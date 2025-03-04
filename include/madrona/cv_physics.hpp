@@ -132,6 +132,11 @@ struct BodyGroupProperties {
 
     uint32_t numHashes;
 
+    // Atomic min will be used on this
+    AtomicU32 islandNumber;
+    AtomicU32 numBodiesInIsland;
+    Entity islandEntity;
+
     // Reset means that we want to calculate first time things like
     // memory, expanded parent, etc...
     bool reset;

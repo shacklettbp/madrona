@@ -15,6 +15,7 @@ set(MADRONA_PHYSICS_SRCS
     cv_load.cpp
     cv_body.cpp
     cv.cpp cv.hpp
+    cv_island.cpp
 )
 
 add_library(madrona_physics STATIC

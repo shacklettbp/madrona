@@ -18,6 +18,15 @@
 
 namespace madrona::phys::cv {
 
+struct IslandInfo {
+    uint32_t numBodyGroups;
+    MemoryRange bodyGroups;
+};
+
+struct IslandArchetype : Archetype<
+    IslandInfo
+> {};
+
 struct MRElement128b {
     uint8_t d[128];
 };

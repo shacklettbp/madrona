@@ -105,6 +105,18 @@ public:
     }
 
     template <sync::memory_order order>
+    T fetch_min(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_min(v, order);
+    }
+
+    template <sync::memory_order order>
+    T fetch_max(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_min(v, order);
+    }
+
+    template <sync::memory_order order>
     T fetch_add(T v) requires (std::is_integral_v<T>)
     {
         return impl_.fetch_add(v, order);
