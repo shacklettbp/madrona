@@ -134,6 +134,13 @@ public:
     inline void * getArchetypeColumn(uint32_t archetype_id,
                                      int32_t column_idx);
 
+    template <typename ArchetypeT, typename ComponentT>
+    std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
+            uint32_t world_id);
+
+    template <typename ArchetypeT>
+    Entity * getWorldEntities(uint32_t world_id);
+
     template <typename ArchetypeT>
     int32_t * getArchetypeWorldOffsets();
 

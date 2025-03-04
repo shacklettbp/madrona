@@ -358,6 +358,32 @@ ComponentT * StateManager::getArchetypeComponent()
 }
 
 template <typename ArchetypeT, typename ComponentT>
+std::pair<ComponentT *, uint32_t> StateManager::getWorldComponentsAndCount(
+        uint32_t world_id)
+{
+    ComponentT *glob_comps = getArchetypeComponent<
+        ArchetypeT, ComponentT>();
+    int32_t *world_offsets = getArchetypeWorldOffsets<
+        ArchetypeT>();
+    int32_t *world_counts = getArchetypeWorldCounts<
+        ArchetypeT>();
+
+    return std::make_pair(glob_comps + world_offsets[world_id],
+            world_counts[world_id]);
+}
+
+template <typename ArchetypeT>
+Entity * StateManager::getWorldEntities(uint32_t world_id)
+{
+    Entity *glob_comps = (Entity *)getArchetypeColumn<
+        ArchetypeT>(0);
+    int32_t *world_offsets = getArchetypeWorldOffsets<
+        ArchetypeT>();
+
+    return glob_comps + world_offsets[world_id];
+}
+
+template <typename ArchetypeT, typename ComponentT>
 void StateManager::setArchetypeComponent(void *ptr)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
