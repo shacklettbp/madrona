@@ -1601,10 +1601,12 @@ inline float * computeBodyJacobian(BodyGroupMemory &m,
 #ifdef MADRONA_GPU_MODE
 inline void computeInvMassGPU(
         Context &ctx,
-        BodyGroupMemory m,
-        BodyGroupProperties p)
+        InitBodyGroup body_grp)
 {
     using namespace gpu_utils;
+
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
     uint32_t lane_id = threadIdx.x % 32;
     uint32_t warp_id = threadIdx.x / 32;
