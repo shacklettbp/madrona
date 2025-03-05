@@ -23,6 +23,7 @@ Entity makeBodyGroup(Context &ctx,
         p.numEq = 0;
         p.numObjData = 0;
         p.tmp.bodyCounter = 0;
+        p.reset = true;
     }
 
     { // Initialize memory

@@ -917,6 +917,10 @@ inline void rneAndCombineSpatialInertias(
         BodyGroupProperties prop,
         BodyGroupMemory mem)
 {
+    if (prop.reset) {
+        return;
+    }
+
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     uint32_t total_dofs = prop.qvDim;
 
@@ -980,10 +984,6 @@ inline void rneAndCombineSpatialInertias(
             }
 
             if (dof_type == DofType::FreeBody) {
-                SpatialVector v_body = {
-                    {velocity[0], velocity[1], velocity[2]}, Vector3::zero()
-                };
-
                 // S\dot{q_i} and \dot{S}\dot{q_i}
                 MADRONA_UNROLL
                 for (uint32_t j = 0; j < 6; ++j) {
@@ -1089,6 +1089,10 @@ inline void processContacts(Context &ctx,
 
     BodyGroupMemory &mem_ref = ctx.get<BodyGroupMemory>(ref_grp);
     BodyGroupMemory &mem_alt = ctx.get<BodyGroupMemory>(alt_grp);
+
+    if (prop_ref.reset || prop_alt.reset) {
+        return;
+    }
 
     bool ref_static = mem_ref.isStatic(prop_ref)[ref_body_idx];
     bool alt_static = mem_alt.isStatic(prop_alt)[alt_body_idx];
@@ -1532,16 +1536,19 @@ inline void computeExpandedParent(Context &ctx,
 inline void initHierarchies(Context &ctx,
                             InitBodyGroup body_grp)
 {
-    auto&m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
-    auto&p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
+    auto& m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
+    auto& p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
+
     computeExpandedParent(ctx, m, p);
     forwardKinematics(ctx, m, p);
 }
 
 inline void combineSpatialInertias(Context &ctx,
-                                   BodyGroupMemory m,
-                                   BodyGroupProperties p)
+                                   InitBodyGroup body_grp)
 {
+    auto& m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
+    auto& p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
+
     BodySpatialVectors* spatialVectors = m.spatialVectors(p);
     BodyOffsets* offsets = m.offsets(p);
 
@@ -2070,6 +2077,30 @@ inline void integrationStep(Context &ctx,
     }
 }
 
+inline void convertPostSolveInitialization(
+    Context &ctx,
+    Position &position,
+    Rotation &rotation,
+    Scale &scale,
+    LinkParentDofObject &link)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
+
+    if (!p.reset) {
+        return;
+    }
+    // Last step in initialization --> end reset
+    p.reset = false;
+
+    convertPostSolve(ctx, position, rotation, scale, link);
+}
+
+inline void completeReset(Context &ctx, CVSolveData &solve_data)
+{
+    solve_data.reset = false;
+}
+
 inline void convertPostSolve(
         Context &ctx,
         Position &position,
@@ -2079,8 +2110,6 @@ inline void convertPostSolve(
 {
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
-    // BodyGroupProperties &p2 = ctx.get<BodyGroupProperties>(link.bodyGroup);
-    // (void)p2;
 
     BodyOffsets offset = m.offsets(p)[link.bodyIdx];
 
@@ -2144,11 +2173,17 @@ inline void convertPostSolve(
 TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
                                   TaskGraphNodeID broadphase)
 {
+    // Initialize memory and run forward kinematics
     auto cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::initHierarchies,
+            InitBodyGroup
+         >>({broadphase});
+
+    cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::computeGroupCOM,
             BodyGroupProperties,
             BodyGroupMemory
-        >>({broadphase});
+        >>({cur_node});
 
     cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::computeSpatialInertiasAndPhi,
@@ -2169,6 +2204,12 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
         >>({cur_node});
 #endif
 
+    // Only run combine spatial inertias on initialization, skipping RNE
+    cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::combineSpatialInertias,
+            InitBodyGroup
+        >>({cur_node});
+
 #ifdef MADRONA_GPU_MODE
     cur_node = builder.addToGraph<CustomParallelForNode<Context,
          tasks::compositeRigidBody, 32, 1,
@@ -2183,11 +2224,40 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
         >>({cur_node});
 #endif
 
+    // Only compute inv mass on initialization
+#ifdef MADRONA_GPU_MODE
+    cur_node = builder.addToGraph<CustomParallelForNode<Context,
+         tasks::computeInvMassGPU, 32, 1,
+         InitBodyGroup
+     >>({cur_node});
+#else
+    cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::computeInvMass,
+         InitBodyGroup
+     >>({cur_node});
+#endif
+
     cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::processContacts,
             ContactConstraint,
             ContactTmpState
         >>({cur_node});
+
+    // Only run contact processing on initialization
+    cur_node = builder.addToGraph<ParallelForNode<Context, 
+        tasks::convertPostSolveInitialization,
+            Position,
+            Rotation,
+            Scale,
+            LinkParentDofObject
+        >>({cur_node});
+
+    // Clear initialization state
+    cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::completeReset,
+            CVSolveData
+        >>({cur_node});
+    cur_node = builder.addToGraph<ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
 
 #ifndef MADRONA_GPU_MODE
     cur_node = builder.addToGraph<ParallelForNode<Context,
@@ -2199,67 +2269,16 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
     return cur_node;
 }
 
+inline void doNothing(Context &, InitBodyGroup) {}
+
 TaskGraphNodeID setupCVInitTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps)
 {
-    // Initialize memory and run forward kinematics
     auto node = builder.addToGraph<ParallelForNode<Context,
-         tasks::initHierarchies,
+            doNothing,
             InitBodyGroup
-         >>(deps);
-
-    // Initialization for initial position (e.g., inverse weights)
-    node = builder.addToGraph<ParallelForNode<Context,
-         tasks::computeGroupCOM,
-            BodyGroupProperties,
-            BodyGroupMemory
-        >>({node});
-
-    node = builder.addToGraph<ParallelForNode<Context,
-         tasks::computeSpatialInertiasAndPhi,
-            DofObjectGroup
-        >>({node});
-
-    node = builder.addToGraph<ParallelForNode<Context,
-         tasks::combineSpatialInertias,
-            BodyGroupMemory,
-            BodyGroupProperties
-        >>({node});
-
-#ifdef MADRONA_GPU_MODE
-    node = builder.addToGraph<CustomParallelForNode<Context,
-         tasks::compositeRigidBody, 32, 1,
-            BodyGroupProperties,
-            BodyGroupMemory
-        >>({node});
-#else
-    node = builder.addToGraph<ParallelForNode<Context,
-         tasks::compositeRigidBody,
-            BodyGroupProperties,
-            BodyGroupMemory
-        >>({node});
-#endif
-
-#ifdef MADRONA_GPU_MODE
-    node = builder.addToGraph<CustomParallelForNode<Context,
-         tasks::computeInvMassGPU, 32, 1,
-         InitBodyGroup
-     >>({node});
-#else
-    node = builder.addToGraph<ParallelForNode<Context,
-         tasks::computeInvMass,
-         InitBodyGroup
-     >>({node});
-#endif
-
-    node =
-        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
-            Position,
-            Rotation,
-            Scale,
-            LinkParentDofObject
-        >>({node});
+        >>(deps);
 
     return node;
 }
