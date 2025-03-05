@@ -1500,17 +1500,20 @@ inline void computeExpandedParent(Context &ctx,
     map[0] = -1;
     
     BodyOffsets *offsets = m.offsets(p);
-    bool* fixed_root = m.isStatic(p);
-
+    BodyInertial *inertials = m.inertials(p);
+    bool* is_static = m.isStatic(p);
+    float total_static_mass = 0.f; // Total mass of all the static bodies
+    // First sweep
     for(int32_t i = 1; i < p.numBodies; ++i) {
         uint32_t n_i = offsets[i].numDofs;
         map[i] = map[i - 1] + (int32_t) n_i;
 
         // Whether this body is fixed and root (or fixed and parent is fixed root)
         if(map[i] == -1 && offsets[i].dofType == DofType::FixedBody) {
-            fixed_root[i] = true;
+            is_static[i] = true;
+            total_static_mass += inertials[i].mass;
         } else {
-            fixed_root[i] = false;
+            is_static[i] = false;
         }
     }
     // Finish expanded parent array
@@ -1519,6 +1522,10 @@ inline void computeExpandedParent(Context &ctx,
                                        offsets[i].parent);
         expandedParent[map[i - 1] + 1] = map[parent_idx];
         ASSERT_PTR_ACCESS(expandedParent, (map[i - 1] + 1), max_ptr);
+
+        if(is_static[i]) {
+            inertials[i].mass = total_static_mass;
+        }
     }
 }
 
