@@ -132,10 +132,6 @@ struct BodyGroupProperties {
 
     uint32_t numHashes;
 
-    // Reset means that we want to calculate first time things like
-    // memory, expanded parent, etc...
-    bool reset;
-
     struct {
         uint32_t bodyCounter;
 
@@ -272,7 +268,8 @@ struct BodyGroupArchetype : Archetype<
     BodyGroupMemory
 > {};
 
-// Body group should run initialization tasks on init or setup
+// Wrapper for body groups which require initialization
+//  (use for systems which only need to run once)
 struct InitBodyGroup {
     Entity bodyGroup;
 };

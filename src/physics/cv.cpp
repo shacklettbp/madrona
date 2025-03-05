@@ -43,6 +43,9 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
             ClearTmpNode<Contact>>({cur_node});
 
         cur_node = builder.addToGraph<
+            ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
+
+        cur_node = builder.addToGraph<
             ResetTmpAllocNode>({cur_node});
     }
 

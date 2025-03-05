@@ -23,7 +23,6 @@ Entity makeBodyGroup(Context &ctx,
         p.numEq = 0;
         p.numObjData = 0;
         p.tmp.bodyCounter = 0;
-        p.reset = true;
     }
 
     { // Initialize memory
@@ -32,6 +31,7 @@ Entity makeBodyGroup(Context &ctx,
                                 sizeof(Entity) * num_bodies);
     }
 
+    // Mark the body group as requiring initialization
     Loc init = ctx.makeTemporary<InitBodyGroupArchetype>();
     ctx.get<InitBodyGroup>(init).bodyGroup = g;
 

@@ -917,10 +917,6 @@ inline void rneAndCombineSpatialInertias(
         BodyGroupProperties prop,
         BodyGroupMemory mem)
 {
-    if (prop.reset) {
-        return;
-    }
-
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     uint32_t total_dofs = prop.qvDim;
 
@@ -1089,10 +1085,6 @@ inline void processContacts(Context &ctx,
 
     BodyGroupMemory &mem_ref = ctx.get<BodyGroupMemory>(ref_grp);
     BodyGroupMemory &mem_alt = ctx.get<BodyGroupMemory>(alt_grp);
-
-    if (prop_ref.reset || prop_alt.reset) {
-        return;
-    }
 
     bool ref_static = mem_ref.isStatic(prop_ref)[ref_body_idx];
     bool alt_static = mem_alt.isStatic(prop_alt)[alt_body_idx];
@@ -1533,8 +1525,8 @@ inline void computeExpandedParent(Context &ctx,
 inline void initHierarchies(Context &ctx,
                             InitBodyGroup body_grp)
 {
-    auto& m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
-    auto& p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
     computeExpandedParent(ctx, m, p);
     forwardKinematics(ctx, m, p);
@@ -2076,25 +2068,6 @@ inline void integrationStep(Context &ctx,
     }
 }
 
-inline void convertPostSolveInitialization(
-    Context &ctx,
-    Position &position,
-    Rotation &rotation,
-    Scale &scale,
-    LinkParentDofObject &link)
-{
-    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
-    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
-
-    if (!p.reset) {
-        return;
-    }
-    // Last step in initialization --> end reset
-    p.reset = false;
-
-    convertPostSolve(ctx, position, rotation, scale, link);
-}
-
 inline void completeReset(Context &ctx, CVSolveData &solve_data)
 {
     solve_data.reset = false;
@@ -2110,53 +2083,13 @@ inline void convertPostSolve(
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
 
-    BodyOffsets offset = m.offsets(p)[link.bodyIdx];
-
     BodyTransform transforms = m.bodyTransforms(p)[link.bodyIdx];
     BodyObjectData obj_data = m.objectData(p)[link.objDataIdx];
 
     scale = obj_data.scale * p.globalScale;
-
-    if (offset.dofType == DofType::FreeBody) {
-        position = transforms.com +
-                   p.globalScale * 
-                        transforms.composedRot.rotateVec(obj_data.offset);
-        rotation = transforms.composedRot * obj_data.rotation;
-    }
-    else if (offset.dofType == DofType::Hinge) {
-        position = transforms.com +
-                   p.globalScale * 
-                        transforms.composedRot.rotateVec(obj_data.offset);
-        rotation = transforms.composedRot * obj_data.rotation;
-    }
-    else if (offset.dofType == DofType::Slider) {
-        position = transforms.com +
-                   p.globalScale * 
-                        transforms.composedRot.rotateVec(obj_data.offset);
-        rotation = transforms.composedRot *
-                   obj_data.rotation;
-    }
-    else if (offset.dofType == DofType::FixedBody) {
-        // For this, we need to look at the first parent who isn't
-        // fixed body and apply its transform.
-
-        position = transforms.com +
-                   p.globalScale * 
-                        transforms.composedRot.rotateVec(obj_data.offset);
-        rotation = transforms.composedRot * obj_data.rotation;
-
-        // Do nothing
-    }
-    else if (offset.dofType == DofType::Ball) {
-        position = transforms.com +
-                   p.globalScale * 
-                        transforms.composedRot.rotateVec(obj_data.offset);
-        rotation = transforms.composedRot *
-                   obj_data.rotation;
-    }
-    else {
-        MADRONA_UNREACHABLE();
-    }
+    position = transforms.com + p.globalScale *
+                    transforms.composedRot.rotateVec(obj_data.offset);
+    rotation = transforms.composedRot * obj_data.rotation;
 
 #if 0
     if (link.type == LinkParentDofObject::Type::Render) {
@@ -2244,7 +2177,7 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
 
     // Only run contact processing on initialization
     cur_node = builder.addToGraph<ParallelForNode<Context, 
-        tasks::convertPostSolveInitialization,
+        tasks::convertPostSolve,
             Position,
             Rotation,
             Scale,
@@ -2268,15 +2201,16 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
     return cur_node;
 }
 
-inline void doNothing(Context &, InitBodyGroup) {}
-
 TaskGraphNodeID setupCVInitTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps)
 {
-    auto node = builder.addToGraph<ParallelForNode<Context,
-            doNothing,
-            InitBodyGroup
+    auto node =
+        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Position,
+            Rotation,
+            Scale,
+            LinkParentDofObject
         >>(deps);
 
     return node;

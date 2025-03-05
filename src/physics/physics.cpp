@@ -5,7 +5,6 @@
 #include "physics_impl.hpp"
 #include "xpbd.hpp"
 #include "tgs.hpp"
-#include "cv.hpp"
 
 namespace madrona::phys {
 
@@ -156,10 +155,6 @@ void reset(Context &ctx)
     broadphase::BVH &bvh = ctx.singleton<broadphase::BVH>();
     bvh.rebuildOnUpdate();
     bvh.clearLeaves();
-}
-
-void resetWorld(Context &ctx) {
-    ctx.singleton<cv::CVSolveData>().reset = true;
 }
 
 broadphase::LeafID registerEntity(Context &ctx,

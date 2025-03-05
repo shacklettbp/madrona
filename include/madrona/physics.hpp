@@ -238,7 +238,6 @@ namespace PhysicsSystem {
               CVXSolve *cvx_solver = nullptr);
 
     void reset(Context &ctx);
-    void resetWorld(Context &ctx);
 
     // Make sure to set the initial position and rotation before
     // invoking this function.
