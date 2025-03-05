@@ -1497,16 +1497,18 @@ inline void computeExpandedParent(Context &ctx,
     // Create a mapping from body index to start of block
     int32_t *map = (int32_t *)ctx.tmpAlloc(sizeof(int32_t) * p.numBodies);
 
-    map[0] = -1;
-    
     BodyOffsets *offsets = m.offsets(p);
     BodyInertial *inertials = m.inertials(p);
     bool* is_static = m.isStatic(p);
     float total_static_mass = 0.f; // Total mass of all the static bodies
     // First sweep
-    for(int32_t i = 1; i < p.numBodies; ++i) {
+    for(int32_t i = 0; i < p.numBodies; ++i) {
         uint32_t n_i = offsets[i].numDofs;
-        map[i] = map[i - 1] + (int32_t) n_i;
+        if (i == 0) {
+            map[i] = -1;
+        } else {
+            map[i] = map[i - 1] + (int32_t) n_i;
+        }
 
         // Whether this body is fixed and root (or fixed and parent is fixed root)
         if(map[i] == -1 && offsets[i].dofType == DofType::FixedBody) {
