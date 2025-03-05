@@ -1287,9 +1287,6 @@ inline void exportCPUSolverState(
             auto &ref_inertial = ref_m.inertials(ref_p)[ref_link.bodyIdx];
             auto &alt_inertial = alt_m.inertials(alt_p)[alt_link.bodyIdx];
 
-            printf("ref.approxInvMassTrans = %f; alt.approxInvMassTrans = %f\n",
-                    ref_inertial.approxInvMassTrans,
-                    alt_inertial.approxInvMassTrans);
             float inv_weight_trans = ref_inertial.approxInvMassTrans +
                 alt_inertial.approxInvMassTrans;
 
@@ -1834,8 +1831,10 @@ inline void computeInvMass(
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
         BodyInertial &inertial = inertials[i_body];
         if(is_static[i_body]) {
-            inertial.approxInvMassTrans = 0.f;
-            inertial.approxInvMassRot = 0.f;
+            inertial.approxInvMassTrans = 1 / inertial.mass;
+            inertial.approxInvMassRot = 3 / (inertial.inertia.d0 +
+                                             inertial.inertia.d1 +
+                                             inertial.inertia.d2);
             continue;
         }
         BodyTransform transform = transforms[i_body];
