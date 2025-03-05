@@ -176,8 +176,6 @@ struct CVSolveData {
 
     RegInfo regInfos[kNumRegisters];
 
-    bool reset;
-
 #ifdef MADRONA_GPU_MODE
     inline float * getContactAccRef(StateManager *state_mgr)
     {

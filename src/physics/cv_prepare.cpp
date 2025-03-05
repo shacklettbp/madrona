@@ -2068,11 +2068,6 @@ inline void integrationStep(Context &ctx,
     }
 }
 
-inline void completeReset(Context &ctx, CVSolveData &solve_data)
-{
-    solve_data.reset = false;
-}
-
 inline void convertPostSolve(
         Context &ctx,
         Position &position,
@@ -2184,12 +2179,8 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
             LinkParentDofObject
         >>({cur_node});
 
-    // Clear initialization state
-    cur_node = builder.addToGraph<ParallelForNode<Context,
-         tasks::completeReset,
-            CVSolveData
-        >>({cur_node});
-    cur_node = builder.addToGraph<ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
+    cur_node = builder.addToGraph<
+        ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
 
 #ifndef MADRONA_GPU_MODE
     cur_node = builder.addToGraph<ParallelForNode<Context,
