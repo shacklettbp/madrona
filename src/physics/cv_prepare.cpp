@@ -969,7 +969,7 @@ inline void rneAndCombineSpatialInertias(
                 spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
 
                 // Free bodies must be root of their hierarchy
-                v_body = {velocity[0], velocity[1], velocity[2]}, Vector3::zero();
+                v_body = {velocity[0], velocity[1], velocity[2]};
             } else {
                 BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
                 spatial_vector.sVel = parent_spatial_vector.sVel;
@@ -2170,13 +2170,13 @@ inline void convertPostSolve(
 }
 
 TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
-                                  TaskGraphNodeID broadphase)
+                                  TaskGraphNodeID narrowphase)
 {
     // Initialize memory and run forward kinematics
     auto cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::initHierarchies,
             InitBodyGroup
-         >>({broadphase});
+         >>({narrowphase});
 
     cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::computeGroupCOM,
