@@ -3,6 +3,7 @@
 #include <madrona/context.hpp>
 
 #include "physics_impl.hpp"
+#include "cv.hpp"
 
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/cu_utils.hpp>
@@ -1688,6 +1689,10 @@ static inline void runNarrowphase(
         bool lane_active))
 {
     PROF_START(setup_ctr, narrowphaseSetupClocks);
+
+    if (ctx.singleton<cv::CVSolveData>().reset) {
+        return;
+    }
 
 #ifdef MADRONA_GPU_MODE
     const int32_t num_smem_bytes_per_warp =
