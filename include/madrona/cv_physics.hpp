@@ -560,6 +560,9 @@ BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, StringID string_id
 // External forces:
 void addHingeExternalForce(Context &ctx, Entity hinge_joint, float newtons);
 
+// Mark the body group as requiring a reset
+void markReset(Context &ctx, Entity body_grp);
+
 void registerTypes(ECSRegistry &registry);
 void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
                            uint32_t *joint_archetype_id);

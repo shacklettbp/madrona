@@ -32,8 +32,7 @@ Entity makeBodyGroup(Context &ctx,
     }
 
     // Mark the body group as requiring initialization
-    Loc init = ctx.makeTemporary<InitBodyGroupArchetype>();
-    ctx.get<InitBodyGroup>(init).bodyGroup = g;
+    markReset(ctx, g);
 
     return g;
 }
@@ -545,6 +544,11 @@ void attachLimit(
     l.slider = slider_limit;
 
     m.q(p)[offsets[body_info.idx].posOffset] = (slider_limit.lower + slider_limit.upper) / 2.f;
+}
+
+void markReset(Context &ctx, Entity body_grp) {
+    Loc init = ctx.makeTemporary<InitBodyGroupArchetype>();
+    ctx.get<InitBodyGroup>(init).bodyGroup = body_grp;
 }
 
 // External forces:
