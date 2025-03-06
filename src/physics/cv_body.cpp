@@ -67,6 +67,9 @@ static void initBodyGroupMemory(
         // These are all the attributes that we can initialize at this time
         BodyOffsets *offsets = m.offsets(p);
         float *q = m.q(p);
+        float *qv = m.qv(p);
+        float *dqv = m.dqv(p);
+        float *f = m.f(p);
         float *mus = m.mus(p);
         BodyInertial *inertials = m.inertials(p);
         Entity *entities = m.entities(p);
@@ -139,6 +142,9 @@ static void initBodyGroupMemory(
             assert((uint8_t *)(offsets + i) < max_ptr);
 
             float *curr_q = q + curr_q_offset;
+            float *curr_qv = qv + qv_dof_offset;
+            float *curr_dqv = dqv + qv_dof_offset;
+            float *curr_f = f + qv_dof_offset;
             assert((uint8_t *)curr_q < max_ptr);
 
             qv_dof_offset += BodyOffsets::getDofTypeDim(bd.type);
@@ -154,14 +160,26 @@ static void initBodyGroupMemory(
                 curr_q[4] = bd.initialRot.x;
                 curr_q[5] = bd.initialRot.y;
                 curr_q[6] = bd.initialRot.z;
+                MADRONA_UNROLL
+                for (uint32_t j = 0; j < 6; ++j) {
+                    curr_qv[j] = 0.f;
+                    curr_dqv[j] = 0.f;
+                    curr_f[j] = 0.f;
+                }
             } break;
 
             case DofType::Hinge: {
                 curr_q[0] = 0.f;
+                curr_qv[0] = 0.f;
+                curr_dqv[0] = 0.f;
+                curr_f[0] = 0.f;
             } break;
 
             case DofType::Slider: {
                 curr_q[0] = 0.f;
+                curr_qv[0] = 0.f;
+                curr_dqv[0] = 0.f;
+                curr_f[0] = 0.f;
             } break;
 
             case DofType::Ball: {
@@ -169,6 +187,12 @@ static void initBodyGroupMemory(
                 curr_q[1] = bd.initialRot.x;
                 curr_q[2] = bd.initialRot.y;
                 curr_q[3] = bd.initialRot.z;
+                MADRONA_UNROLL
+                for (uint32_t j = 0; j < 3; ++j) {
+                    curr_qv[j] = 0.f;
+                    curr_dqv[j] = 0.f;
+                    curr_f[j] = 0.f;
+                }
             } break;
 
             case DofType::FixedBody: {
