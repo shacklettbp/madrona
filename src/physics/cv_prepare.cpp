@@ -445,12 +445,6 @@ void computeSpatialInertiasAndPhi(Context &ctx,
 
         computePhi(dof_type, phis[obj_grp.idx], S, com_pos);
     }
-
-    // --------- Add external forces -------------
-    uint32_t num_dofs = BodyOffsets::getDofTypeDim(dof_type);
-    float *tau = mem.biasVector(prop);
-    float *force = mem.f(prop);
-    memcpy(tau + velOffset, force + velOffset, num_dofs * sizeof(float));
 }
 
 inline void computePhiDot(DofType dof_type,
@@ -1027,8 +1021,9 @@ inline void rneAndCombineSpatialInertias(
                 spatial_vector.spatialInertia.multiply(spatial_vector.sVel));
         }
 
-        // Backward pass to find bias forces
+        // Backward pass to find bias forces (added to external forces)
         float *tau = mem.biasVector(prop);
+        memcpy(tau, mem.f(prop), prop.qvDim * sizeof(float));
 
         CountT dof_index = total_dofs;
         for (CountT i = prop.numBodies-1; i >= 0; --i) {

@@ -2203,7 +2203,7 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
 
 #ifndef MADRONA_GPU_MODE
 void solveCPU(Context &ctx,
-                     CVSolveData &cv_sing)
+              CVSolveData &cv_sing)
 {
     uint32_t world_id = ctx.worldID().idx;
 
