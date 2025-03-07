@@ -1194,6 +1194,21 @@ static void setupSpherePrimitive(const SourceCollisionPrimitive &src_prim,
     };
 }
 
+static void setupCapsulePrimitive(const SourceCollisionPrimitive &src_prim,
+                                  CollisionPrimitive *out_prim,
+                                  AABB *out_aabb)
+{
+    out_prim->capsule = src_prim.capsule;
+
+    const float r = src_prim.sphere.radius;
+    const float h = src_prim.capsule.cylinderHeight;
+
+    *out_aabb = AABB {
+        .pMin = { -r, -r, -(r + h) },
+        .pMax = { r, r, r + h },
+    };
+}
+
 static void setupPlanePrimitive(const SourceCollisionPrimitive &,
                                 CollisionPrimitive *out_prim,
                                 AABB *out_aabb)
@@ -1263,9 +1278,8 @@ static void setupRigidBodyAABBsAndPrimitives(
                 setupHullPrimitive(src_prim, hull_meshes,
                     out_prim, &prim_aabb);
             } break;
-            case Type::Box: {
-                // Not implemented yet
-                assert(false);
+            case Type::Capsule: {
+                setupCapsulePrimitive(src_prim, out_prim, &prim_aabb);
             } break;
             }
 

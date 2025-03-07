@@ -20,6 +20,7 @@ struct SourceCollisionPrimitive {
     union {
         CollisionPrimitive::Sphere sphere;
         CollisionPrimitive::Plane plane;
+        CollisionPrimitive::Capsule capsule;
         HullInput hullInput;
     };
 };

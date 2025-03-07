@@ -94,12 +94,13 @@ using namespace math;
 using namespace geo;
 
 enum class NarrowphaseTest : uint32_t {
-    SphereSphere = 1,
-    HullHull = 2,
-    SphereHull = 3,
-    PlanePlane = 4,
-    SpherePlane = 5,
-    HullPlane = 6,
+    SphereSphere = 0b1,
+    HullHull = 0b10,
+    SphereHull = 0b11,
+    PlanePlane = 0b100,
+    SpherePlane = 0b101,
+    HullPlane = 0b110,
+    PlaneCapsule = 0b1100,
 };
 
 struct FaceQuery {
@@ -1413,6 +1414,81 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         // Planes must be static, this should never be called
         assert(false);
         MADRONA_UNREACHABLE();
+    } break;
+    case NarrowphaseTest::PlaneCapsule: {
+        // Rescale the capsule
+        CollisionPrimitive::Capsule scaled_capsule = b_prim->capsule;
+        scaled_capsule.cylinderHeight *= b_scale.d2;
+        scaled_capsule.radius *= b_scale.d0;
+        assert(b_scale.d0 == b_scale.d1);
+
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+        Vector3 plane_normal = a_rot.rotateVec(base_normal);
+
+        Vector3 cap_axis = b_rot.rotateVec(base_normal);
+        Vector3 cap_p1 = b_pos -
+            cap_axis * scaled_capsule.cylinderHeight * 0.5f;
+        Vector3 cap_p2 = b_pos +
+            cap_axis * scaled_capsule.cylinderHeight * 0.5f;
+
+        { // Do plane / capsule collision test
+            float dp1 = (cap_p1 - a_pos).dot(plane_normal);
+            float dp2 = (cap_p2 - a_pos).dot(plane_normal);
+
+            // These points must be on the same side of the plane
+            assert(dp1 * dp2 > 0.f);
+
+            float d1 = fabs(dp1) - scaled_capsule.radius;
+            float d2 = fabs(dp2) - scaled_capsule.radius;
+
+            if (d1 > 0.f && d2 > 0.f) {
+                // No intersection
+                NarrowphaseResult result;
+                result.type = ContactType::None;
+                return result;
+            } else if (d1 == d2 && d1 < 0.f) {
+                // Capsule is completely horizontal with the plane
+                // We could create two contact points
+#if 0
+                Vector3 contact_pt1 = cap_p1 - plane_normal * scaled_capsule.radius;
+                Vector3 contact_pt2 = cap_p2 - plane_normal * scaled_capsule.radius;
+#endif
+
+                // TODO: Handle this case properly
+                assert(false);
+                return {};
+            } else {
+                // We just have one contact point
+                if (d1 < d2) {
+                    // Handle this as a sphere contact
+                    Vector3 contact_pt = cap_p1 - plane_normal * fabs(dp1);
+
+                    SphereContact contact {
+                        .normal = plane_normal,
+                        .pt = contact_pt,
+                        .depth = d1,
+                    };
+
+                    NarrowphaseResult result = {};
+                    result.type = ContactType::Sphere;
+                    result.sphere = contact;
+                    return result;
+                } else {
+                    Vector3 contact_pt = cap_p2 - plane_normal * fabs(dp2);
+
+                    SphereContact contact {
+                        .normal = plane_normal,
+                        .pt = contact_pt,
+                        .depth = d2,
+                    };
+
+                    NarrowphaseResult result = {};
+                    result.type = ContactType::Sphere;
+                    result.sphere = contact;
+                    return result;
+                }
+            }
+        }
     } break;
     case NarrowphaseTest::SpherePlane: {
         float sphere_radius;
