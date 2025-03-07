@@ -1128,13 +1128,14 @@ inline void processContacts(Context &ctx,
         return;
     }
 
-    // Filter out parent-child contacts
+    // Filter out parent-child contacts and contacts between the same body
     if(ref_grp == alt_grp) {
         BodyOffsets *offsets = mem_ref.offsets(prop_ref);
         BodyOffsets offset_ref = offsets[ref_body_idx];
         BodyOffsets offset_alt = offsets[alt_body_idx];
         if(offset_ref.parentWithDof == alt_body_idx ||
-            offset_alt.parentWithDof == ref_body_idx) {
+            offset_alt.parentWithDof == ref_body_idx ||
+            offset_ref.parentWithDof == offset_alt.parentWithDof) {
             contact.numPoints = 0;
             return;
         }
