@@ -133,6 +133,7 @@ static void initBodyGroupMemory(
                 .posOffset = (uint8_t)curr_q_offset,
                 .velOffset = (uint8_t)qv_dof_offset,
                 .parent = 0xFF,
+                .parentWithDof = 0xFF,
                 .dofType = body_descs[i].type,
                 .numDofs = (uint8_t)BodyOffsets::getDofTypeDim(body_descs[i].type),
                 .eqOffset = (uint8_t)eq_offset,
@@ -392,6 +393,7 @@ void setRoot(
 
     // We require that the root have index 0
     offsets[0].parent = 0xFF;
+    offsets[0].parentWithDof = 0xFF;
     assert(body_info.idx == 0);
 }
 

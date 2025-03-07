@@ -1120,11 +1120,24 @@ inline void processContacts(Context &ctx,
     BodyGroupMemory &mem_ref = ctx.get<BodyGroupMemory>(ref_grp);
     BodyGroupMemory &mem_alt = ctx.get<BodyGroupMemory>(alt_grp);
 
+    // Filter out static-static contacts
     bool ref_static = mem_ref.isStatic(prop_ref)[ref_body_idx];
     bool alt_static = mem_alt.isStatic(prop_alt)[alt_body_idx];
     if (ref_static && alt_static) {
         contact.numPoints = 0;
         return;
+    }
+
+    // Filter out parent-child contacts
+    if(ref_grp == alt_grp) {
+        BodyOffsets *offsets = mem_ref.offsets(prop_ref);
+        BodyOffsets offset_ref = offsets[ref_body_idx];
+        BodyOffsets offset_alt = offsets[alt_body_idx];
+        if(offset_ref.parentWithDof == alt_body_idx ||
+            offset_alt.parentWithDof == ref_body_idx) {
+            contact.numPoints = 0;
+            return;
+        }
     }
 
     float mu_ref = mem_ref.mus(prop_ref)[ref_body_idx];
@@ -1518,9 +1531,27 @@ inline void computeExpandedParent(Context &ctx,
                                   BodyGroupMemory m,
                                   BodyGroupProperties p)
 {
+    BodyOffsets *offsets = m.offsets(p);
+    BodyInertial *inertials = m.inertials(p);
+    uint32_t* is_static = m.isStatic(p);
     int32_t *expandedParent = m.expandedParent(p);
     uint8_t *max_ptr = (uint8_t *)m.qVectorsPtr +
                        BodyGroupMemory::qVectorsNumBytes(p);
+
+    // First, get the index of the first parent with a DOF for each body
+    for(int32_t i = 1; i < p.numBodies; ++i) {
+        BodyOffsets &current_offset = offsets[i];
+        uint8_t parent_idx = offsets[i].parent;
+        if(parent_idx == 0xFF) {
+            continue;
+        }
+        BodyOffsets parent_offset = offsets[parent_idx];
+        if(parent_offset.numDofs > 0) {
+            current_offset.parentWithDof = parent_idx;
+        } else {
+            current_offset.parentWithDof = parent_offset.parentWithDof;
+        }
+    }
 
     // Initialize n-N_B elements
     expandedParent[0] = -1;
@@ -1531,9 +1562,6 @@ inline void computeExpandedParent(Context &ctx,
     // Create a mapping from body index to start of block
     int32_t *map = (int32_t *)ctx.tmpAlloc(sizeof(int32_t) * p.numBodies);
 
-    BodyOffsets *offsets = m.offsets(p);
-    BodyInertial *inertials = m.inertials(p);
-    uint32_t* is_static = m.isStatic(p);
     float total_static_mass = 0.f; // Total mass of all the static bodies
     // First sweep
     for(int32_t i = 0; i < p.numBodies; ++i) {

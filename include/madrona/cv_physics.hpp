@@ -61,7 +61,8 @@ struct BodyLimitConstraint {
 struct BodyOffsets {
     uint8_t posOffset;
     uint8_t velOffset;
-    uint8_t parent;    // 0xFF is invalid invalid
+    uint8_t parent;    // 0xFF is invalid
+    uint8_t parentWithDof; // Index of first parent with at least one DOF
     DofType dofType;
 
     uint8_t numDofs; // Dimension of velocity
