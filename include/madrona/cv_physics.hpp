@@ -68,7 +68,6 @@ struct BodyOffsets {
     uint8_t numDofs; // Dimension of velocity
     uint8_t eqOffset;
     uint8_t numEqs;
-    uint8_t pad;
 
     static inline uint32_t getDofTypeDim(DofType type, bool is_pos = false);
 };
