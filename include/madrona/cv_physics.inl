@@ -12,7 +12,7 @@ uint32_t BodyOffsets::getDofTypeDim(DofType type, bool is_pos)
     } break;
 
     case DofType::Ball: {
-        return 3;
+        return is_pos ? 4 : 3;
     }
 
     case DofType::FixedBody: {
