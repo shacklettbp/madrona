@@ -2,6 +2,9 @@
 #include "cv_gpu.hpp"
 #include "physics_impl.hpp"
 
+#define dbg_warp_printf(...) if (dbg) { warp_printf(__VA_ARGS__); }
+#define dbg_matrix_printf(...) if (dbg) { printMatrix(__VA_ARGS__); }
+
 using namespace madrona::math;
 
 namespace madrona::phys::cv {
@@ -178,11 +181,33 @@ void GaussMinimizationNode::dobjWarp(
 {
     using namespace gpu_utils;
 
+#if 0
+    if (threadIdx.x % 32 == 0) {
+        LOG("(world_id = {}) before warpCopy (freeAccDim = {}): scratch ({}), x ({}), freeAcc ({})\n",
+                sd->worldID,
+                sd->freeAccDim,
+                scratch,
+                x,
+                sd->freeAcc);
+    }
+#endif
+
     // x - acc_free
     warpLoop(sd->freeAccDim, [&](uint32_t iter) {
         scratch[iter] = x[iter] - sd->freeAcc[iter];
     });
+
     __syncwarp();
+
+#if 0
+    if (threadIdx.x % 32 == 0) {
+        LOG("after warpCopy\n");
+    }
+
+    if (threadIdx.x % 32 == 0) {
+        LOG("before sparseBlkDiagSmallReg\n");
+    }
+#endif
 
     sparseBlkDiagSmallReg<float, 4, false, false, true>(
             res,
@@ -221,6 +246,12 @@ void GaussMinimizationNode::dobjWarp(
         warpCopy(jaccref_cont, scratch, sd->numRowsJc * sizeof(float), dbg);
         __syncwarp();
     }
+
+#if 0
+    if (threadIdx.x % 32 == 0) {
+        LOG("before ds\n");
+    }
+#endif
 
     // ds
     warpLoop(sd->numRowsJc / 3, [&](uint32_t iter) {
@@ -653,9 +684,6 @@ float GaussMinimizationNode::exactLineSearch(
         float *scratch,
         bool dbg)
 {
-#define dbg_warp_printf(...) if (dbg) { warp_printf(__VA_ARGS__); }
-#define dbg_matrix_printf(...) if (dbg) { printMatrix(__VA_ARGS__); }
-
     using namespace gpu_utils;
 
     float pMx_free = dotVectors(p, Mxmin, sd->freeAccDim);
@@ -1159,6 +1187,10 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
     StateManager *state_mgr = getStateManager();
 
     CVSolveData *curr_sd = &solveDatas[world_id];
+
+    if (lane_id == 0) {
+        curr_sd->worldID = world_id;
+    }
 
     BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
         BodyGroupArchetype, BodyGroupProperties>(world_id);
@@ -1851,14 +1883,6 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
                         return residuals[iter];
                     });
 
-#if 0
-            printMatrix(
-                    acc_ref,
-                    1,
-                    curr_sd->numRowsJe,
-                    "accref_eq");
-#endif
-
             if (acc_ref && in_smem) {
                 float * acc_ref_glob =
                     (float *)curr_sd->getEqualityAccRef(state_mgr);
@@ -2087,12 +2111,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             curr_fun = new_fun;
         }
 
-#if 0
-        if (threadIdx.x % 32 == 0) {
-            printf("num_iters = %d\n", iter);
-        }
-#endif
-
         { // Now, we need to copy x into the right components
             BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
                 BodyGroupArchetype, BodyGroupProperties>(world_id);
@@ -2117,34 +2135,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                         }
                     });
             }
-
-#if 0
-            BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
-                BodyGroup, BodyGroupHierarchy>(world_id);
-            CountT num_grps = state_mgr->numRows<BodyGroup>(world_id);
-
-            // Make sure to have a phase where we first calculate prefix sums
-            // of all the DOFs of all bodies so we can get around this shit.
-
-            if (lane_id == 0) {
-                uint32_t processed_dofs = 0;
-                for (CountT i = 0; i < num_grps; ++i) {
-                    Entity * bodies = get_bodies(hiers[i]);
-                    for (CountT j = 0; j < hiers[i].numBodies; j++) {
-                        auto body = bodies[j];
-                        auto numDofs = state_mgr->getUnsafe<
-                                DofObjectNumDofs>(body).numDofs;
-                        auto &acceleration = state_mgr->getUnsafe<
-                                DofObjectAcceleration>(body);
-
-                        for (CountT k = 0; k < numDofs; k++) {
-                            acceleration.dqv[k] = x[processed_dofs];
-                            processed_dofs++;
-                        }
-                    }
-                }
-            }
-#endif
         }
 
         world_id += total_resident_warps;

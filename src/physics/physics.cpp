@@ -414,8 +414,10 @@ TaskGraphNodeID setupInitTasks(
     Solver solver)
 {
     switch (solver) {
+#if 1
     case Solver::Convex:
         return cv::setupCVInitTasks(builder, deps);
+#endif
 
     default:
         return builder.addToGraph<ParallelForNode<Context,

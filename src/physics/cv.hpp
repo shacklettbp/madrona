@@ -110,6 +110,7 @@ struct SparseBlkDiag {
 };
 
 struct CVSolveData {
+    uint32_t worldID;
     uint32_t enablePhysics;
 
     uint32_t numBodyGroups;

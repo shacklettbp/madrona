@@ -17,6 +17,26 @@ using namespace madrona::base;
 namespace madrona::phys::cv {
 
 namespace tasks {
+
+void printInfo(BodyGroupMemory mem, BodyGroupProperties prop, const char *label)
+{
+#if 0
+    printf("%s: \n", label);
+    for (int i = 0; i < prop.qvDim; ++i) {
+        printf("%f ", mem.f(prop)[i]);
+    }
+    printf("\n");
+    for (int i = 0; i < prop.qvDim; ++i) {
+        printf("%f ", mem.qv(prop)[i]);
+    }
+    printf("\n");
+    for (int i = 0; i < prop.qvDim; ++i) {
+        printf("%f ", mem.dqv(prop)[i]);
+    }
+    printf("\n\n");
+#endif
+}
+
 void forwardKinematics(Context &,
                        BodyGroupMemory m,
                        BodyGroupProperties p)
@@ -642,6 +662,12 @@ void compositeRigidBody(
     uint32_t lane_id = threadIdx.x % 32;
     uint32_t warp_id = threadIdx.x / 32;
 
+    if (lane_id == 0) {
+        if (prop.qvDim > 0) {
+            printInfo(mem, prop, "pre crb");
+        }
+    }
+
     // ----------------- Composite rigid body -----------------
     // Mass Matrix of this entire body group, column-major
     uint32_t total_dofs = prop.qvDim;
@@ -785,6 +811,12 @@ void compositeRigidBody(
         // This overwrites bias with the acceleration
         solveM(prop, mem, bias);
     }
+
+    if (lane_id == 0) {
+        if (prop.qvDim > 0) {
+            printInfo(mem, prop, "post crb");
+        }
+    }
 }
 
 #else
@@ -923,6 +955,8 @@ inline void rneAndCombineSpatialInertias(
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
 
     MADRONA_GPU_SINGLE_THREAD {
+        bool fixed = false;
+
         for (uint32_t i = 0; i < prop.numBodies; ++i) {
             BodyOffsets body_offset = offsets[i];
             DofType dof_type = body_offset.dofType;
@@ -952,14 +986,14 @@ inline void rneAndCombineSpatialInertias(
             }
 
             // Common initialization for all joint types
-            SpatialVector v_body;
+            SpatialVector v_body = {};
             if (body_offset.parent == 0xFF || dof_type == DofType::FreeBody) {
                 // v_0 = 0, a_0 = -g (fictitious upward acceleration)
                 spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
                 spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
 
                 // Free bodies must be root of their hierarchy
-                v_body = {velocity[0], velocity[1], velocity[2]};
+                v_body = {{velocity[0], velocity[1], velocity[2]}, Vector3::zero()};
             } else {
                 BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
                 spatial_vector.sVel = parent_spatial_vector.sVel;
@@ -984,6 +1018,7 @@ inline void rneAndCombineSpatialInertias(
                     }
                 }
             } else if (dof_type == DofType::FixedBody) {
+                fixed = true;
             } else if (dof_type == DofType::Slider || dof_type == DofType::Hinge) {
                 assert(body_offset.parent != 0xFF);
 
@@ -1024,6 +1059,10 @@ inline void rneAndCombineSpatialInertias(
         // Backward pass to find bias forces (added to external forces)
         float *tau = mem.biasVector(prop);
         memcpy(tau, mem.f(prop), prop.qvDim * sizeof(float));
+
+        if (!fixed) {
+            printInfo(mem, prop, "rne");
+        }
 
         CountT dof_index = total_dofs;
         for (CountT i = prop.numBodies-1; i >= 0; --i) {
@@ -1494,7 +1533,7 @@ inline void computeExpandedParent(Context &ctx,
 
     BodyOffsets *offsets = m.offsets(p);
     BodyInertial *inertials = m.inertials(p);
-    bool* is_static = m.isStatic(p);
+    uint32_t* is_static = m.isStatic(p);
     float total_static_mass = 0.f; // Total mass of all the static bodies
     // First sweep
     for(int32_t i = 0; i < p.numBodies; ++i) {
@@ -1507,10 +1546,10 @@ inline void computeExpandedParent(Context &ctx,
 
         // Whether this body is fixed and root (or fixed and parent is fixed root)
         if(map[i] == -1 && offsets[i].dofType == DofType::FixedBody) {
-            is_static[i] = true;
+            is_static[i] = 1;
             total_static_mass += inertials[i].mass;
         } else {
-            is_static[i] = false;
+            is_static[i] = 0;
         }
     }
     // Finish expanded parent array
@@ -1534,6 +1573,10 @@ inline void initHierarchies(Context &ctx,
 
     computeExpandedParent(ctx, m, p);
     forwardKinematics(ctx, m, p);
+
+    if (p.qvDim > 0) {
+        printInfo(m, p, "initHierarchies");
+    }
 }
 
 inline void combineSpatialInertias(Context &ctx,
@@ -1628,7 +1671,7 @@ inline void computeInvMassGPU(
                                         32 - bodies_in_smem);
 
         if (to_allocate) {
-            printf("need to allocate %d bodies in gmem out of %d\n", to_allocate, p.numBodies);
+            // printf("need to allocate %d bodies in gmem out of %d\n", to_allocate, p.numBodies);
             gmem_buf = (float *)ctx.tmpAlloc(to_allocate * num_bytes_per_body);
         }
     }
@@ -1713,7 +1756,7 @@ inline void computeInvMassGPU(
             float b = inertials[i_body].approxInvMassRot =
                 (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
 
-            printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
+            // printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
         });
 
     warpLoop(
@@ -1828,7 +1871,7 @@ inline void computeInvMass(
     BodyOffsets *offsets = m.offsets(p);
     BodyTransform *transforms = m.bodyTransforms(p);
     BodyInertial *inertials = m.inertials(p);
-    bool *is_static = m.isStatic(p);
+    uint32_t *is_static = m.isStatic(p);
 
     // Compute the inverse weight for each body
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
@@ -1890,7 +1933,7 @@ inline void computeInvMass(
         float b = inertial.approxInvMassRot =
             (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
 
-        printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
+        // printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
     }
 
     // For each DOF, find the inverse weight
@@ -2090,6 +2133,8 @@ inline void convertPostSolve(
                     transforms.composedRot.rotateVec(obj_data.offset);
     rotation = transforms.composedRot * obj_data.rotation;
 
+    // printf("convertPostSolve\n");
+
 #if 0
     if (link.type == LinkParentDofObject::Type::Render) {
         printf("pos = %f %f %f; rot = %f %f %f %f; scale = %f %f %f\n",
@@ -2201,12 +2246,18 @@ TaskGraphNodeID setupCVInitTasks(
         Span<const TaskGraphNodeID> deps)
 {
     auto node =
+        builder.addToGraph<ParallelForNode<Context, tasks::forwardKinematics,
+            BodyGroupMemory,
+            BodyGroupProperties
+        >>(deps);
+
+    node =
         builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
             Position,
             Rotation,
             Scale,
             LinkParentDofObject
-        >>(deps);
+        >>({node});
 
     return node;
 }

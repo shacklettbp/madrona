@@ -234,6 +234,7 @@ static void initBodyGroupMemory(
             sizeof(MRElement128b);
         m.tmp = ctx.allocMemoryRange<MRElement128b>(num_elems);
         m.tmpPtr = ctx.memoryRangePointer<MRElement128b>(m.tmp);
+        memset(m.tmpPtr, 0, num_bytes);
     }
 }
 
