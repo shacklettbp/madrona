@@ -468,9 +468,32 @@ void BVH::updateLeafPosition(LeafID leaf_id,
                              const Quat &rot,
                              const Diag3x3 &scale,
                              const Vector3 &linear_vel,
-                             const AABB &obj_aabb)
+                             const AABB &obj_aabb,
+                             bool is_capsule)
 {
-    AABB world_aabb = obj_aabb.applyTRS(pos, rot, scale);
+    AABB world_aabb = [&]() {
+        if (is_capsule) {
+            assert(scale.d0 == scale.d1);
+
+            float r = scale.d0;
+            float half_h = scale.d2;
+
+            AABB capsule_aabb = {
+                .pMin = { -r, -r, -(r + half_h) },
+                .pMax = { r, r, r + half_h },
+            };
+
+            return capsule_aabb.applyTRS(pos, rot, { 1.f, 1.f, 1.f });
+        } else {
+            return obj_aabb.applyTRS(pos, rot, scale);
+        }
+    } ();
+
+    Diag3x3 real_scale = scale;
+    if (is_capsule) {
+        real_scale = { 1.f, 1.f, 1.f };
+    }
+
     AABB expanded_aabb = expandAABBWithMotion(world_aabb, linear_vel,
                                               leaf_velocity_expansion_,
                                               leaf_accel_expansion_);
@@ -479,7 +502,7 @@ void BVH::updateLeafPosition(LeafID leaf_id,
     leaf_transforms_[leaf_id.id] = {
         pos,
         rot,
-        scale,
+        real_scale,
     };
     sorted_leaves_[leaf_id.id] = leaf_id.id;
 }
@@ -904,8 +927,22 @@ inline void updateLeafPositionsEntry(
     BVH &bvh = ctx.singleton<BVH>();
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     AABB obj_aabb = obj_mgr.rigidBodyAABBs[obj_id.idx];
+    uint32_t prim_offset = obj_mgr.rigidBodyPrimitiveOffsets[obj_id.idx];
+    uint32_t prim_count = obj_mgr.rigidBodyPrimitiveCounts[obj_id.idx];
 
-    bvh.updateLeafPosition(leaf_id, pos, rot, scale, vel.linear, obj_aabb);
+    bool is_capsule = false;
+    if (prim_count == 1 && 
+            obj_mgr.collisionPrimitives[prim_offset].type == 
+                CollisionPrimitive::Type::Capsule) {
+        is_capsule = true;
+    }
+
+    // Check if this is a capsule. If this is a capsule, we need a special
+    // way to update the AABB.
+
+    bvh.updateLeafPosition(
+            leaf_id, pos, rot, scale, vel.linear, obj_aabb,
+            is_capsule);
 }
 
 // FIXME currently unused

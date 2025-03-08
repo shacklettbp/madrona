@@ -1233,7 +1233,7 @@ static void setupCapsulePrimitive(const SourceCollisionPrimitive &src_prim,
     out_prim->capsule = src_prim.capsule;
 
     const float r = src_prim.capsule.radius;
-    const float h = src_prim.capsule.cylinderHeight;
+    const float h = src_prim.capsule.cylinderHeight * 0.5f;
 
     *out_aabb = AABB {
         .pMin = { -r, -r, -(r + h) },

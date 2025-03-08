@@ -22,6 +22,8 @@ Entity makeBodyGroup(Context &ctx,
         p.numBodies = num_bodies;
         p.numEq = 0;
         p.numObjData = 0;
+        p.numHashes = 0;
+        p.numFixedQ = 0;
         p.tmp.bodyCounter = 0;
     }
 
@@ -49,7 +51,9 @@ static void initBodyGroupMemory(
         p.qDim += BodyOffsets::getDofTypeDim(bd.type, true);
         p.qvDim += BodyOffsets::getDofTypeDim(bd.type);
         p.numEq += bd.numLimits;
-        p.numObjData += bd.numCollisionObjs + bd.numVisualObjs;
+
+        // This was already counted
+        // p.numObjData += bd.numCollisionObjs + bd.numVisualObjs;
     }
 
     { // Allocate frame persistent memory

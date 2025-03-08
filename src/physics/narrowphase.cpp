@@ -1420,8 +1420,9 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
 
         // Rescale the capsule
         CollisionPrimitive::Capsule scaled_capsule = b_prim->capsule;
-        scaled_capsule.cylinderHeight *= b_scale.d2;
-        scaled_capsule.radius *= b_scale.d0;
+        // Technically b_scale represents the half height of the cylinder
+        scaled_capsule.cylinderHeight = (b_scale.d2 * 2.f);
+        scaled_capsule.radius = b_scale.d0;
         assert(b_scale.d0 == b_scale.d1);
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
@@ -1466,9 +1467,9 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
                     Vector3 contact_pt = cap_p1 - plane_normal * fabs(dp1);
 
                     SphereContact contact {
-                        .normal = plane_normal,
+                        .normal = -plane_normal,
                         .pt = contact_pt,
-                        .depth = d1,
+                        .depth = -d1,
                     };
 
                     NarrowphaseResult result = {};
@@ -1479,9 +1480,9 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
                     Vector3 contact_pt = cap_p2 - plane_normal * fabs(dp2);
 
                     SphereContact contact {
-                        .normal = plane_normal,
+                        .normal = -plane_normal,
                         .pt = contact_pt,
-                        .depth = d2,
+                        .depth = -d2,
                     };
 
                     NarrowphaseResult result = {};
@@ -1853,8 +1854,25 @@ static inline void runNarrowphase(
         AABB a_obj_aabb = obj_mgr.primitiveAABBs[a_prim_idx];
         AABB b_obj_aabb = obj_mgr.primitiveAABBs[b_prim_idx];
 
+        // TODO: Have a better way of handling this capsule edge case.
         AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
-        AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
+        AABB b_world_aabb = [&]() {
+            if (raw_type_b == (uint32_t)CollisionPrimitive::Type::Capsule) {
+                assert(b_scale.d0 == b_scale.d1);
+
+                float r = b_scale.d0;
+                float half_h = b_scale.d2;
+
+                AABB capsule_aabb = {
+                    .pMin = { -r, -r, -(r + half_h) },
+                    .pMax = { r, r, r + half_h },
+                };
+
+                return capsule_aabb.applyTRS(b_pos, b_rot, { 1.f, 1.f, 1.f });
+            } else {
+                return b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
+            }
+        } ();
 
         if (!a_world_aabb.intersects(b_world_aabb)) {
 #ifdef MADRONA_GPU_MODE
