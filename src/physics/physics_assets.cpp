@@ -1034,6 +1034,38 @@ static inline MassProperties computeMassProperties(
                 Vector3::zero(),
                 Quat { 1, 0, 0, 0 },
             };
+        } else if (prim.type == CollisionPrimitive::Type::Capsule) {
+            // FIXME: handlel this properly.
+            float mass = 1.f;
+
+            float radius = prim.capsule.radius;
+            float cylinder_height = prim.capsule.cylinderHeight;
+
+            float r2 = radius * radius;
+            float r3 = r2 * radius;
+            float h2 = cylinder_height * cylinder_height;
+            float rh = radius * cylinder_height;
+
+            float cy_vol = math::pi * r2 * cylinder_height;
+            float hs_vol = 2.f * math::pi * r3;
+            float cp_vol = cy_vol + 2.f * hs_vol;
+
+            float cy_mass = (cy_vol / cp_vol) * mass;
+            float hs_mass = (hs_vol / cp_vol) * mass;
+
+            math::Diag3x3 inertia_tensor = {
+                cy_mass * (h2/12.f + r2*0.25f) +
+                    2.f * hs_mass * (r2*0.4f + h2*0.5f + rh*0.375f),
+                cy_mass * (h2/12.f + r2*0.25f) +
+                    2.f * hs_mass * (r2*0.4f + h2*0.5f + rh*0.375f),
+                cy_mass * (r2*0.5f) + 2.f * hs_mass * (r2*0.4f),
+            };
+
+            return MassProperties {
+                inertia_tensor,
+                Vector3::zero(),
+                Quat { 1, 0, 0, 0 },
+            };
         }
 
         // Hull primitive
@@ -1200,7 +1232,7 @@ static void setupCapsulePrimitive(const SourceCollisionPrimitive &src_prim,
 {
     out_prim->capsule = src_prim.capsule;
 
-    const float r = src_prim.sphere.radius;
+    const float r = src_prim.capsule.radius;
     const float h = src_prim.capsule.cylinderHeight;
 
     *out_aabb = AABB {

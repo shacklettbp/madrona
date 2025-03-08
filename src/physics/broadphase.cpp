@@ -871,6 +871,9 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
         case CollisionPrimitive::Type::Sphere: {
             assert(false);
         } break;
+        case CollisionPrimitive::Type::Capsule: {
+            assert(false);
+        } break;
         default: MADRONA_UNREACHABLE();
         }
 

@@ -100,4 +100,28 @@ Entity loadModel(Context &ctx,
                  math::Quat initial_rot,
                  float global_scale);
 
+// Fills in things like mass and inertia
+BodyDesc makeCapsuleBodyDesc(
+        DofType type,
+        math::Vector3 initial_pos,
+        math::Quat initial_rot,
+        ResponseType response_type,
+        uint32_t num_limits,
+        float mu_s,
+        float mass, // Total mass
+        float radius,
+        float cylinder_height);
+
+// Because of the weird scaling properties of the capsule, we handle the
+// capsule differently for rendering and physics.
+void attachCapsuleObjects(
+        Context &ctx,
+        Entity body_grp,
+        Entity body,
+        float radius,
+        float cylinder_height,
+        uint32_t capsule_collider_obj_idx,
+        uint32_t sphere_render_obj_idx,
+        uint32_t cylinder_render_obj_idx);
+
 }

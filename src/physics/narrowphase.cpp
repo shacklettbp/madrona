@@ -1416,6 +1416,8 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         MADRONA_UNREACHABLE();
     } break;
     case NarrowphaseTest::PlaneCapsule: {
+        assert(b_prim->type == CollisionPrimitive::Type::Capsule);
+
         // Rescale the capsule
         CollisionPrimitive::Capsule scaled_capsule = b_prim->capsule;
         scaled_capsule.cylinderHeight *= b_scale.d2;

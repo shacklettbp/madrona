@@ -196,4 +196,120 @@ Entity loadModel(Context &ctx,
     return grp;
 }
 
+BodyDesc makeCapsuleBodyDesc(
+        DofType type,
+        math::Vector3 initial_pos,
+        math::Quat initial_rot,
+        ResponseType response_type,
+        uint32_t num_limits,
+        float mu_s,
+        float mass,
+        float radius,
+        float cylinder_height)
+{
+    float r2 = radius * radius;
+    float r3 = r2 * radius;
+    float h2 = cylinder_height * cylinder_height;
+    float rh = radius * cylinder_height;
+
+    float cy_vol = math::pi * r2 * cylinder_height;
+    float hs_vol = 2.f * math::pi * r3;
+    float cp_vol = cy_vol + 2.f * hs_vol;
+
+    float cy_mass = (cy_vol / cp_vol) * mass;
+    float hs_mass = (hs_vol / cp_vol) * mass;
+
+    math::Diag3x3 inertia_tensor = {
+        cy_mass * (h2/12.f + r2*0.25f) +
+            2.f * hs_mass * (r2*0.4f + h2*0.5f + rh*0.375f),
+        cy_mass * (h2/12.f + r2*0.25f) +
+            2.f * hs_mass * (r2*0.4f + h2*0.5f + rh*0.375f),
+        cy_mass * (r2*0.5f) + 2.f * hs_mass * (r2*0.4f),
+    };
+
+    return BodyDesc {
+        .type = type,
+        .initialPos = initial_pos,
+        .initialRot = initial_rot,
+        .responseType = response_type,
+        .numCollisionObjs = 1,
+        .numVisualObjs = 3,
+        .numLimits = num_limits,
+        .mass = mass,
+        .inertia = inertia_tensor,
+        .muS = mu_s,
+        .hash = {}
+    };
+}
+
+void attachCapsuleObjects(
+        Context &ctx,
+        Entity body_grp,
+        Entity body,
+        float radius,
+        float cylinder_height,
+        uint32_t capsule_collider_obj_idx,
+        uint32_t sphere_render_obj_idx,
+        uint32_t cylinder_render_obj_idx)
+{
+    // By default, the capsule collider object has radius 1,
+    // and height 1.
+    attachCollision(
+            ctx,
+            body_grp,
+            body,
+            0,
+            CollisionDesc {
+                .objID = capsule_collider_obj_idx,
+                .offset = Vector3::all(0.f),
+                .rotation = Quat::id(),
+                .scale = { radius, radius, cylinder_height*0.5f },
+                .linkIdx = 0xFFFF'FFFF,
+                .subIndex = 0xFFFF'FFFF,
+                .renderObjID = -1
+            });
+
+    attachVisual(
+            ctx,
+            body_grp,
+            body,
+            0,
+            VisualDesc {
+                .objID = cylinder_render_obj_idx,
+                .offset = Vector3::all(0.f),
+                .rotation = Quat::id(),
+                .scale = { radius, radius, cylinder_height*0.5f },
+                .linkIdx = 0xFFFF'FFFF,
+                .subIndex = 0xFFFF'FFFF
+            });
+
+    attachVisual(
+            ctx,
+            body_grp,
+            body,
+            1,
+            VisualDesc {
+                .objID = sphere_render_obj_idx,
+                .offset = { 0.f, 0.f, -cylinder_height*0.5f },
+                .rotation = Quat::id(),
+                .scale = { radius, radius, radius },
+                .linkIdx = 0xFFFF'FFFF,
+                .subIndex = 0xFFFF'FFFF
+            });
+
+    attachVisual(
+            ctx,
+            body_grp,
+            body,
+            2,
+            VisualDesc {
+                .objID = sphere_render_obj_idx,
+                .offset = { 0.f, 0.f, cylinder_height*0.5f },
+                .rotation = Quat::id(),
+                .scale = { radius, radius, radius },
+                .linkIdx = 0xFFFF'FFFF,
+                .subIndex = 0xFFFF'FFFF
+            });
+}
+
 }
