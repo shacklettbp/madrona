@@ -1162,9 +1162,6 @@ inline void processContacts(Context &ctx,
     // Get friction coefficient
     float mu = fminf(mu_ref, mu_alt);
     tmp_state.mu = mu;
-
-    printf("Contact: normal=(%f %f %f)\n",
-            contact.normal.x, contact.normal.y, contact.normal.z);
 }
 
 // This only runs on the CPU
