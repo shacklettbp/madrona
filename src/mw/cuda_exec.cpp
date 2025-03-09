@@ -2052,9 +2052,9 @@ static GPUEngineState initEngineAndUserState(
         // Create latency test
         float *data_buffer;
         (float *)cudaMalloc(
-            &data_buffer, sizeof(float) * 256 * num_sms * 16);
-        float *data_buffer_stage =(float *)malloc(
-                sizeof(float) * 256 * num_sms * 16);
+            &data_buffer, sizeof(uint32_t) * 256 * num_sms * 16);
+        uint32_t *data_buffer_stage =(uint32_t *)malloc(
+                sizeof(uint32_t) * 256 * num_sms * 16);
 
         using mwGPU::madrona::LatencyTest;
         LatencyTest *latency_test;
@@ -2077,6 +2077,9 @@ static GPUEngineState initEngineAndUserState(
             auto ptr = (LatencyTest *)channel_devptr;
             ptr->signal.store(0, cuda::std::memory_order_release);
 
+            uint32_t wtf = ptr->signal.load(cuda::std::memory_order_acquire);
+            printf("wtf...: %d\n", wtf);
+
             latency_test = ptr;
         }
 
@@ -2094,8 +2097,8 @@ static GPUEngineState initEngineAndUserState(
             render_cfg->nearPlane,
             (uint32_t)num_sms,
             (uint32_t)shared_mem_per_sm,
-            data_buffer,
-            latency_test);
+            latency_test,
+            data_buffer);
 
         // Launch the kernel in the megakernel module to initialize the BVH 
         // params
@@ -2117,18 +2120,86 @@ static GPUEngineState initEngineAndUserState(
         cu::deallocGPU(params_tmp);
 
 
+        uint32_t wtf = latency_test->signal.load(cuda::std::memory_order_acquire);
+        printf("wtf...: %d\n", wtf);
 
-        // Now run the latency test
-        launchKernel(bvh_kernels.latencyTest,
-                num_sms * 16, 256, no_args);
-        REQ_CUDA(cudaStreamSynchronize(strm));
+        uint32_t num_tests = 100;
 
-        REQ_CUDA(cudaMemcpy(data_buffer_stage, data_buffer,
-                    sizeof(float) * num_sms * 16 * 256,
-                    cudaMemcpyDeviceToHost));
+        { // Without atomic
+            double no_atomic_duration_total = 0.f;
+            for (uint32_t i = 0; i < num_tests; ++i) {
+                latency_test->signal.store(0, cuda::std::memory_order_release);
 
-        for (uint32_t i = 0; i < num_sms * 16 * 256; ++i) {
-            assert(data_buffer[i] == i);
+                auto start = std::chrono::steady_clock::now();
+
+                // Now run the latency test
+                launchKernel(bvh_kernels.latencyTest,
+                        num_sms * 16, 256, no_args);
+                REQ_CUDA(cudaStreamSynchronize(strm));
+
+                auto end = std::chrono::steady_clock::now();
+
+                auto duration = std::chrono::duration_cast<
+                    std::chrono::nanoseconds>(end-start).count();
+
+                no_atomic_duration_total += duration;
+
+                REQ_CUDA(cudaMemcpy(data_buffer_stage, data_buffer,
+                            sizeof(uint32_t) * num_sms * 16 * 256,
+                            cudaMemcpyDeviceToHost));
+
+                // Make sure data is written properly
+                for (uint32_t i = 0; i < num_sms * 16 * 256; ++i) {
+                    assert(data_buffer_stage[i] == i);
+                }
+            }
+
+            float no_atomic_avg = no_atomic_duration_total / (double)num_tests;
+            printf("Without atomic, avg time: %llu ns\n", (uint64_t)no_atomic_avg);
+        }
+
+        { // With atomic
+            using namespace std::chrono_literals;
+
+            double with_atomic_duration_total = 0.f;
+            for (uint32_t i = 0; i < num_tests; ++i) {
+                latency_test->signal.store(0, cuda::std::memory_order_release);
+
+                auto start = std::chrono::steady_clock::now();
+
+                // Now run the latency test
+                launchKernel(bvh_kernels.latencyTest,
+                        num_sms * 16, 256, no_args);
+
+                while (true) {
+                    auto signal = latency_test->signal.load(cuda::std::memory_order_acquire);
+                    if (signal < num_sms * 16) {
+                        std::this_thread::sleep_for(1ns);
+                    } else {
+                        break;
+                    }
+                }
+
+                auto end = std::chrono::steady_clock::now();
+                auto duration = std::chrono::duration_cast<
+                    std::chrono::nanoseconds>(end-start).count();
+
+                REQ_CUDA(cudaStreamSynchronize(strm));
+
+                with_atomic_duration_total += duration;
+
+                REQ_CUDA(cudaMemcpy(data_buffer_stage, data_buffer,
+                            sizeof(uint32_t) * num_sms * 16 * 256,
+                            cudaMemcpyDeviceToHost));
+
+                // Make sure data is written properly
+                for (uint32_t i = 0; i < num_sms * 16 * 256; ++i) {
+                    assert(data_buffer_stage[i] == i);
+                }
+            }
+
+            float with_atomic_avg = with_atomic_duration_total / (double)num_tests;
+            printf("With atomic, avg time: %llu ns\n", (uint64_t)with_atomic_avg);
         }
     }
 

@@ -234,7 +234,7 @@ extern "C" __global__ void bvhInit()
 extern "C" __global__ void driverLatencyTest()
 {
     LatencyTest *latency_test = bvhParams.latencyTest;
-    float *data_buffer = (float *)bvhParams.latencyTestBuffer;
+    uint32_t *data_buffer = (uint32_t *)bvhParams.latencyTestBuffer;
 
     uint32_t data_idx = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -242,7 +242,7 @@ extern "C" __global__ void driverLatencyTest()
 
     __syncthreads();
     if (threadIdx.x == 0) {
-        latency_test->signal.fetch_add(1, cuda::memory_order_release);
+        latency_test->signal.fetch_add(1, cuda::std::memory_order_release);
     }
 }
 
