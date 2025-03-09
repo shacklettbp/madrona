@@ -408,6 +408,24 @@ inline void doNothing(Context &,
 {
 }
 
+TaskGraphNodeID setupResetTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps,
+    Solver solver)
+{
+    switch (solver) {
+    case Solver::Convex: {
+        return cv::setupCVResetTasks(builder, deps);
+    } break;
+
+    default:
+        return builder.addToGraph<ParallelForNode<Context,
+            doNothing,
+            PhysicsSystemState
+        >>(deps);
+    }
+}
+
 TaskGraphNodeID setupInitTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps,

@@ -182,7 +182,7 @@ struct CollisionPrimitive {
         Sphere = 1 << 0,
         Hull = 1 << 1,
         Plane = 1 << 2,
-        Box = 1 << 3
+        Capsule = 1 << 3
     };
 
     struct Sphere {
@@ -199,11 +199,17 @@ struct CollisionPrimitive {
         math::Vector3 dim;
     };
 
+    struct Capsule {
+        float radius;
+        float cylinderHeight;
+    };
+
     Type type;
     union {
         Sphere sphere;
         Plane plane;
         Hull hull;
+        Capsule capsule;
     };
 };
 
@@ -283,6 +289,11 @@ namespace PhysicsSystem {
 
     void registerTypes(ECSRegistry &registry,
                        Solver solver = Solver::XPBD);
+
+    TaskGraphNodeID setupResetTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps,
+        Solver solver);
 
     TaskGraphNodeID setupInitTasks(
         TaskGraphBuilder &builder,

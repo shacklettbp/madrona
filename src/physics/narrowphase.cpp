@@ -94,12 +94,14 @@ using namespace math;
 using namespace geo;
 
 enum class NarrowphaseTest : uint32_t {
-    SphereSphere = 1,
-    HullHull = 2,
-    SphereHull = 3,
-    PlanePlane = 4,
-    SpherePlane = 5,
-    HullPlane = 6,
+    SphereSphere = 0b1,
+    HullHull = 0b10,
+    SphereHull = 0b11,
+    PlanePlane = 0b100,
+    SpherePlane = 0b101,
+    HullPlane = 0b110,
+    CapsuleCapsule = 0b1000,
+    PlaneCapsule = 0b1100,
 };
 
 struct FaceQuery {
@@ -292,6 +294,73 @@ MADRONA_ALWAYS_INLINE static inline  float warpFloatMin(float val)
 }
 
 #endif
+
+std::pair<Vector3, Vector3> findShortestConnection(
+        const Vector3 p1, const Vector3 p2,
+        const Vector3 q1, const Vector3 q2)
+{
+    Vector3 u = p2 - p1;
+    Vector3 v = q2 - q1;
+    Vector3 w = p1 - q1;
+
+    float a = u.dot(u);
+    float b = u.dot(v);
+    float c = v.dot(v);
+    float d = u.dot(w);
+    float e = v.dot(w);
+    float sc, sN, sD = a*c - b*b;
+    float tc, tN, tD = a*c - b*b;
+    float tol = 1e-15;
+
+    if (sD < tol) {
+        sN = 0.0;
+        sD = 1.0;
+        tN = e;
+        tD = c;
+    } else {
+        sN = (b*e - c*d);
+        tN = (a*e - b*d);
+        if (sN < 0.0) {
+            sN = 0.0;
+            tN = e;
+            tD = c;
+        } else if (sN > sD) {
+            sN = sD;
+            tN = e + b;
+            tD = c;
+        }
+    }
+
+    if (tN < 0.0) {
+        tN = 0.0;
+        if (-d < 0.0) {
+            sN = 0.0;
+        } else if (-d > a) {
+            sN = sD;
+        } else {
+            sN = -d;
+            sD = a;
+        }
+    } else if (tN > tD) {
+        tN = tD;
+        if ((-d + b) < 0.0) {
+            sN = 0;
+        } else if ((-d + b) > a) {
+            sN = sD;
+        } else {
+            sN = (-d +  b);
+            sD = a;
+        }
+    }
+    // finally do the division to get sc and tc
+    sc = (fabs(sN) < tol ? 0.0 : sN / sD);
+    tc = (fabs(tN) < tol ? 0.0 : tN / tD);
+
+    Vector3 r1 = p1 + (sc * u);
+    Vector3 r2 = q1 + (tc * v);  
+
+    return {r1, r2};
+}
 
 static float getHullDistanceFromPlane(
     MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
@@ -1414,6 +1483,150 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         assert(false);
         MADRONA_UNREACHABLE();
     } break;
+    case NarrowphaseTest::CapsuleCapsule: {
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+
+        CollisionPrimitive::Capsule a_scaled_capsule = a_prim->capsule;
+        Vector3 a_cap_axis, a_cap_p1, a_cap_p2;
+        { // Scale capsule properly
+            a_scaled_capsule.cylinderHeight = (a_scale.d2 * 2.f);
+            a_scaled_capsule.radius = a_scale.d0;
+            assert(a_scale.d0 == a_scale.d1);
+
+            a_cap_axis = a_rot.rotateVec(base_normal);
+            a_cap_p1 = a_pos -
+                a_cap_axis * a_scaled_capsule.cylinderHeight * 0.5f;
+            a_cap_p2 = a_pos +
+                a_cap_axis * a_scaled_capsule.cylinderHeight * 0.5f;
+        }
+
+        CollisionPrimitive::Capsule b_scaled_capsule = b_prim->capsule;
+        Vector3 b_cap_axis, b_cap_p1, b_cap_p2;
+        { // Scale capsule properly
+            b_scaled_capsule.cylinderHeight = (b_scale.d2 * 2.f);
+            b_scaled_capsule.radius = b_scale.d0;
+            assert(b_scale.d0 == b_scale.d1);
+
+            b_cap_axis = b_rot.rotateVec(base_normal);
+            b_cap_p1 = b_pos -
+                b_cap_axis * b_scaled_capsule.cylinderHeight * 0.5f;
+            b_cap_p2 = b_pos +
+                b_cap_axis * b_scaled_capsule.cylinderHeight * 0.5f;
+        }
+
+        // Calculate shorting distance between the two segments.
+        auto [a_point, b_point] = findShortestConnection(
+                a_cap_p1, a_cap_p2,
+                b_cap_p1, b_cap_p2);
+
+        Vector3 diff = b_point - a_point;
+        float d2 = diff.length2();
+        float min_separation = a_scaled_capsule.radius + b_scaled_capsule.radius;
+
+        if (d2 > min_separation * min_separation) {
+            // No collision
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        } else {
+            // We have a collision
+            float d = sqrt(d2);
+
+            Vector3 contact_pt = a_point + a_scaled_capsule.radius *
+                diff / d;
+            float penetration = d - 
+                (a_scaled_capsule.radius + b_scaled_capsule.radius);
+
+            SphereContact contact {
+                .normal = -diff / d,
+                .pt = contact_pt,
+                .depth = -penetration
+            };
+
+            NarrowphaseResult result = {};
+            result.type = ContactType::Sphere;
+            result.sphere = contact;
+            return result;
+        }
+    } break;
+    case NarrowphaseTest::PlaneCapsule: {
+        assert(b_prim->type == CollisionPrimitive::Type::Capsule);
+
+        // Rescale the capsule
+        CollisionPrimitive::Capsule scaled_capsule = b_prim->capsule;
+        // Technically b_scale represents the half height of the cylinder
+        scaled_capsule.cylinderHeight = (b_scale.d2 * 2.f);
+        scaled_capsule.radius = b_scale.d0;
+        assert(b_scale.d0 == b_scale.d1);
+
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+        Vector3 plane_normal = a_rot.rotateVec(base_normal);
+
+        Vector3 cap_axis = b_rot.rotateVec(base_normal);
+        Vector3 cap_p1 = b_pos -
+            cap_axis * scaled_capsule.cylinderHeight * 0.5f;
+        Vector3 cap_p2 = b_pos +
+            cap_axis * scaled_capsule.cylinderHeight * 0.5f;
+
+        { // Do plane / capsule collision test
+            float dp1 = (cap_p1 - a_pos).dot(plane_normal);
+            float dp2 = (cap_p2 - a_pos).dot(plane_normal);
+
+            // These points must be on the same side of the plane
+            assert(dp1 * dp2 > 0.f);
+
+            float d1 = fabs(dp1) - scaled_capsule.radius;
+            float d2 = fabs(dp2) - scaled_capsule.radius;
+
+            if (d1 > 0.f && d2 > 0.f) {
+                // No intersection
+                NarrowphaseResult result;
+                result.type = ContactType::None;
+                return result;
+            } else if (d1 == d2 && d1 < 0.f) {
+                // Capsule is completely horizontal with the plane
+                // We could create two contact points
+#if 0
+                Vector3 contact_pt1 = cap_p1 - plane_normal * scaled_capsule.radius;
+                Vector3 contact_pt2 = cap_p2 - plane_normal * scaled_capsule.radius;
+#endif
+
+                // TODO: Handle this case properly
+                assert(false);
+                return {};
+            } else {
+                // We just have one contact point
+                if (d1 < d2) {
+                    // Handle this as a sphere contact
+                    Vector3 contact_pt = cap_p1 - plane_normal * fabs(dp1);
+
+                    SphereContact contact {
+                        .normal = -plane_normal,
+                        .pt = contact_pt,
+                        .depth = -d1,
+                    };
+
+                    NarrowphaseResult result = {};
+                    result.type = ContactType::Sphere;
+                    result.sphere = contact;
+                    return result;
+                } else {
+                    Vector3 contact_pt = cap_p2 - plane_normal * fabs(dp2);
+
+                    SphereContact contact {
+                        .normal = -plane_normal,
+                        .pt = contact_pt,
+                        .depth = -d2,
+                    };
+
+                    NarrowphaseResult result = {};
+                    result.type = ContactType::Sphere;
+                    result.sphere = contact;
+                    return result;
+                }
+            }
+        }
+    } break;
     case NarrowphaseTest::SpherePlane: {
         float sphere_radius;
         {
@@ -1775,8 +1988,42 @@ static inline void runNarrowphase(
         AABB a_obj_aabb = obj_mgr.primitiveAABBs[a_prim_idx];
         AABB b_obj_aabb = obj_mgr.primitiveAABBs[b_prim_idx];
 
-        AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
-        AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
+        // TODO: Have a better way of handling this capsule edge case.
+        AABB a_world_aabb = [&]() {
+            if (raw_type_a == (uint32_t)CollisionPrimitive::Type::Capsule) {
+                assert(a_scale.d0 == a_scale.d1);
+
+                float r = a_scale.d0;
+                float half_h = a_scale.d2;
+
+                AABB capsule_aabb = {
+                    .pMin = { -r, -r, -(r + half_h) },
+                    .pMax = { r, r, r + half_h },
+                };
+
+                return capsule_aabb.applyTRS(a_pos, a_rot, { 1.f, 1.f, 1.f });
+            } else {
+                return a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
+            }
+        } ();
+
+        AABB b_world_aabb = [&]() {
+            if (raw_type_b == (uint32_t)CollisionPrimitive::Type::Capsule) {
+                assert(b_scale.d0 == b_scale.d1);
+
+                float r = b_scale.d0;
+                float half_h = b_scale.d2;
+
+                AABB capsule_aabb = {
+                    .pMin = { -r, -r, -(r + half_h) },
+                    .pMax = { r, r, r + half_h },
+                };
+
+                return capsule_aabb.applyTRS(b_pos, b_rot, { 1.f, 1.f, 1.f });
+            } else {
+                return b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
+            }
+        } ();
 
         if (!a_world_aabb.intersects(b_world_aabb)) {
 #ifdef MADRONA_GPU_MODE

@@ -43,6 +43,17 @@ template <typename... ComponentTs> struct Archetype {
     using Base = Archetype<ComponentTs...>;
 };
 
+// Component where the 
+template <typename T>
+struct VarComponent {
+    T dummy;
+
+    inline T * ptr()
+    {
+        return (T *)this;
+    }
+};
+
 struct WorldID {
     int32_t idx;
 };

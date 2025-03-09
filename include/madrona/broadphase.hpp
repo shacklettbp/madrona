@@ -42,7 +42,8 @@ public:
                             const math::Quat &rot,
                             const math::Diag3x3 &scale,
                             const math::Vector3 &linear_vel,
-                            const math::AABB &obj_aabb);
+                            const math::AABB &obj_aabb,
+                            bool is_capsule = false);
 
     math::AABB expandLeaf(LeafID leaf_id,
                           const math::Vector3 &linear_vel);

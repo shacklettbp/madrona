@@ -56,6 +56,10 @@ TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
                                TaskGraphNodeID solve);
 
 namespace tasks {
+void initHierarchies(Context &ctx,
+                     InitBodyGroup body_grp);
+void destroyHierarchies(Context &ctx,
+                        DestroyBodyGroup &body_grp);
 void refreshPointers(Context &ctx,
                      BodyGroupMemory &m);
 void computeExpandedParent(Context &ctx,
@@ -87,6 +91,7 @@ void solveM(
         float* x);
 void convertPostSolve(
         Context &ctx,
+        Entity e,
         base::Position &position,
         base::Rotation &rotation,
         base::Scale &scale,

@@ -18,11 +18,6 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 {
     auto cur_node = broadphase;
 
-    cur_node = builder.addToGraph<
-        CompactArchetypeNode<BodyGroupArchetype>>({cur_node});
-    cur_node = builder.addToGraph<
-        CompactArchetypeNode<DofObjectArchetype>>({cur_node});
-
     cur_node = builder.addToGraph<ParallelForNode<Context, 
              tasks::refreshPointers,
                 BodyGroupMemory>>({cur_node});
@@ -106,6 +101,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<BodyGroupMemory>();
     registry.registerComponent<BodyGroupProperties>();
     registry.registerComponent<InitBodyGroup>();
+    registry.registerComponent<DestroyBodyGroup>();
     registry.registerComponent<ContactTmpState>();
     registry.registerComponent<LinkParentDofObject>();
 
@@ -116,6 +112,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerArchetype<LinkCollider>();
     registry.registerArchetype<LinkVisual>();
     registry.registerArchetype<InitBodyGroupArchetype>();
+    registry.registerArchetype<DestroyBodyGroupArchetype>();
 
     registry.registerMemoryRangeElement<MRElement128b>();
     registry.registerMemoryRangeElement<SolverScratch256b>();

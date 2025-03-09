@@ -93,8 +93,16 @@ struct BodyInertial {
 };
 
 struct BodyObjectData {
+    enum class Type {
+        Render,
+        Collider,
+        RenderCollider,
+        None
+    };
+
     // Either a renderable, or rigid body entity
     Entity proxy;
+    Type type;
     math::Vector3 offset;
     math::Quat rotation;
     math::Diag3x3 scale;
@@ -278,6 +286,14 @@ struct InitBodyGroupArchetype : Archetype<
     InitBodyGroup
 > {};
 
+struct DestroyBodyGroup {
+    Entity bodyGroup;
+};
+
+struct DestroyBodyGroupArchetype : Archetype<
+    DestroyBodyGroup
+> {};
+
 struct LinkParentDofObject {
     enum class Type {
         Collider,
@@ -377,6 +393,8 @@ Entity makeBodyGroup(
         Context &ctx,
         uint32_t num_bodies,
         float global_scale = 1.f);
+
+void destroyBodyGroup(Context &ctx, Entity body_grp);
 
 Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc);
 
@@ -569,6 +587,10 @@ void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
 void init(Context &ctx, CVXSolve *cvx_solve);
 
 TaskGraphNodeID setupCVInitTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps);
+
+TaskGraphNodeID setupCVResetTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
 
