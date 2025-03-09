@@ -51,9 +51,6 @@ static void initBodyGroupMemory(
         p.qDim += BodyOffsets::getDofTypeDim(bd.type, true);
         p.qvDim += BodyOffsets::getDofTypeDim(bd.type);
         p.numEq += bd.numLimits;
-
-        // This was already counted
-        // p.numObjData += bd.numCollisionObjs + bd.numVisualObjs;
     }
 
     { // Allocate frame persistent memory
@@ -342,6 +339,7 @@ void attachCollision(
 
     obj_data[proxies.colliderOffset + idx] = {
         col_obj,
+        BodyObjectData::Type::Collider,
         desc.offset,
         desc.rotation,
         desc.scale,
@@ -377,6 +375,7 @@ void attachVisual(
 
     obj_data[proxies.visualOffset + idx] = {
         viz_obj,
+        BodyObjectData::Type::Render,
         desc.offset,
         desc.rotation,
         desc.scale,
@@ -577,9 +576,21 @@ void attachLimit(
     m.q(p)[offsets[body_info.idx].posOffset] = (slider_limit.lower + slider_limit.upper) / 2.f;
 }
 
-void markReset(Context &ctx, Entity body_grp) {
+void markReset(Context &ctx, Entity body_grp)
+{
     Loc init = ctx.makeTemporary<InitBodyGroupArchetype>();
     ctx.get<InitBodyGroup>(init).bodyGroup = body_grp;
+}
+
+void markDestroy(Context &ctx, Entity body_grp)
+{
+    Loc destroy = ctx.makeTemporary<DestroyBodyGroupArchetype>();
+    ctx.get<DestroyBodyGroup>(destroy).bodyGroup = body_grp;
+}
+
+void destroyBodyGroup(Context &ctx, Entity body_grp)
+{
+    markDestroy(ctx, body_grp);
 }
 
 // External forces:

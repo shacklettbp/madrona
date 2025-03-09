@@ -1011,6 +1011,8 @@ void GaussMinimizationNode::calculateSolverDims(
         sd->numBodyGroups = num_grps;
     }
 
+    __syncwarp();
+
     { // Get total num dofs
         uint32_t total_num_dofs = warpSumPred<uint32_t>(
             [&](uint32_t iter) {
@@ -1047,6 +1049,8 @@ void GaussMinimizationNode::calculateSolverDims(
         sd->h = state_mgr->getSingleton<PhysicsSystemState>({(int32_t)world_id}).h;
     }
 
+    __syncwarp();
+
     { // Get equality jacobian dims
         uint32_t total_num_rows = warpSumPred<uint32_t>(
             [&](uint32_t iter) {
@@ -1065,7 +1069,12 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
     { // Solver dims
         uint32_t world_id = invocation_idx;
         CVSolveData *curr_sd = &solveDatas[world_id];
+
         calculateSolverDims(world_id, curr_sd);
+
+        if (curr_sd->freeAccDim == 0) {
+            return;
+        }
     }
 
     if (threadIdx.x % 32 == 0) {
@@ -1187,6 +1196,10 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
     StateManager *state_mgr = getStateManager();
 
     CVSolveData *curr_sd = &solveDatas[world_id];
+
+    if (curr_sd->freeAccDim == 0) {
+        return;
+    }
 
     if (lane_id == 0) {
         curr_sd->worldID = world_id;
@@ -1769,6 +1782,10 @@ void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
     { // Do the actual computation
         CVSolveData *curr_sd = &solveDatas[world_id];
 
+        if (curr_sd->freeAccDim == 0) {
+            return;
+        }
+
         // We want acc_ref to have priority in shared memory
         auto [acc_ref, in_smem] = [&]() -> std::pair<float *, bool> {
             const int32_t num_smem_bytes_per_warp =
@@ -1845,6 +1862,10 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
 
     { // Do the actual computation
         CVSolveData *curr_sd = &solveDatas[world_id];
+
+        if (curr_sd->freeAccDim == 0) {
+            return;
+        }
 
         float *residuals = curr_sd->eqResiduals;
 
@@ -1961,6 +1982,10 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
     { // Do the computation
         CVSolveData *curr_sd = &solveDatas[world_id];
+
+        if (curr_sd->freeAccDim == 0) {
+            return;
+        }
 
         float tol_scale = 1.f / curr_sd->totalMass;
 

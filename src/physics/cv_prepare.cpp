@@ -1594,8 +1594,8 @@ inline void computeExpandedParent(Context &ctx,
     }
 }
 
-inline void initHierarchies(Context &ctx,
-                            InitBodyGroup body_grp)
+void initHierarchies(Context &ctx,
+                     InitBodyGroup body_grp)
 {
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
@@ -1605,6 +1605,57 @@ inline void initHierarchies(Context &ctx,
 
     if (p.qvDim > 0) {
         printInfo(m, p, "initHierarchies");
+    }
+}
+
+void destroyHierarchies(Context &ctx,
+                        DestroyBodyGroup &body_grp)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
+
+    Entity *dof_objects = m.entities(p);
+    BodyObjectData *objs = m.objectData(p);
+
+    auto cleanup_body = [&](uint32_t iter) {
+        // First, destroy the DofObjectArchetypes
+        Entity dof_object = dof_objects[iter];
+        ctx.destroyEntity(dof_object);
+    };
+
+    auto cleanup_obj = [&](uint32_t iter) {
+        BodyObjectData obj = objs[iter];
+        if (obj.type == BodyObjectData::Type::Render) {
+            render::RenderingSystem::cleanupRenderableEntity(ctx, obj.proxy);
+        }
+
+        ctx.destroyEntity(obj.proxy);
+
+        if (obj.optionalRender != Entity::none()) {
+            render::RenderingSystem::cleanupRenderableEntity(
+                    ctx, obj.optionalRender);
+            ctx.destroyEntity(obj.optionalRender);
+        }
+    };
+
+#ifdef MADRONA_GPU_MODE
+    gpu_utils::warpLoop(p.numBodies, cleanup_body);
+#else
+    for (uint32_t iter = 0; iter < p.numBodies; ++iter)
+        cleanup_body(iter);
+#endif
+
+#ifdef MADRONA_GPU_MODE
+    gpu_utils::warpLoop(p.numObjData, cleanup_obj);
+#else
+    for (uint32_t iter = 0; iter < p.numObjData; ++iter)
+        cleanup_obj(iter);
+#endif
+
+    MADRONA_GPU_SINGLE_THREAD {
+        ctx.freeMemoryRange(m.qVectors);
+        ctx.freeMemoryRange(m.tmp);
+        ctx.destroyEntity(body_grp.bodyGroup);
     }
 }
 
@@ -2146,11 +2197,13 @@ inline void integrationStep(Context &ctx,
 
 inline void convertPostSolve(
         Context &ctx,
+        Entity e,
         Position &position,
         Rotation &rotation,
         Scale &scale,
         LinkParentDofObject &link)
 {
+    (void)e;
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
 
@@ -2161,17 +2214,6 @@ inline void convertPostSolve(
     position = transforms.com + p.globalScale *
                     transforms.composedRot.rotateVec(obj_data.offset);
     rotation = transforms.composedRot * obj_data.rotation;
-
-    // printf("convertPostSolve\n");
-
-#if 0
-    if (link.type == LinkParentDofObject::Type::Render) {
-        printf("pos = %f %f %f; rot = %f %f %f %f; scale = %f %f %f\n",
-                position.x, position.y, position.z,
-                rotation.w, rotation.x, rotation.y, rotation.z,
-                scale.d0, scale.d1, scale.d2);
-    }
-#endif
 }
 }
 
@@ -2180,15 +2222,10 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
 {
     // Initialize memory and run forward kinematics
     auto cur_node = builder.addToGraph<ParallelForNode<Context,
-         tasks::initHierarchies,
-            InitBodyGroup
-         >>({narrowphase});
-
-    cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::computeGroupCOM,
             BodyGroupProperties,
             BodyGroupMemory
-        >>({cur_node});
+        >>({narrowphase});
 
     cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::computeSpatialInertiasAndPhi,
@@ -2251,14 +2288,12 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
     // Only run contact processing on initialization
     cur_node = builder.addToGraph<ParallelForNode<Context, 
         tasks::convertPostSolve,
+            Entity,
             Position,
             Rotation,
             Scale,
             LinkParentDofObject
         >>({cur_node});
-
-    cur_node = builder.addToGraph<
-        ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
 
 #ifndef MADRONA_GPU_MODE
     cur_node = builder.addToGraph<ParallelForNode<Context,
@@ -2266,6 +2301,44 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
             CVSolveData
         >>({cur_node});
 #endif
+
+    return cur_node;
+}
+
+TaskGraphNodeID setupCVResetTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps)
+{
+#ifdef MADRONA_GPU_MODE
+    auto cur_node = builder.addToGraph<CustomParallelForNode<Context,
+         tasks::destroyHierarchies, 32, 1,
+            DestroyBodyGroup
+        >>(deps);
+#else
+    auto cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::destroyHierarchies,
+            DestroyBodyGroup
+        >>(deps);
+#endif
+
+    cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::initHierarchies,
+            InitBodyGroup
+         >>({cur_node});
+
+    cur_node = builder.addToGraph<
+        ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
+    cur_node = builder.addToGraph<
+        ClearTmpNode<DestroyBodyGroupArchetype>>({cur_node});
+
+    cur_node = builder.addToGraph<
+        CompactArchetypeNode<BodyGroupArchetype>>({cur_node});
+    cur_node = builder.addToGraph<
+        CompactArchetypeNode<DofObjectArchetype>>({cur_node});
+    cur_node = builder.addToGraph<
+        CompactArchetypeNode<LinkCollider>>({cur_node});
+    cur_node = builder.addToGraph<
+        CompactArchetypeNode<LinkVisual>>({cur_node});
 
     return cur_node;
 }
@@ -2282,6 +2355,7 @@ TaskGraphNodeID setupCVInitTasks(
 
     node =
         builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Entity,
             Position,
             Rotation,
             Scale,
@@ -2307,6 +2381,7 @@ TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
 
     cur_node =
         builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Entity,
             Position,
             Rotation,
             Scale,
