@@ -12,7 +12,9 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
                                          void *textures,
                                          float near_sphere,
                                          uint32_t num_sms,
-                                         uint32_t sm_shared_memory)
+                                         uint32_t sm_shared_memory,
+                                         void *latency_test_raw,
+                                         void *latency_test_data_buffer)
 {
     using namespace madrona;
     using namespace madrona::render;
@@ -89,4 +91,7 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 
     params->numSMs = num_sms;
     params->smSharedMemory = sm_shared_memory;
+
+    params->latencyTest = (LatencyTest *)latency_test_raw;
+    params->latencyTestBuffer = latency_test_data_buffer;
 }

@@ -366,6 +366,8 @@ struct BVHKernels {
     CUfunction constructAABBs;
 
     CUfunction widenTree;
+    
+    CUfunction latencyTest;
 
     CUevent allocEvent;
     CUevent buildEvent;
@@ -1341,6 +1343,10 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&bvh_init, mod,
                                "bvhInit"));
 
+    CUfunction latency_test;
+    REQ_CU(cuModuleGetFunction(&latency_test, mod,
+                               "driverLatencyTest"));
+
     CUfunction bvh_alloc;
     REQ_CU(cuModuleGetFunction(&bvh_alloc, mod,
                                "bvhAllocInternalNodes"));
@@ -1392,6 +1398,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .raycast = bvh_raycast_entry,
         .constructAABBs = bvh_aabbs,
         .widenTree = widen_tree,
+        .latencyTest = latency_test,
         .allocEvent = alloc_event,
         .buildEvent = build_event,
         .widenEvent = widen_event,
@@ -2042,6 +2049,37 @@ static GPUEngineState initEngineAndUserState(
         REQ_CU(cuModuleGetGlobal(&bvh_consts_addr, &bvh_consts_size,
                                  bvh_kernels.mod, "bvhParams"));
 
+        // Create latency test
+        float *data_buffer;
+        (float *)cudaMalloc(
+            &data_buffer, sizeof(float) * 256 * num_sms * 16);
+        float *data_buffer_stage =(float *)malloc(
+                sizeof(float) * 256 * num_sms * 16);
+
+        using mwGPU::madrona::LatencyTest;
+        LatencyTest *latency_test;
+        {
+            CUdeviceptr channel_devptr;
+            REQ_CU(cuMemAllocManaged(&channel_devptr,
+                        sizeof(LatencyTest),
+                        CU_MEM_ATTACH_GLOBAL));
+
+            REQ_CU(cuMemAdvise((CUdeviceptr)channel_devptr, 
+                        sizeof(LatencyTest),
+                        CU_MEM_ADVISE_SET_READ_MOSTLY, 0));
+            REQ_CU(cuMemAdvise((CUdeviceptr)channel_devptr,
+                        sizeof(LatencyTest),
+                        CU_MEM_ADVISE_SET_ACCESSED_BY, CU_DEVICE_CPU));
+
+            REQ_CU(cuMemAdvise(channel_devptr, sizeof(LatencyTest),
+                        CU_MEM_ADVISE_SET_ACCESSED_BY, cu_gpu));
+
+            auto ptr = (LatencyTest *)channel_devptr;
+            ptr->signal.store(0, cuda::std::memory_order_release);
+
+            latency_test = ptr;
+        }
+
         // Setup the BVH parameters in the __constant__ block of the bvh module
         // Pass this to the ECS to fill in
         auto init_bvh_args = makeKernelArgBuffer(
@@ -2055,7 +2093,9 @@ static GPUEngineState initEngineAndUserState(
             render_cfg->materialData.textures,
             render_cfg->nearPlane,
             (uint32_t)num_sms,
-            (uint32_t)shared_mem_per_sm);
+            (uint32_t)shared_mem_per_sm,
+            data_buffer,
+            latency_test);
 
         // Launch the kernel in the megakernel module to initialize the BVH 
         // params
@@ -2075,6 +2115,21 @@ static GPUEngineState initEngineAndUserState(
                  sizeof(mwGPU::madrona::BVHParams));
 
         cu::deallocGPU(params_tmp);
+
+
+
+        // Now run the latency test
+        launchKernel(bvh_kernels.latencyTest,
+                num_sms * 16, 256, no_args);
+        REQ_CUDA(cudaStreamSynchronize(strm));
+
+        REQ_CUDA(cudaMemcpy(data_buffer_stage, data_buffer,
+                    sizeof(float) * num_sms * 16 * 256,
+                    cudaMemcpyDeviceToHost));
+
+        for (uint32_t i = 0; i < num_sms * 16 * 256; ++i) {
+            assert(data_buffer[i] == i);
+        }
     }
 
     return GPUEngineState {

@@ -231,6 +231,21 @@ extern "C" __global__ void bvhInit()
     // bvhParams.internal_data->numFrames = 0;
 }
 
+extern "C" __global__ void driverLatencyTest()
+{
+    LatencyTest *latency_test = bvhParams.latencyTest;
+    float *data_buffer = (float *)bvhParams.latencyTestBuffer;
+
+    uint32_t data_idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    data_buffer[data_idx] = data_idx;
+
+    __syncthreads();
+    if (threadIdx.x == 0) {
+        latency_test->signal.fetch_add(1, cuda::memory_order_release);
+    }
+}
+
 // Because the number of instances / views isn't going to be known when the
 // CPU launches this kernel (it just gets put into a CUgraph and run every
 // frame), we are just going to max out the GPU and use a persistent thread

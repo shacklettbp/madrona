@@ -111,6 +111,10 @@ struct KernelTimingInfo {
     AtomicU64 memoryUsage;
 };
 
+struct LatencyTest {
+    cuda::atomic<int32_t, cuda::thread_scope_system> signal;
+};
+
 struct BVHParams {
     uint32_t numWorlds;
 
@@ -156,6 +160,9 @@ struct BVHParams {
     // Used to determine how many thread blocks per SM.
     uint32_t numSMs;
     uint32_t smSharedMemory;
+
+    LatencyTest *latencyTest;
+    void *latencyTestBuffer;
 };
 
 }
