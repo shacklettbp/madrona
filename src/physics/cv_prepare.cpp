@@ -2204,14 +2204,6 @@ inline void convertPostSolve(
         LinkParentDofObject &link)
 {
     (void)e;
-    if (link.type == LinkParentDofObject::Type::Collider) {
-        printf("Collider: %d %d\n", e.id, e.gen);
-    }
-
-    if (link.type == LinkParentDofObject::Type::Render) {
-        printf("Visual: %d %d\n", e.id, e.gen);
-    }
-
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
 
