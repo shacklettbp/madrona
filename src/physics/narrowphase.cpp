@@ -132,6 +132,7 @@ struct Manifold {
 enum class ContactType {
     None,
     Sphere,
+    Convex,
     SATPlane,
     SATFace,
     SATEdge,
@@ -141,6 +142,10 @@ struct SphereContact {
     Vector3 normal;
     Vector3 pt;
     float depth;
+};
+
+struct ConvexContact {
+    Manifold manifold;
 };
 
 struct SATContact {
@@ -361,6 +366,35 @@ std::pair<Vector3, Vector3> findShortestConnection(
 
     return {r1, r2};
 }
+
+// Contact between sphere (a) and plane (b)
+std::pair<bool, SphereContact> spherePlaneContact(
+        const Vector3 a_pos,
+        const Vector3 b_pos,
+        const Quat b_rot,
+        const float sphere_radius)
+{
+    constexpr Vector3 base_normal = { 0, 0, 1 };
+    Vector3 plane_normal = b_rot.rotateVec(base_normal);
+
+    float d = plane_normal.dot(b_pos);
+    float t = plane_normal.dot(a_pos) - d;
+
+    float penetration = sphere_radius - t;
+    if (penetration < 0) {
+        return { false, {} };
+    }
+
+    Vector3 contact_point = a_pos - t * plane_normal;
+
+    SphereContact sphere_contact {
+        .normal = plane_normal,
+        .pt = contact_point,
+        .depth = penetration,
+    };
+    return { true, sphere_contact };
+}
+
 
 static float getHullDistanceFromPlane(
     MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
@@ -1271,6 +1305,7 @@ inline constexpr int32_t numPlaneFloats = maxNumPlanes * 4;
 struct NarrowphaseResult {
     ContactType type;
     SphereContact sphere;
+    ConvexContact convex;
     SATContact sat;
     const Vector3 *aVertices;
     const Vector3 *bVertices;
@@ -1575,55 +1610,48 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             // These points must be on the same side of the plane
             assert(dp1 * dp2 > 0.f);
 
-            float d1 = fabs(dp1) - scaled_capsule.radius;
-            float d2 = fabs(dp2) - scaled_capsule.radius;
+            // Check the collision between the two spheres
+            auto [is_contact_a, contact_a] = spherePlaneContact(
+                cap_p1, a_pos, a_rot, scaled_capsule.radius);
+            auto [is_contact_b, contact_b] = spherePlaneContact(
+                cap_p2, a_pos, a_rot, scaled_capsule.radius);
+            // Negate since objs a and b are swapped
+            contact_a.normal *= -1.f;
+            contact_b.normal *= -1.f;
 
-            if (d1 > 0.f && d2 > 0.f) {
-                // No intersection
+            if (!is_contact_a && !is_contact_b) {
                 NarrowphaseResult result;
                 result.type = ContactType::None;
                 return result;
-            } else if (d1 == d2 && d1 < 0.f) {
-                // Capsule is completely horizontal with the plane
-                // We could create two contact points
-#if 0
-                Vector3 contact_pt1 = cap_p1 - plane_normal * scaled_capsule.radius;
-                Vector3 contact_pt2 = cap_p2 - plane_normal * scaled_capsule.radius;
-#endif
+            }
+            else if (is_contact_a && !is_contact_b) {
+                NarrowphaseResult result = {};
+                result.type = ContactType::Sphere;
+                result.sphere = contact_a;
+                return result;
+            }
+            else if (!is_contact_a && is_contact_b) {
+                NarrowphaseResult result = {};
+                result.type = ContactType::Sphere;
+                result.sphere = contact_b;
+                return result;
+            }
+            // Capsule is horizontal with plane
+            else {
+                ConvexContact convex_contact = {};
+                Manifold manifold = {};
+                manifold.numContactPoints = 2;
+                manifold.contactPoints[0] = contact_a.pt;
+                manifold.contactPoints[1] = contact_b.pt;
+                manifold.penetrationDepths[0] = contact_a.depth;
+                manifold.penetrationDepths[1] = contact_b.depth;
+                manifold.normal = contact_a.normal;
+                convex_contact.manifold = manifold;
 
-                // TODO: Handle this case properly
-                assert(false);
-                return {};
-            } else {
-                // We just have one contact point
-                if (d1 < d2) {
-                    // Handle this as a sphere contact
-                    Vector3 contact_pt = cap_p1 - plane_normal * fabs(dp1);
-
-                    SphereContact contact {
-                        .normal = -plane_normal,
-                        .pt = contact_pt,
-                        .depth = -d1,
-                    };
-
-                    NarrowphaseResult result = {};
-                    result.type = ContactType::Sphere;
-                    result.sphere = contact;
-                    return result;
-                } else {
-                    Vector3 contact_pt = cap_p2 - plane_normal * fabs(dp2);
-
-                    SphereContact contact {
-                        .normal = -plane_normal,
-                        .pt = contact_pt,
-                        .depth = -d2,
-                    };
-
-                    NarrowphaseResult result = {};
-                    result.type = ContactType::Sphere;
-                    result.sphere = contact;
-                    return result;
-                }
+                NarrowphaseResult result = {};
+                result.type = ContactType::Convex;
+                result.convex = convex_contact;
+                return result;
             }
         }
     } break;
@@ -1635,26 +1663,13 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             sphere_radius = a_scale.d0 * sphere.radius;
         }
 
-        constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 plane_normal = b_rot.rotateVec(base_normal);
-
-        float d = plane_normal.dot(b_pos);
-        float t = plane_normal.dot(a_pos) - d;
-
-        float penetration = sphere_radius - t;
-        if (penetration < 0) {
+        auto [is_contact, sphere_contact] = spherePlaneContact(
+            a_pos, b_pos, b_rot, sphere_radius);
+        if (!is_contact) {
             NarrowphaseResult result;
             result.type = ContactType::None;
             return result;
         }
-
-        Vector3 contact_point = a_pos - t * plane_normal;
-
-        SphereContact sphere_contact {
-            .normal = plane_normal,
-            .pt = contact_point,
-            .depth = penetration,
-        };
 
         NarrowphaseResult result;
         result.type = ContactType::Sphere;
@@ -1745,6 +1760,10 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
 
         addSinglePointContact(ctx, sphere_contact.pt, sphere_contact.normal,
                               sphere_contact.depth, b_loc, a_loc);
+    } break;
+    case ContactType::Convex: {
+        ConvexContact convex_contact = narrowphase_result.convex;
+        addManifoldContacts(ctx, convex_contact.manifold, b_loc, a_loc);
     } break;
     case ContactType::SATPlane: {
         // Plane is always b, always reference
