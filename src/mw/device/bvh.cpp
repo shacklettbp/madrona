@@ -231,9 +231,22 @@ extern "C" __global__ void bvhInit()
     // bvhParams.internal_data->numFrames = 0;
 }
 
-extern "C" __global__ void driverLatencyTest()
+extern "C" __global__ void driverLatencyTestDriver()
 {
     LatencyTest *latency_test = bvhParams.latencyTest;
+    uint32_t *data_buffer = (uint32_t *)bvhParams.latencyTestBuffer;
+
+    uint32_t data_idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    data_buffer[data_idx] = data_idx;
+}
+
+extern "C" __global__ void driverLatencyTestAtomic()
+{
+    LatencyTest *latency_test = bvhParams.latencyTest;
+    while (latency_test->signal.load(
+                cuda::std::memory_order_relaxed) >= gridDim.x) {};
+
     uint32_t *data_buffer = (uint32_t *)bvhParams.latencyTestBuffer;
 
     uint32_t data_idx = threadIdx.x + blockIdx.x * blockDim.x;
@@ -242,7 +255,7 @@ extern "C" __global__ void driverLatencyTest()
 
     __syncthreads();
     if (threadIdx.x == 0) {
-        latency_test->signal.fetch_add(1, cuda::std::memory_order_release);
+        latency_test->signal.fetch_add(1, cuda::std::memory_order_relaxed);
     }
 }
 

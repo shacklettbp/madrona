@@ -367,7 +367,8 @@ struct BVHKernels {
 
     CUfunction widenTree;
     
-    CUfunction latencyTest;
+    CUfunction latencyTestAtomic;
+    CUfunction latencyTestDriver;
 
     CUevent allocEvent;
     CUevent buildEvent;
@@ -1343,9 +1344,13 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&bvh_init, mod,
                                "bvhInit"));
 
-    CUfunction latency_test;
-    REQ_CU(cuModuleGetFunction(&latency_test, mod,
-                               "driverLatencyTest"));
+    CUfunction latency_test_atomic;
+    REQ_CU(cuModuleGetFunction(&latency_test_atomic, mod,
+                               "driverLatencyTestAtomic"));
+
+    CUfunction latency_test_driver;
+    REQ_CU(cuModuleGetFunction(&latency_test_driver, mod,
+                               "driverLatencyTestDriver"));
 
     CUfunction bvh_alloc;
     REQ_CU(cuModuleGetFunction(&bvh_alloc, mod,
@@ -1398,7 +1403,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .raycast = bvh_raycast_entry,
         .constructAABBs = bvh_aabbs,
         .widenTree = widen_tree,
-        .latencyTest = latency_test,
+        .latencyTestAtomic = latency_test_atomic,
+        .latencyTestDriver = latency_test_driver,
         .allocEvent = alloc_event,
         .buildEvent = build_event,
         .widenEvent = widen_event,
@@ -2133,7 +2139,7 @@ static GPUEngineState initEngineAndUserState(
                 auto start = std::chrono::steady_clock::now();
 
                 // Now run the latency test
-                launchKernel(bvh_kernels.latencyTest,
+                launchKernel(bvh_kernels.latencyTestDriver,
                         num_sms * 16, 256, no_args);
                 REQ_CUDA(cudaStreamSynchronize(strm));
 
@@ -2163,13 +2169,14 @@ static GPUEngineState initEngineAndUserState(
 
             double with_atomic_duration_total = 0.f;
             for (uint32_t i = 0; i < num_tests; ++i) {
-                latency_test->signal.store(0, cuda::std::memory_order_release);
-
-                auto start = std::chrono::steady_clock::now();
+                latency_test->signal.store(num_sms * 16, cuda::std::memory_order_relaxed);
 
                 // Now run the latency test
-                launchKernel(bvh_kernels.latencyTest,
+                launchKernel(bvh_kernels.latencyTestAtomic,
                         num_sms * 16, 256, no_args);
+
+                auto start = std::chrono::steady_clock::now();
+                latency_test->signal.store(0, cuda::std::memory_order_relaxed);
 
                 while (true) {
                     auto signal = latency_test->signal.load(cuda::std::memory_order_acquire);
@@ -2179,7 +2186,6 @@ static GPUEngineState initEngineAndUserState(
                         break;
                     }
                 }
-
                 auto end = std::chrono::steady_clock::now();
                 auto duration = std::chrono::duration_cast<
                     std::chrono::nanoseconds>(end-start).count();
