@@ -2204,6 +2204,14 @@ inline void convertPostSolve(
         LinkParentDofObject &link)
 {
     (void)e;
+    if (link.type == LinkParentDofObject::Type::Collider) {
+        printf("Collider: %d %d\n", e.id, e.gen);
+    }
+
+    if (link.type == LinkParentDofObject::Type::Render) {
+        printf("Visual: %d %d\n", e.id, e.gen);
+    }
+
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
 
@@ -2325,6 +2333,17 @@ TaskGraphNodeID setupCVResetTasks(
          tasks::initHierarchies,
             InitBodyGroup
          >>({cur_node});
+
+    // Dumb that we have to run this twice in a frame but it's cheap
+    // as hell so we'll just do that for now.
+    cur_node =
+        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Entity,
+            Position,
+            Rotation,
+            Scale,
+            LinkParentDofObject
+        >>({cur_node});
 
     cur_node = builder.addToGraph<
         ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
