@@ -232,10 +232,10 @@ static void initBodyGroupMemory(
 
     { // Allocate frame volatile memory
         uint32_t num_bytes = BodyGroupMemory::tmpNumBytes(p);
-        uint32_t num_elems = (num_bytes + sizeof(MRElement128b) - 1) /
-            sizeof(MRElement128b);
-        m.tmp = ctx.allocMemoryRange<MRElement128b>(num_elems);
-        m.tmpPtr = ctx.memoryRangePointer<MRElement128b>(m.tmp);
+        uint32_t num_elems = (num_bytes + sizeof(SolverScratch256b) - 1) /
+            sizeof(SolverScratch256b);
+        m.tmp = ctx.allocMemoryRange<SolverScratch256b>(num_elems);
+        m.tmpPtr = ctx.memoryRangePointer<SolverScratch256b>(m.tmp);
         memset(m.tmpPtr, 0, num_bytes);
     }
 }

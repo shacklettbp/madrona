@@ -8,7 +8,7 @@ void refreshPointers(Context &ctx,
                      BodyGroupMemory &m)
 {
     m.qVectorsPtr = ctx.memoryRangePointer<MRElement128b>(m.qVectors);
-    m.tmpPtr = ctx.memoryRangePointer<MRElement128b>(m.tmp);
+    m.tmpPtr = ctx.memoryRangePointer<SolverScratch256b>(m.tmp);
 }
 }
 
@@ -47,6 +47,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 #ifdef MADRONA_GPU_MODE
     cur_node = builder.addToGraph<
         SortMemoryRangeNode<MRElement128b>>({cur_node});
+    cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
+
+    cur_node = builder.addToGraph<
+        SortMemoryRangeNode<SolverScratch256b, false>>({cur_node});
     cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
 #endif
 
