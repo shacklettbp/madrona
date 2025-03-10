@@ -102,7 +102,9 @@ struct BodyObjectData {
 
     // Either a renderable, or rigid body entity
     Entity proxy;
+
     Type type;
+
     math::Vector3 offset;
     math::Quat rotation;
     math::Diag3x3 scale;
