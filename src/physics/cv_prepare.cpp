@@ -2302,6 +2302,10 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
         >>({cur_node});
 #endif
 
+    // Body groups should now all be set up at this point
+    cur_node = builder.addToGraph<
+        ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
+
     return cur_node;
 }
 
@@ -2337,8 +2341,6 @@ TaskGraphNodeID setupCVResetTasks(
             LinkParentDofObject
         >>({cur_node});
 
-    cur_node = builder.addToGraph<
-        ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
     cur_node = builder.addToGraph<
         ClearTmpNode<DestroyBodyGroupArchetype>>({cur_node});
 
