@@ -21,6 +21,8 @@ struct URDFLoader {
         uint32_t planePhysicsIdx;
         uint32_t sphereRenderIdx;
         uint32_t spherePhysicsIdx;
+        uint32_t capsulePhysicsIdx;
+        uint32_t capsuleRenderIdx;
     };
 
     struct URDFInfo {

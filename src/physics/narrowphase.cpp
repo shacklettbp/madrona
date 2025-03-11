@@ -99,6 +99,7 @@ enum class NarrowphaseTest : uint32_t {
     SphereHull = 0b11,
     PlanePlane = 0b100,
     SpherePlane = 0b101,
+    SphereCapsule = 0b1001,
     HullPlane = 0b110,
     CapsuleCapsule = 0b1000,
     PlaneCapsule = 0b1100,

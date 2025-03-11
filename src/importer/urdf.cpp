@@ -1547,6 +1547,15 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                 obj_id = primitives.cubePhysicsIdx;
             } break;
 
+            case URDFGeometryType::Cylinder: {
+                scale = Vector3 {
+                    collision.geometry.cylinder.radius,
+                    collision.geometry.cylinder.radius,
+                    collision.geometry.cylinder.length / 2.f
+                };
+                obj_id = primitives.capsulePhysicsIdx;
+            } break;
+
             default: {
                 assert(false);
             } break;
@@ -1610,6 +1619,15 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             case URDFGeometryType::Box: {
                 scale = visual.geometry.box.dim;
                 obj_id = primitives.cubeRenderIdx;
+            } break;
+
+            case URDFGeometryType::Cylinder: {
+                scale = Vector3 {
+                    visual.geometry.cylinder.radius,
+                    visual.geometry.cylinder.radius,
+                    visual.geometry.cylinder.length / 2.f
+                };
+                obj_id = primitives.capsuleRenderIdx;
             } break;
 
             default: {
