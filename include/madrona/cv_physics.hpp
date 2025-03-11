@@ -63,8 +63,8 @@ struct BodyOffsets {
     uint8_t velOffset;
     uint8_t parent;    // 0xFF is invalid
     uint8_t parentWithDof; // Index of first parent with at least one DOF
-    DofType dofType;
 
+    DofType dofType;
     uint8_t numDofs; // Dimension of velocity
     uint8_t eqOffset;
     uint8_t numEqs;
@@ -154,6 +154,22 @@ struct BodyGroupProperties {
         // Offset (row) in the equality jacobian
         uint32_t eqOffset;
     } tmp;
+};
+
+// For checkpointing
+struct BodyGroupDesc {
+    using DescUint = uint8_t;
+
+    DescUint qDim;
+    DescUint numFixedQ;
+    DescUint qvDim;
+    DescUint numBodies;
+    DescUint numEq;
+    DescUint numObjData;
+    DescUint numHashes;
+    DescUint pad;
+
+    float globalScale;
 };
 
 struct SpatialVector {
@@ -271,6 +287,9 @@ struct BodyGroupMemory {
 
     static inline uint32_t qVectorsNumBytes(BodyGroupProperties p);
     static inline uint32_t tmpNumBytes(BodyGroupProperties p);
+
+    // Number of bytes required to save checkpointed version of this group
+    static inline uint32_t checkpointNumBytes(BodyGroupProperties p);
 };
 struct BodyGroupArchetype : Archetype<
     BodyGroupProperties,
@@ -575,6 +594,14 @@ BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, StringID string_id)
 
 BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, uint32_t body_idx);
 BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, StringID string_id);
+
+// Checkpointing
+uint32_t getNumCheckpointBytes(Context &ctx, Entity body_grp);
+
+// Returns the number of bytes written
+uint32_t saveBodyGroupCheckpoint(Context &ctx, Entity body_grp, void *ptr);
+// Returns the body group and number of bytes consumed
+std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr);
 
 // External forces:
 void addHingeExternalForce(Context &ctx, Entity hinge_joint, float newtons);
