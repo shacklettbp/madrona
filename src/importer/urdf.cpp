@@ -1234,7 +1234,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             .mass = link.inertial.mass,
             .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
             // ... ?
-            .muS = 0.1f
+            .muS = 1.0f
         };
 
         bodyDescs.push_back(body_desc);

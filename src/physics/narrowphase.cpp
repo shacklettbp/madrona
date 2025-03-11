@@ -1997,6 +1997,7 @@ static inline void runNarrowphase(
         std::swap(raw_type_a, raw_type_b);
     }
 
+    printf("a_prim_idx: %d, b_prim_idx: %d\n", a_prim->type, b_prim->type);
     const Vector3 a_pos = ctx.getDirect<Position>(RGDCols::Position, a_loc);
     const Vector3 b_pos = ctx.getDirect<Position>(RGDCols::Position, b_loc);
     const Quat a_rot = ctx.getDirect<Rotation>(RGDCols::Rotation, a_loc);
