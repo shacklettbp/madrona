@@ -754,4 +754,107 @@ BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, StringID string_id
     return m.inertials(p)[getBodyIndex(m, p, string_id)];
 }
 
+uint32_t getNumCheckpointBytes(Context &ctx, Entity body_grp)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return BodyGroupMemory::checkpointNumBytes(p);
+}
+
+uint32_t saveBodyGroupCheckpoint(Context &ctx, Entity body_grp, void *ptr)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+
+    uint8_t *write_ptr = (uint8_t *)ptr;
+
+    { // Write desc
+        BodyGroupDesc *desc = (BodyGroupDesc *)ptr;
+        *desc = BodyGroupDesc {
+            .qDim = (BodyGroupDesc::DescUint)p.qDim,
+            .numFixedQ = (BodyGroupDesc::DescUint)p.numFixedQ,
+            .qvDim = (BodyGroupDesc::DescUint)p.qvDim,
+            .numBodies = (BodyGroupDesc::DescUint)p.numBodies,
+            .numEq = (BodyGroupDesc::DescUint)p.numEq,
+            .numObjData = (BodyGroupDesc::DescUint)p.numObjData,
+            .numHashes = (BodyGroupDesc::DescUint)p.numHashes,
+            .pad = 0,
+            .globalScale = p.globalScale
+        };
+
+        write_ptr += sizeof(BodyGroupDesc);
+    }
+
+    { // Write q, qv, dqv, force
+        memcpy(write_ptr, m.q(p), sizeof(float) * p.qDim);
+        write_ptr += sizeof(float) * p.qDim;
+
+        memcpy(write_ptr, m.qv(p), sizeof(float) * p.qvDim);
+        write_ptr += sizeof(float) * p.qvDim;
+
+        memcpy(write_ptr, m.dqv(p), sizeof(float) * p.qvDim);
+        write_ptr += sizeof(float) * p.qvDim;
+
+        memcpy(write_ptr, m.f(p), sizeof(float) * p.qvDim);
+        write_ptr += sizeof(float) * p.qvDim;
+    }
+
+    { // Mus
+        memcpy(write_ptr, m.mus(p), sizeof(float) * p.numBodies);
+        write_ptr += sizeof(float) * p.numBodies;
+    }
+
+    { // Equalities
+        memcpy(write_ptr, m.limits(p), sizeof(BodyLimitConstraint) * p.numEq);
+        write_ptr += sizeof(BodyLimitConstraint) * p.numEq;
+    }
+
+    { // Inertias
+        memcpy(write_ptr, m.inertials(p), sizeof(BodyInertial) * p.numBodies);
+        write_ptr += sizeof(BodyInertial) * p.numBodies;
+    }
+
+    { // Expanded parent
+        memcpy(write_ptr, m.expandedParent(p), sizeof(int32_t) * p.qvDim);
+        write_ptr += sizeof(int32_t) * p.qvDim;
+    }
+
+    { // Fixed root status
+        memcpy(write_ptr, m.isStatic(p), sizeof(uint32_t) * p.numBodies);
+        write_ptr += sizeof(uint32_t) * p.numBodies;
+    }
+
+    { // Body object data
+        memcpy(write_ptr, m.objectData(p), sizeof(BodyObjectData) * p.numObjData);
+        write_ptr += sizeof(BodyObjectData) * p.numObjData;
+    }
+
+    { // Body hierarchies
+        memcpy(write_ptr, m.hierarchies(p), sizeof(BodyHierarchy) * p.numBodies);
+        write_ptr += sizeof(BodyHierarchy) * p.numBodies;
+    }
+
+    { // Body offsets
+        memcpy(write_ptr, m.offsets(p), sizeof(BodyOffsets) * p.numBodies);
+        write_ptr += sizeof(BodyOffsets) * p.numBodies;
+    }
+
+    { // Name hashes
+        memcpy(write_ptr, m.nameHashes(p), sizeof(BodyNameHash) * p.numHashes);
+        write_ptr += sizeof(BodyNameHash) * p.numHashes;
+    }
+
+    return write_ptr - (uint8_t *)ptr;
+}
+
+std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
+{
+    uint8_t *read_ptr = (uint8_t *)ptr;
+
+    BodyGroupDesc desc = *(BodyGroupDesc *)read_ptr;
+    read_ptr += sizeof(BodyGroupDesc);
+
+    Entity grp = makeBodyGroup();
+}
+
 }
