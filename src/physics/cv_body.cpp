@@ -170,6 +170,7 @@ static void initBodyGroupMemory(
                 }
             } break;
 
+            // TODO: Convention is 0, unless the reference angle is given (implement reference angle)
             case DofType::Hinge: {
                 curr_q[0] = 0.f;
                 curr_qv[0] = 0.f;
@@ -547,9 +548,6 @@ void attachLimit(
     l.type = BodyLimitConstraint::Type::Hinge;
     l.bodyIdx = body_info.idx;
     l.hinge = hinge_limit;
-
-    // Set the joint value to be in the limits
-    m.q(p)[offsets[body_info.idx].posOffset] = (hinge_limit.lower + hinge_limit.upper) / 2.f;
 }
 
 void attachLimit(
@@ -572,8 +570,6 @@ void attachLimit(
     l.type = BodyLimitConstraint::Type::Slider;
     l.bodyIdx = body_info.idx;
     l.slider = slider_limit;
-
-    m.q(p)[offsets[body_info.idx].posOffset] = (slider_limit.lower + slider_limit.upper) / 2.f;
 }
 
 void markReset(Context &ctx, Entity body_grp)
