@@ -106,7 +106,8 @@ inline uint32_t BodyGroupMemory::checkpointNumBytes(BodyGroupProperties p)
            p.numObjData * sizeof(BodyObjectData) +  // body object data
            p.numBodies * sizeof(BodyHierarchy) +    // body hierarchy
            p.numBodies * sizeof(BodyOffsets) +      // Body offsets
-           p.numHashes * sizeof(BodyNameHash);      // Body name hashes
+           p.numHashes * sizeof(BodyNameHash) +     // Body name hashes
+           p.numBodies * sizeof(DofObjectProxies);
 }
 
 SpatialVector SpatialVector::fromVec(const float* v)

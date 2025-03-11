@@ -339,6 +339,9 @@ void attachCollision(
     };
 
     obj_data[proxies.colliderOffset + idx] = {
+        (uint16_t)body_grpinfo.idx,
+        (uint16_t)idx,
+        (int32_t)desc.objID,
         col_obj,
         BodyObjectData::Type::Collider,
         desc.offset,
@@ -375,6 +378,9 @@ void attachVisual(
     };
 
     obj_data[proxies.visualOffset + idx] = {
+        (uint16_t)body_grpinfo.idx,
+        (uint16_t)idx,
+        (int32_t)desc.objID,
         viz_obj,
         BodyObjectData::Type::Render,
         desc.offset,
@@ -844,6 +850,12 @@ uint32_t saveBodyGroupCheckpoint(Context &ctx, Entity body_grp, void *ptr)
         write_ptr += sizeof(BodyNameHash) * p.numHashes;
     }
 
+    for (uint32_t i = 0; i < p.numBodies; ++i) {
+        DofObjectProxies &proxies = ctx.get<DofObjectProxies>(m.entities(p)[i]);
+        memcpy(write_ptr, &proxies, sizeof(DofObjectProxies));
+        write_ptr += sizeof(DofObjectProxies);
+    }
+
     return write_ptr - (uint8_t *)ptr;
 }
 
@@ -854,7 +866,176 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
     BodyGroupDesc desc = *(BodyGroupDesc *)read_ptr;
     read_ptr += sizeof(BodyGroupDesc);
 
-    Entity grp = makeBodyGroup();
+    Entity grp = makeBodyGroup(
+            ctx,
+            (uint32_t)desc.numBodies,
+            desc.globalScale);
+
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(grp);
+
+    { // Set properties
+        p.globalScale = desc.globalScale;
+        p.qDim = desc.qDim;
+        p.numFixedQ = desc.numFixedQ;
+        p.qvDim = desc.qvDim;
+        p.numBodies = desc.numBodies;
+        p.numEq = desc.numEq;
+        p.numObjData = desc.numObjData;
+        p.numHashes = desc.numHashes;
+    }
+
+    { // Allocate frame persistent memory
+        uint32_t num_bytes = BodyGroupMemory::qVectorsNumBytes(p);
+        uint32_t num_elems = (num_bytes + sizeof(MRElement128b) - 1) /
+            sizeof(MRElement128b);
+        m.qVectors = ctx.allocMemoryRange<MRElement128b>(num_elems);
+        m.qVectorsPtr = ctx.memoryRangePointer<MRElement128b>(m.qVectors);
+
+        // Set everything to zero initially
+        memset(m.qVectorsPtr, 0, num_bytes);
+    }
+
+    { // Allocate frame volatile memory
+        uint32_t num_bytes = BodyGroupMemory::tmpNumBytes(p);
+        uint32_t num_elems = (num_bytes + sizeof(SolverScratch256b) - 1) /
+            sizeof(SolverScratch256b);
+        m.tmp = ctx.allocMemoryRange<SolverScratch256b>(num_elems);
+        m.tmpPtr = ctx.memoryRangePointer<SolverScratch256b>(m.tmp);
+        memset(m.tmpPtr, 0, num_bytes);
+    }
+
+    { // Copy q, qv, dqv, tau
+        uint32_t num_bytes = sizeof(float) * 
+                             (p.qDim + p.qvDim * 3);
+        memcpy(m.qVectorsPtr, read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Copy mu
+        uint32_t num_bytes = sizeof(float) * p.numBodies;
+        memcpy(m.mus(p), read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Equalities
+        uint32_t num_bytes = sizeof(BodyLimitConstraint) * p.numEq;
+        memcpy(m.limits(p), read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Inertias
+        uint32_t num_bytes = sizeof(BodyInertial) * p.numBodies;
+        memcpy(m.inertials(p), read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Expanded parent
+        uint32_t num_bytes = sizeof(int32_t) * p.qvDim;
+        memcpy(m.expandedParent(p), read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Fixed root status
+        uint32_t num_bytes = sizeof(uint32_t) * p.numBodies;
+        memcpy(m.isStatic(p), read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Object data
+        uint32_t num_bytes = sizeof(BodyObjectData) * p.numObjData;
+        memcpy(m.objectData(p), read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Body hierarchy
+        uint32_t num_bytes = sizeof(BodyHierarchy) * p.numBodies;
+        memcpy(m.hierarchies(p), read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Body offsets
+        uint32_t num_byte = sizeof(BodyOffsets) * p.numBodies;
+        memcpy(m.offsets(p), read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Name hashes
+        uint32_t num_byte = sizeof(BodyNameHash) * p.numHashes;
+        memcpy(m.nameHashes(p), read_ptr, num_bytes);
+        read_ptr += num_bytes;
+    }
+
+    { // Create the dof object entities
+        for (uint32_t i = 0; i < m.numBodies; ++i) {
+            Entity e = ctx.makeEntity<DofObjectArchetype>();
+            m.entities(p)[i] = e;
+
+            ctx.get<DofObjectGroup>(e) = {
+                .bodyGroup = grp,
+                .idx = i
+            };
+
+            DofObjectProxies *src_proxies = (DofObjectProxies *)read_ptr;
+            DofObjectProxies *dst_proxies = &ctx.get<DofObjectProxies>(e);
+
+            memcpy(dst_proxies, src_proxies, sizeof(DofObjectProxies));
+
+            read_ptr += sizeof(DofObjectProxies);
+        }
+    }
+
+    { // Now, create the body object entities
+        BodyObjectData *obj_datas = m.objectData(p);
+
+        for (uint32_t i = 0; i < p.numObjData; ++i) {
+            BodyObjectData obj_data = obj_datas[i];
+
+            Entity body_e = m.entities(p)[obj_data.bodyIdx];
+            DofObjectProxies proxies = ctx.get<DofObjectProxies>(body_e);
+
+            if (obj_data.type == BodyObjectData::TYpe::Collider) {
+                Entity col_obj = ctx.makeEntity<LinkCollider>();
+
+                ctx.get<DisabledColliders>(col_obj).numDisabled = 0;
+
+                ctx.get<broadphase::LeafID>(col_obj) =
+                    PhysicsSystem::registerEntity(ctx, col_obj, { (int32_t)obj_data.objectID });
+                ctx.get<ResponseType>(col_obj) = proxies.responseType;
+                ctx.get<ObjectID>(col_obj) = { (int32_t)desc.objectID };
+
+                ctx.get<Velocity>(col_obj) = {
+                    Vector3::zero(),
+                    Vector3::zero(),
+                };
+
+                ctx.get<ExternalForce>(col_obj) = Vector3::zero();
+                ctx.get<ExternalTorque>(col_obj) = Vector3::zero();
+
+                ctx.get<LinkParentDofObject>(col_obj) = {
+                    .bodyGroup = grp,
+                    .bodyIdx = obj_data.bodyIdx,
+                    .objDataIdx = proxies.colliderOffset + obj_data.subIdx,
+                    .type = LinkParentDofObject::Type::Collider,
+                };
+            } else {
+                Entity viz_obj = ctx.makeEntity<LinkVisual>();
+
+                ctx.get<ObjectID>(viz_obj) = { (int32_t)obj_data.objectID };
+
+                render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+
+                ctx.get<LinkParentDofObject>(viz_obj) = {
+                    .bodyGroup = body_grp,
+                    .bodyIdx = body_grpinfo.idx,
+                    .objDataIdx = proxies.visualOffset + obj_data.subIdx,
+                    .type = LinkParentDofObject::Type::Render,
+                };
+            }
+        }
+    }
+
+    return { grp, read_ptr - (uint8_t *)ptr };
 }
 
 }

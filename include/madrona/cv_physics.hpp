@@ -100,6 +100,10 @@ struct BodyObjectData {
         None
     };
 
+    uint16_t bodyIdx;
+    uint16_t subIdx;
+    int32_t objectID;
+
     // Either a renderable, or rigid body entity
     Entity proxy;
 
