@@ -412,7 +412,6 @@ void computeSpatialInertiasAndPhi(Context &ctx,
     Vector3 body_grp_com_pos = prop.comPos;
 
     // --------- Compute spatial inertias -------------
-
     BodyInertial inertial = mem.inertials(prop)[obj_grp.idx];
     BodyTransform transform = mem.bodyTransforms(prop)[obj_grp.idx];
     Diag3x3 inertia = inertial.inertia * prop.globalScale * prop.globalScale;
@@ -1959,10 +1958,8 @@ inline void computeInvMass(
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
         BodyInertial &inertial = inertials[i_body];
         if(is_static[i_body]) {
-            inertial.approxInvMassTrans = 1 / inertial.mass;
-            inertial.approxInvMassRot = 3 / (inertial.inertia.d0 +
-                                             inertial.inertia.d1 +
-                                             inertial.inertia.d2);
+            inertial.approxInvMassTrans = 0.f;
+            inertial.approxInvMassRot = 0.f;
             continue;
         }
         BodyTransform transform = transforms[i_body];
