@@ -1588,9 +1588,11 @@ inline void computeExpandedParent(Context &ctx,
         expandedParent[map[i - 1] + 1] = map[parent_idx];
         ASSERT_PTR_ACCESS(expandedParent, (map[i - 1] + 1), max_ptr);
 
-        if(is_static[i]) {
-            inertials[i].mass = total_static_mass;
-        }
+        // FIXME: this messes up the COMpos and everything following
+        //  it really is only needed for inverse mass calc for contacts
+        // if(is_static[i]) {
+        //     inertials[i].mass = total_static_mass;
+        // }
     }
 }
 
