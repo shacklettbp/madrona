@@ -94,6 +94,7 @@ struct TraceResult {
     float metalness;
     float roughness;
     float depth;
+    uint32_t objID;
 };
 
 struct TraceInfo {
@@ -767,6 +768,14 @@ static __device__ TraceResult traceRay(
     if (tri_hit.hit) {
         tri_hit.tHit = t_max;
 
+        if (bvhParams.raycastRGBD) {
+            InstanceData *instance = world_info.instances + tri_hit.instanceIdx;
+
+            int32_t obj_id = instance->objectID;
+            result.objID = obj_id;
+        }
+
+#if 0
         if (bvhParams.raycastRGBD && (!trace_info.dOnly)) {
             InstanceData *instance = world_info.instances + tri_hit.instanceIdx;
 
@@ -811,6 +820,7 @@ static __device__ TraceResult traceRay(
             result.color = color;
             result.normal = instance->rotation.rotateVec(tri_hit.normal);
         }
+#endif
         
         result.depth = tri_hit.tHit;
         result.hit = true;
@@ -830,6 +840,14 @@ static __device__ void writeRGB(uint32_t pixel_byte_offset,
     *(rgb_out + 3) = 255;
 }
 
+static __device__ void writeSegMask(uint32_t pixel_byte_offset,
+                                    uint32_t seg_mask)
+{
+    uint32_t *seg_out = (uint32_t *)
+        ((uint8_t *)bvhParams.rgbOutput + pixel_byte_offset);
+    *seg_out = seg_mask;
+}
+
 static __device__ void writeDepth(uint32_t pixel_byte_offset,
                              float depth)
 {
@@ -843,6 +861,7 @@ struct FragmentResult {
     Vector3 color;
     Vector3 normal;
     float depth;
+    uint32_t objID;
 };
 
 static __device__ FragmentResult computeFragment(
@@ -862,6 +881,14 @@ static __device__ FragmentResult computeFragment(
             };
         }
     } else if (first_hit.hit) {
+        return FragmentResult {
+            .hit = true,
+            .depth = first_hit.depth,
+            .objID = first_hit.objID,
+        };
+    }
+#if 0
+    else if (first_hit.hit) {
         // Now we need to test against lights.
         Vector3 hit_pos = trace_info.rayOrigin +
                           first_hit.depth * trace_info.rayDirection;
@@ -931,6 +958,7 @@ static __device__ FragmentResult computeFragment(
             .depth = first_hit.depth
         };
     }
+#endif
 
     return FragmentResult {
         .hit = false
@@ -1005,10 +1033,12 @@ extern "C" __global__ void bvhRaycastEntry()
         if (bvhParams.raycastRGBD) {
             // Write both depth and color information
             if (result.hit) {
-                writeRGB(global_pixel_byte_off, result.color);
+                //writeRGB(global_pixel_byte_off, result.color);
+                writeSegMask(global_pixel_byte_off, result.objID+1);
                 writeDepth(global_pixel_byte_off, result.depth);
             } else {
-                writeRGB(global_pixel_byte_off, { 0.f, 0.f, 0.f });
+                // writeRGB(global_pixel_byte_off, { 0.f, 0.f, 0.f });
+                writeSegMask(global_pixel_byte_off, 0);
                 writeDepth(global_pixel_byte_off, 0.f);
             }
         } else {
