@@ -62,6 +62,10 @@ void forwardKinematics(Context &,
         all_phi[0].phi[0] = com[0];
         all_phi[0].phi[1] = com[1];
         all_phi[0].phi[2] = com[2];
+        all_phi[0].phi[3] = q[3];
+        all_phi[0].phi[4] = q[4];
+        all_phi[0].phi[5] = q[5];
+        all_phi[0].phi[6] = q[6];
     }
 
     // Forward pass from parent to children
@@ -211,26 +215,38 @@ void computePhi(
     Vector3 origin)
 {
     if (dof_type == DofType::FreeBody) {
-        // S = [1_3x3 r^x; 0 1_3x3], column-major
+        // S = [1_3x3 r^xR^T; 0 R^T], row-major
         memset(S, 0.f, 6 * 6 * sizeof(float));
         // Diagonal identity
-        for(CountT i = 0; i < 6; ++i) {
+        for(CountT i = 0; i < 3; ++i) {
             S[i * 6 + i] = 1.f;
         }
         // r^x Skew symmetric matrix
         Vector3 comPos = {
             body_phi.phi[0],
-            body_phi.phi[1], 
+            body_phi.phi[1],
             body_phi.phi[2]
         };
 
-        comPos -= origin;
-        S[0 + 6 * 4] = -comPos.z;
-        S[0 + 6 * 5] = comPos.y;
-        S[1 + 6 * 3] = comPos.z;
-        S[1 + 6 * 5] = -comPos.x;
-        S[2 + 6 * 3] = -comPos.y;
-        S[2 + 6 * 4] = comPos.x;
+        Mat3x3 rot = Mat3x3::fromQuat(Quat {
+            body_phi.phi[3],
+            body_phi.phi[4],
+            body_phi.phi[5],
+            body_phi.phi[6]
+        });
+
+        Vector3 offset = origin - comPos;
+        Mat3x3 rx_rot = Mat3x3::skewSym(offset) * rot;
+
+        for (int col = 3; col < 6; ++col) {
+            int m_col = col - 3;
+            S[col * 6 + 0] = rx_rot[0][m_col];
+            S[col * 6 + 1] = rx_rot[1][m_col];
+            S[col * 6 + 2] = rx_rot[2][m_col];
+            S[col * 6 + 3] = rot[0][m_col];
+            S[col * 6 + 4] = rot[1][m_col];
+            S[col * 6 + 5] = rot[2][m_col];
+        }
     } else if (dof_type == DofType::Slider) {
         // This is just the axis of the slider.
         S[0] = body_phi.phi[0];
@@ -262,39 +278,8 @@ void computePhi(
         S[4] = hinge.y;
         S[5] = hinge.z;
     } else if (dof_type == DofType::Ball) {
-        // This will just get right-multiplied by the angular velocity
-        Vector3 anchor_pos = {
-            body_phi.phi[0], 
-            body_phi.phi[1],
-            body_phi.phi[2]
-        };
-
-        anchor_pos -= origin;
-
-        // We need to right multiply these by the parent composed rotation
-        // matrix.
-        Mat3x3 rx = Mat3x3::skewSym(anchor_pos);
-
-        Quat parent_composed_rot = Quat {
-            body_phi.phi[3],
-            body_phi.phi[4],
-            body_phi.phi[5],
-            body_phi.phi[6]
-        };
-
-        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
-
-        rx *= parent_rot;
-
-        for (int col = 0; col < 3; ++col) {
-            S[col * 6 + 0] = rx[col][0];
-            S[col * 6 + 1] = rx[col][1];
-            S[col * 6 + 2] = rx[col][2];
-
-            S[col * 6 + 3] = parent_rot[col][0];
-            S[col * 6 + 4] = parent_rot[col][1];
-            S[col * 6 + 5] = parent_rot[col][2];
-        }
+        // TODO: revisit me
+        assert(false);
     } else {
         // MADRONA_UNREACHABLE();
     }
@@ -431,7 +416,6 @@ void computeSpatialInertiasAndPhi(Context &ctx,
 
     // Take only the upper triangular part (since it's symmetric)
     InertiaTensor& spatialInertia = mem.spatialVectors(prop)[obj_grp.idx].spatialInertia;
-
     spatialInertia.spatial_inertia[0] = inertia_mat[0][0];
     spatialInertia.spatial_inertia[1] = inertia_mat[1][1];
     spatialInertia.spatial_inertia[2] = inertia_mat[2][2];
@@ -618,7 +602,7 @@ inline void mulM(
 // Solves M^{-1}x, overwriting x. Based on Table 6.5 in Featherstone
 void solveM(
         BodyGroupProperties prop,
-        BodyGroupMemory mem, 
+        BodyGroupMemory mem,
         float* x)
 {
     CountT total_dofs = prop.qvDim;
@@ -672,6 +656,20 @@ void compositeRigidBody(
     uint32_t total_dofs = prop.qvDim;
     BodyOffsets *offsets = mem.offsets(prop);
     BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
+
+    // ----------------- Combine Spatial Inertias -----------------
+    uint32_t num_bodies = prop.numBodies;
+    MADRONA_GPU_SINGLE_THREAD {
+        for (CountT i = num_bodies-1; i > 0; --i) {
+            InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
+            uint32_t parent_idx = offsets[i].parent;
+            assert(parent_idx < 0xFF);
+
+            InertiaTensor& spatial_inertia_parent =
+                spatialVectors[parent_idx].spatialInertia;
+            spatial_inertia_parent += spatial_inertia;
+        }
+    }
 
     float *S =  mem.phiFull(prop);
     float *M = mem.massMatrix(prop);
@@ -819,19 +817,31 @@ void compositeRigidBody(
 }
 
 #else
-// CRB: Compute the Mass Matrix (n_dofs x n_dofs)
+// CRB: Compute the Mass Matrix of the body group (n_dofs x n_dofs)
 void compositeRigidBody(
         Context &,
         BodyGroupProperties prop,
         BodyGroupMemory mem)
 {
-    // ----------------- Composite rigid body -----------------
-    // Mass Matrix of this entire body group, column-major
-    uint32_t total_dofs = prop.qvDim;
     BodyOffsets *offsets = mem.offsets(prop);
     BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
 
-    float *S =  mem.phiFull(prop);
+    // ----------------- Combine Spatial Inertias -----------------
+    uint32_t num_bodies = prop.numBodies;
+    for (CountT i = num_bodies-1; i > 0; --i) {
+        InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
+        uint32_t parent_idx = offsets[i].parent;
+        assert(parent_idx < 0xFF);
+
+        InertiaTensor& spatial_inertia_parent =
+            spatialVectors[parent_idx].spatialInertia;
+        spatial_inertia_parent += spatial_inertia;
+    }
+
+    // ----------------- Composite rigid body -----------------
+    // Mass Matrix of this entire body group, column-major
+    uint32_t total_dofs = prop.qvDim;
+    float *S = mem.phiFull(prop);
     float *M = mem.massMatrix(prop);
     memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
 
@@ -937,7 +947,7 @@ void compositeRigidBody(
 
 
 // Recursive Newton Euler algorithm: Compute bias forces and gravity
-inline void rneAndCombineSpatialInertias(
+inline void recursiveNewtonEuler(
         Context &ctx,
         BodyGroupProperties prop,
         BodyGroupMemory mem)
@@ -1086,17 +1096,6 @@ inline void rneAndCombineSpatialInertias(
                 BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
                 parent_spatial_vector.sForce += spatial_vector.sForce;
             }
-        }
-
-        // ----------------- Combine Spatial Inertias -----------------
-        uint32_t num_bodies = prop.numBodies;
-        // Backward pass from children to parent
-        for (CountT i = num_bodies-1; i > 0; --i) {
-            InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
-            uint32_t parent_idx = (uint32_t)offsets[i].parent;
-            InertiaTensor& spatial_inertia_parent = 
-                spatialVectors[parent_idx].spatialInertia;
-            spatial_inertia_parent += spatial_inertia;
         }
     }
 }
@@ -1660,28 +1659,6 @@ void destroyHierarchies(Context &ctx,
     }
 }
 
-inline void combineSpatialInertias(Context &ctx,
-                                   InitBodyGroup body_grp)
-{
-    auto& m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
-    auto& p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
-
-    BodySpatialVectors* spatialVectors = m.spatialVectors(p);
-    BodyOffsets* offsets = m.offsets(p);
-
-    // Backward pass from children to parent
-    for (CountT i = p.numBodies - 1; i > 0; --i) {
-        InertiaTensor &spatial_inertia = spatialVectors[i].spatialInertia;
-        uint32_t parent_idx = (uint32_t)offsets[i].parent;
-
-        assert(parent_idx < 0xFF);
-
-        InertiaTensor& spatial_inertia_parent = 
-            spatialVectors[parent_idx].spatialInertia;
-        spatial_inertia_parent += spatial_inertia;
-    }
-}
-
 inline float * computeBodyJacobian(BodyGroupMemory &m,
                                    BodyGroupProperties &p,
                                    uint8_t cur_body_idx,
@@ -1739,7 +1716,7 @@ inline void computeInvMassGPU(
     auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
                     num_smem_bytes_per_warp * warp_id;
 
-    uint32_t num_bytes_per_body = sizeof(float) * 
+    uint32_t num_bytes_per_body = sizeof(float) *
         (36 + 2 * 6 * p.qvDim);
 
     uint32_t bodies_in_smem = std::min(
@@ -1748,7 +1725,7 @@ inline void computeInvMassGPU(
 
     float *gmem_buf = nullptr;
     if (lane_id == 0 && bodies_in_smem < 32) {
-        uint32_t to_allocate = std::min(p.numBodies - bodies_in_smem, 
+        uint32_t to_allocate = std::min(p.numBodies - bodies_in_smem,
                                         32 - bodies_in_smem);
 
         if (to_allocate) {
@@ -1762,8 +1739,8 @@ inline void computeInvMassGPU(
     float *data_start = nullptr;
     if (lane_id < bodies_in_smem) {
         data_start = (float *)(
-            (uint8_t *)smem_buf + 
-                       lane_id * num_bytes_per_body); 
+            (uint8_t *)smem_buf +
+                       lane_id * num_bytes_per_body);
     } else if (lane_id < p.numBodies) {
         data_start = (float *)
             ((uint8_t *)gmem_buf +
@@ -1896,7 +1873,7 @@ inline void computeInvMassGPU(
 
             // Update the inverse mass of each DOF
             if (offset.numDofs == 6) {
-               dof_inertial.approxInvMassDof[0] = 
+               dof_inertial.approxInvMassDof[0] =
                    dof_inertial.approxInvMassDof[1] =
                    dof_inertial.approxInvMassDof[2] =
                    (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
@@ -1977,6 +1954,16 @@ inline void computeInvMass(
         auto Jb = [&](int32_t row, int32_t col) -> float& {
             return J[row + 6 * col];
         };
+
+        // print J
+        for (int i = 0; i < 6; ++i) {
+            for (int j = 0; j < p.qvDim; ++j) {
+                printf("%f ", Jb(i, j));
+            }
+            printf("\n");
+        }
+
+
         auto MinvJTb = [&](int32_t row, int32_t col) -> float& {
             return MinvJT[row + p.qvDim * col];
         };
@@ -2070,7 +2057,7 @@ inline void computeInvMass(
 
         // Update the inverse mass of each DOF
         if (offset.numDofs == 6) {
-           dof_inertial.approxInvMassDof[0] = 
+           dof_inertial.approxInvMassDof[0] =
                dof_inertial.approxInvMassDof[1] =
                dof_inertial.approxInvMassDof[2] =
                (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
@@ -2095,7 +2082,7 @@ inline void integrationStep(Context &ctx,
                             DofObjectGroup grp_info)
 {
     float h = ctx.singleton<PhysicsSystemState>().h;
-    
+
     if (!ctx.singleton<CVSolveData>().enablePhysics) {
         return;
     }
@@ -2122,19 +2109,19 @@ inline void integrationStep(Context &ctx,
         Vector3 omega = { qv[3], qv[4], qv[5] };
         Quat rot_quat = { q[3], q[4], q[5], q[6] };
         Quat new_rot = {rot_quat.w, rot_quat.x, rot_quat.y, rot_quat.z};
-        new_rot.w += 0.5f * h * (-rot_quat.x * omega.x - 
-                                 rot_quat.y * omega.y - 
+        new_rot.w += 0.5f * h * (-rot_quat.x * omega.x -
+                                 rot_quat.y * omega.y -
                                  rot_quat.z * omega.z);
 
-        new_rot.x += 0.5f * h * (rot_quat.w * omega.x + 
+        new_rot.x += 0.5f * h * (rot_quat.w * omega.x +
                                  rot_quat.z * omega.y -
                                  rot_quat.y * omega.z);
-        
-        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x + 
+
+        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x +
                                  rot_quat.w * omega.y +
                                  rot_quat.x * omega.z);
 
-        new_rot.z += 0.5f * h * (rot_quat.y * omega.x - 
+        new_rot.z += 0.5f * h * (rot_quat.y * omega.x -
                                  rot_quat.x * omega.y +
                                  rot_quat.w * omega.z);
 
@@ -2174,7 +2161,7 @@ inline void integrationStep(Context &ctx,
                                  rot_quat.z * omega.y -
                                  rot_quat.y * omega.z);
 
-        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x + 
+        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x +
                                  rot_quat.w * omega.y +
                                  rot_quat.x * omega.z);
 
@@ -2233,23 +2220,17 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
 
 #ifdef MADRONA_GPU_MODE
     cur_node = builder.addToGraph<CustomParallelForNode<Context,
-         tasks::rneAndCombineSpatialInertias, 32, 1,
+         tasks::recursiveNewtonEuler, 32, 1,
             BodyGroupProperties,
             BodyGroupMemory
         >>({cur_node});
 #else
     cur_node = builder.addToGraph<ParallelForNode<Context,
-         tasks::rneAndCombineSpatialInertias,
+         tasks::recursiveNewtonEuler,
             BodyGroupProperties,
             BodyGroupMemory
         >>({cur_node});
 #endif
-
-    // Only run combine spatial inertias on initialization, skipping RNE
-    cur_node = builder.addToGraph<ParallelForNode<Context,
-         tasks::combineSpatialInertias,
-            InitBodyGroup
-        >>({cur_node});
 
 #ifdef MADRONA_GPU_MODE
     cur_node = builder.addToGraph<CustomParallelForNode<Context,
@@ -2285,7 +2266,7 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
         >>({cur_node});
 
     // Only run contact processing on initialization
-    cur_node = builder.addToGraph<ParallelForNode<Context, 
+    cur_node = builder.addToGraph<ParallelForNode<Context,
         tasks::convertPostSolve,
             Entity,
             Position,
