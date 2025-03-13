@@ -240,12 +240,12 @@ void computePhi(
 
         for (int col = 3; col < 6; ++col) {
             int m_col = col - 3;
-            S[col * 6 + 0] = rx_rot[0][m_col];
-            S[col * 6 + 1] = rx_rot[1][m_col];
-            S[col * 6 + 2] = rx_rot[2][m_col];
-            S[col * 6 + 3] = rot[0][m_col];
-            S[col * 6 + 4] = rot[1][m_col];
-            S[col * 6 + 5] = rot[2][m_col];
+            S[col * 6 + 0] = rx_rot[m_col][0];
+            S[col * 6 + 1] = rx_rot[m_col][1];
+            S[col * 6 + 2] = rx_rot[m_col][2];
+            S[col * 6 + 3] = rot[m_col][0];
+            S[col * 6 + 4] = rot[m_col][1];
+            S[col * 6 + 5] = rot[m_col][2];
         }
     } else if (dof_type == DofType::Slider) {
         // This is just the axis of the slider.
@@ -292,22 +292,35 @@ void computePhiTrans(DofType dof_type,
                      float (&S)[18])
 {
     if (dof_type == DofType::FreeBody) {
+        // S = [1_3x3 r^xR^T], col-major
         memset(S, 0.f, 6 * 3 * sizeof(float));
+        // Diagonal identity
         for(CountT i = 0; i < 3; ++i) {
             S[i * 3 + i] = 1.f;
         }
+        // r^x Skew symmetric matrix
         Vector3 comPos = {
             body_phi.phi[0],
             body_phi.phi[1],
-            body_phi.phi[2],
+            body_phi.phi[2]
         };
-        comPos -= origin;
-        S[0 + 3 * 4] = -comPos.z;
-        S[0 + 3 * 5] = comPos.y;
-        S[1 + 3 * 3] = comPos.z;
-        S[1 + 3 * 5] = -comPos.x;
-        S[2 + 3 * 3] = -comPos.y;
-        S[2 + 3 * 4] = comPos.x;
+
+        Mat3x3 rot = Mat3x3::fromQuat(Quat {
+            body_phi.phi[3],
+            body_phi.phi[4],
+            body_phi.phi[5],
+            body_phi.phi[6]
+        });
+
+        Vector3 offset = origin - comPos;
+        Mat3x3 rx_rot = Mat3x3::skewSym(offset) * rot;
+
+        for (int col = 3; col < 6; ++col) {
+            int m_col = col - 3;
+            S[col * 3 + 0] = rx_rot[m_col][0];
+            S[col * 3 + 1] = rx_rot[m_col][1];
+            S[col * 3 + 2] = rx_rot[m_col][2];
+        }
     }
     else if (dof_type == DofType::Slider) {
         S[0] = body_phi.phi[0];
@@ -332,26 +345,8 @@ void computePhiTrans(DofType dof_type,
         S[2] = r_cross_hinge.z;
     }
     else if (dof_type == DofType::Ball) {
-        Vector3 anchor_pos = {
-            body_phi.phi[0],
-            body_phi.phi[1],
-            body_phi.phi[2],
-        };
-        anchor_pos -= origin;
-        Mat3x3 rx = Mat3x3::skewSym(anchor_pos);
-        Quat parent_composed_rot = Quat{
-            body_phi.phi[3],
-            body_phi.phi[4],
-            body_phi.phi[5],
-            body_phi.phi[6]
-        };
-        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
-        rx *= parent_rot;
-        for (int col = 0; col < 3; ++col) {
-            S[col * 3 + 0] = rx[col][0];
-            S[col * 3 + 1] = rx[col][1];
-            S[col * 3 + 2] = rx[col][2];
-        }
+        // TODO: revisit me
+        assert(false);
     }
     else {
         // MADRONA_UNREACHABLE();
@@ -1956,6 +1951,7 @@ inline void computeInvMass(
         };
 
         // print J
+        printf("---\n");
         for (int i = 0; i < 6; ++i) {
             for (int j = 0; j < p.qvDim; ++j) {
                 printf("%f ", Jb(i, j));
