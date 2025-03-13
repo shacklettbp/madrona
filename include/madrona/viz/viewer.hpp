@@ -56,13 +56,25 @@ public:
 
     void configureLighting(Span<const render::LightConfig> lights);
 
+    // Run the viewer without the loop() function
+    void setup();
+    bool isFinished();
+
+    template <typename WorldInputFn, typename AgentInputFn,
+              typename UIFn>
+    bool acquireFrame(WorldInputFn &&world_input_fn,
+                      AgentInputFn &&agent_input_fn,
+                      UIFn &&ui_fn);
+    template <typename UIFn>
+    void commitFrame(UIFn &&ui_fn);
+
     // Run the viewer
     template <typename WorldInputFn, typename AgentInputFn,
               typename StepFn, typename UIFn>
     void loop(WorldInputFn &&world_input_fn, AgentInputFn &&agent_input_fn,
               StepFn &&step_fn, UIFn &&ui_fn);
-
     void stopLoop();
+
 
     CountT getCurrentWorldID() const;
     CountT getCurrentViewID() const;
@@ -75,6 +87,16 @@ private:
         void (*agent_input_fn)(void *, CountT, CountT, const UserInput &),
         void *agent_input_data,
         void (*step_fn)(void *), void *step_data,
+        void (*ui_fn)(void *), void *ui_data);
+
+    bool acquireFrame(
+        void (*world_input_fn)(void *, CountT, const UserInput &),
+        void *world_input_data,
+        void (*agent_input_fn)(void *, CountT, CountT, const UserInput &),
+        void *agent_input_data,
+        void (*ui_fn)(void *), void *ui_data);
+
+    void commitFrame(
         void (*ui_fn)(void *), void *ui_data);
 
     struct Impl;

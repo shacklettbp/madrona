@@ -42,10 +42,39 @@ struct Viewer::Impl {
     float cameraMoveSpeed;
     bool shouldExit;
 
+    bool allowedStep;
+    std::chrono::steady_clock::time_point lastSimTickTime;
+    std::chrono::steady_clock::time_point curFrameStartTime;
+    float frameDuration;
+    std::chrono::duration<float> simDeltaT;
+
+    std::array<bool, (size_t)KeyboardKey::NumKeys> keyState;
+    std::array<bool, (size_t)KeyboardKey::NumKeys> pressState;
+    std::array<bool, (size_t)KeyboardKey::NumKeys> prevKeyState;
+    std::array<int, (size_t)KeyboardKey::NumKeys> glfwKeys;
+
     inline Impl(const render::RenderManager &render_mgr,
                 const Window *window,
                 const Viewer::Config &cfg);
 
+    /* If you don't want to use loop() */
+    inline void setup();
+    inline bool isFinished();
+    inline bool acquireFrame(
+        void (*world_input_fn)(void *, CountT, const UserInput &),
+        void *world_input_data,
+        void (*agent_input_fn)(void *, CountT, CountT, const UserInput &),
+        void *agent_input_data,
+        void (*ui_fn)(void *),
+        void *ui_data);
+    inline void commitFrame(
+        void (*ui_fn)(void *),
+        void *ui_data);
+
+
+
+
+    /* Only used by loop() */
     inline bool startFrame();
 
     // This is going to render all the views which were registered
@@ -564,6 +593,150 @@ Viewer::UserInput::UserInput(bool *keys_state, bool *press_state)
     : keys_state_(keys_state), press_state_(press_state)
 {}
 
+void Viewer::Impl::setup()
+{
+    GLFWwindow *window = renderer.osWindow();
+
+    utils::zeroN<bool>(prevKeyState.data(), prevKeyState.size());
+
+#define SETGLFWKEY(KB) \
+    glfwKeys[(size_t)KeyboardKey::KB] = GLFW_KEY_##KB
+
+    SETGLFWKEY(A);
+    SETGLFWKEY(B);
+    SETGLFWKEY(C);
+    SETGLFWKEY(D);
+    SETGLFWKEY(E);
+    SETGLFWKEY(F);
+    SETGLFWKEY(G);
+    SETGLFWKEY(H);
+    SETGLFWKEY(I);
+    SETGLFWKEY(J);
+    SETGLFWKEY(K);
+    SETGLFWKEY(L);
+    SETGLFWKEY(M);
+    SETGLFWKEY(N);
+    SETGLFWKEY(O);
+    SETGLFWKEY(P);
+    SETGLFWKEY(Q);
+    SETGLFWKEY(R);
+    SETGLFWKEY(S);
+    SETGLFWKEY(T);
+    SETGLFWKEY(U);
+    SETGLFWKEY(V);
+    SETGLFWKEY(W);
+    SETGLFWKEY(X);
+    SETGLFWKEY(Y);
+    SETGLFWKEY(Z);
+
+#undef SETGLFWKEY
+
+    glfwKeys[(size_t)KeyboardKey::K1] = GLFW_KEY_1;
+    glfwKeys[(size_t)KeyboardKey::K2] = GLFW_KEY_2;
+    glfwKeys[(size_t)KeyboardKey::K3] = GLFW_KEY_3;
+    glfwKeys[(size_t)KeyboardKey::K4] = GLFW_KEY_4;
+    glfwKeys[(size_t)KeyboardKey::K5] = GLFW_KEY_5;
+    glfwKeys[(size_t)KeyboardKey::K6] = GLFW_KEY_6;
+    glfwKeys[(size_t)KeyboardKey::K7] = GLFW_KEY_7;
+    glfwKeys[(size_t)KeyboardKey::K8] = GLFW_KEY_8;
+    glfwKeys[(size_t)KeyboardKey::K9] = GLFW_KEY_9;
+    glfwKeys[(size_t)KeyboardKey::K0] = GLFW_KEY_0;
+
+    glfwKeys[(size_t)KeyboardKey::Shift] = GLFW_KEY_LEFT_SHIFT;
+    glfwKeys[(size_t)KeyboardKey::Space] = GLFW_KEY_SPACE;
+
+    frameDuration = InternalConfig::secondsPerFrame;
+    lastSimTickTime = chrono::steady_clock::now();
+}
+
+bool Viewer::Impl::isFinished()
+{
+    GLFWwindow *window = renderer.osWindow();
+    return glfwWindowShouldClose(window) || shouldExit;
+}
+
+bool Viewer::Impl::acquireFrame(
+    void (*world_input_fn)(void *, CountT, const UserInput &),
+    void *world_input_data,
+    void (*agent_input_fn)(void *, CountT, CountT, const UserInput &),
+    void *agent_input_data,
+    void (*ui_fn)(void *),
+    void *ui_data)
+{
+    GLFWwindow *window = renderer.osWindow();
+
+    bool got_frame = false;
+    while (!got_frame) {
+        utils::zeroN<bool>(keyState.data(), keyState.size());
+        utils::zeroN<bool>(pressState.data(), pressState.size());
+
+        for (CountT i = 0; i < (CountT)KeyboardKey::NumKeys; i++) {
+            keyState[i] = glfwGetKey(window, glfwKeys[i]) == GLFW_PRESS;
+            pressState[i] = !prevKeyState[i] && keyState[i];
+        }
+
+        if (vizCtrl.controlIdx == 0) {
+            handleCamera(window, vizCtrl.flyCam, cameraMoveSpeed);
+        }
+
+        curFrameStartTime = chrono::steady_clock::now();
+        simDeltaT = chrono::duration<float>(1.f / (float)simTickRate);
+
+        bool success = startFrame();
+
+        if (success) {
+            got_frame = true;
+        }
+    }
+
+    if (got_frame) {
+        auto time_diff = curFrameStartTime - lastSimTickTime;
+
+        if (time_diff >= simDeltaT) {
+            prevKeyState = keyState;
+            UserInput user_input(keyState.data(), pressState.data());
+
+            world_input_fn(world_input_data, vizCtrl.worldIdx, user_input);
+
+            if (vizCtrl.controlIdx != 0) {
+                agent_input_fn(agent_input_data, vizCtrl.worldIdx,
+                         vizCtrl.controlIdx - 1, user_input);
+            }
+
+            allowedStep = true;
+        } else {
+            ui_fn(ui_data);
+
+            render(frameDuration);
+
+            frameDuration = throttleFPS(curFrameStartTime);
+
+            allowedStep = false;
+        }
+    } else {
+        allowedStep = false;
+    }
+
+    return allowedStep;
+}
+
+void Viewer::Impl::commitFrame(
+    void (*ui_fn)(void *),
+    void *ui_data)
+{
+    if (allowedStep) {
+        lastSimTickTime = curFrameStartTime;
+
+        ui_fn(ui_data);
+
+        render(frameDuration);
+
+        frameDuration = throttleFPS(curFrameStartTime);
+    }
+}
+
+
+
 void Viewer::Impl::loop(
     void (*world_input_fn)(void *, CountT, const UserInput &),
     void *world_input_data,
@@ -709,6 +882,34 @@ void Viewer::loop(
     impl_->loop(world_input_fn, world_input_data,
                 agent_input_fn, agent_input_data,
                 step_fn, step_data, ui_fn, ui_data);
+}
+
+void Viewer::setup()
+{
+    impl_->setup();
+}
+
+bool Viewer::isFinished()
+{
+    return impl_->isFinished();
+}
+
+bool Viewer::acquireFrame(
+    void (*world_input_fn)(void *, CountT, const UserInput &),
+    void *world_input_data,
+    void (*agent_input_fn)(void *, CountT, CountT, const UserInput &),
+    void *agent_input_data,
+    void (*ui_fn)(void *), void *ui_data)
+{
+    return impl_->acquireFrame(world_input_fn, world_input_data,
+                               agent_input_fn, agent_input_data,
+                               ui_fn, ui_data);
+}
+
+void Viewer::commitFrame(
+    void (*ui_fn)(void *), void *ui_data)
+{
+    impl_->commitFrame(ui_fn, ui_data);
 }
 
 void Viewer::stopLoop()

@@ -46,4 +46,48 @@ void Viewer::loop(WorldInputFn &&world_input_fn, AgentInputFn &&agent_input_fn,
     }, ui_data);
 }
 
+template <typename WorldInputFn, typename AgentInputFn,
+          typename UIFn>
+bool Viewer::acquireFrame(WorldInputFn &&world_input_fn,
+                          AgentInputFn &&agent_input_fn,
+                          UIFn &&ui_fn)
+{
+    void *world_input_data = &world_input_fn;
+    void *agent_input_data = &agent_input_fn;
+    void *ui_data = &ui_fn;
+
+    return acquireFrame([](
+        void *world_input_data,
+        CountT world_idx,
+        const UserInput &input)
+    {
+        auto *lambda_ptr = (WorldInputFn *)world_input_data;
+        (*lambda_ptr)(world_idx, input);
+    }, world_input_data, [](
+        void *agent_input_data,
+        CountT world_idx,
+        CountT agent_idx,
+        const UserInput &input)
+    {
+        auto *lambda_ptr = (AgentInputFn *)agent_input_data;
+        (*lambda_ptr)(world_idx, agent_idx, input);
+    }, agent_input_data, [](void *ui_data)
+    {
+        auto *lambda_ptr = (UIFn *)ui_data;
+        (*lambda_ptr)();
+    }, ui_data);
+}
+
+template <typename UIFn>
+void Viewer::commitFrame(UIFn &&ui_fn)
+{
+    void *ui_data = &ui_fn;
+
+    commitFrame([](void *ui_data)
+    {
+        auto *lambda_ptr = (UIFn *)ui_data;
+        (*lambda_ptr)();
+    }, ui_data);
+}
+
 }
