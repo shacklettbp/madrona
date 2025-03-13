@@ -1511,9 +1511,6 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                     obj_id = physics_asset_paths.size();
                     physics_asset_paths.push_back(collision.geometry.mesh.filename);
 
-                    printf("Collision object %d has path %s\n",
-                        obj_id, collision.geometry.mesh.filename.c_str());
-                    
                     auto [new_it, is_inserted] =
                         col_path_to_obj.emplace(collision.geometry.mesh.filename, obj_id);
                     assert(is_inserted);
@@ -1551,8 +1548,6 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                 assert(false);
             } break;
             }
-
-            printf("Body %d (%s) has collider obj=%d\n", l, link.name.c_str(), obj_id);
 
             CollisionDesc coll_desc = {
                 .objID = obj_id,
@@ -1593,7 +1588,6 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                 } else {
                     obj_id = (int32_t)render_asset_paths.size();
 
-                    printf("pushing render filename %s\n", filename.c_str());
                     render_asset_paths.push_back(filename);
                     
                     auto [new_it, is_inserted] =
