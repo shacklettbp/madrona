@@ -548,6 +548,8 @@ void attachLimit(
     l.type = BodyLimitConstraint::Type::Hinge;
     l.bodyIdx = body_info.idx;
     l.hinge = hinge_limit;
+
+    m.q(p)[offsets[body_info.idx].posOffset] = (hinge_limit.lower + hinge_limit.upper) / 2.f;
 }
 
 void attachLimit(
@@ -570,6 +572,8 @@ void attachLimit(
     l.type = BodyLimitConstraint::Type::Slider;
     l.bodyIdx = body_info.idx;
     l.slider = slider_limit;
+
+    m.q(p)[offsets[body_info.idx].posOffset] = (slider_limit.lower + slider_limit.upper) / 2.f;
 }
 
 void markReset(Context &ctx, Entity body_grp)
