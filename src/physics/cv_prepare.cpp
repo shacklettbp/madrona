@@ -215,7 +215,7 @@ void computePhi(
     Vector3 origin)
 {
     if (dof_type == DofType::FreeBody) {
-        // S = [1_3x3 r^xR^T; 0 R^T], row-major
+        // S = [1_3x3 r^x R; 0 R^T], row-major
         memset(S, 0.f, 6 * 6 * sizeof(float));
         // Diagonal identity
         for(CountT i = 0; i < 3; ++i) {
@@ -292,7 +292,7 @@ void computePhiTrans(DofType dof_type,
                      float (&S)[18])
 {
     if (dof_type == DofType::FreeBody) {
-        // S = [1_3x3 r^xR^T], col-major
+        // S = [1_3x3 r^x R], col-major
         memset(S, 0.f, 6 * 3 * sizeof(float));
         // Diagonal identity
         for(CountT i = 0; i < 3; ++i) {
@@ -432,7 +432,7 @@ void computeSpatialInertiasAndPhi(Context &ctx,
     BodyPhi* phis = mem.bodyPhi(prop);
 
     uint32_t velOffset = offset.velOffset;
-    uint32_t S_offset = 2 * 6 * velOffset;
+    uint32_t S_offset = 6 * velOffset;
     float* S = mem.phiFull(prop) + S_offset;
 
     uint8_t *max_ptr = (uint8_t *)mem.tmpPtr +
@@ -825,7 +825,7 @@ void compositeRigidBody(
     uint32_t num_bodies = prop.numBodies;
     for (CountT i = num_bodies-1; i > 0; --i) {
         InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
-        uint32_t parent_idx = offsets[i].parent;
+        uint32_t parent_idx = offsets[i].parentWithDof;  // (don't include fixed bodies)
         assert(parent_idx < 0xFF);
 
         InertiaTensor& spatial_inertia_parent =
@@ -835,60 +835,47 @@ void compositeRigidBody(
 
     // ----------------- Composite rigid body -----------------
     // Mass Matrix of this entire body group, column-major
+    int32_t *expandedParent = mem.expandedParent(prop);
     uint32_t total_dofs = prop.qvDim;
     float *S = mem.phiFull(prop);
     float *M = mem.massMatrix(prop);
     memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
+    auto qM = [&](int32_t row, int32_t col) -> float& {
+        return M[row + total_dofs * col];
+    };
 
-    // Backward pass
-    for (CountT i = prop.numBodies-1; i >= 0; --i) {
-        uint32_t velOffset = offsets[i].velOffset;
-        uint32_t S_offset = 2 * 6 * velOffset;
-        uint32_t num_dofs = BodyOffsets::getDofTypeDim(offsets[i].dofType);
-        float* S_i = S + S_offset;
 
-        float *F = mem.scratch(prop);
-
-        for(CountT col = 0; col < num_dofs; ++col) {
-            float *S_col = S_i + 6 * col;
-            float *F_col = F + 6 * col;
-            spatialVectors[i].spatialInertia.multiply(S_col, F_col);
+    // TODO: don't recompute this
+    /// map from dof index to body index
+    uint32_t dof_to_body[prop.qvDim];
+    uint32_t num_processed_dofs = 0;
+    for (uint32_t i = 0; i < prop.numBodies; ++i) {
+        BodyOffsets body_offset = offsets[i];
+        DofType dof_type = body_offset.dofType;
+        CountT num_dofs = BodyOffsets::getDofTypeDim(dof_type);
+        for (CountT j = 0; j < BodyOffsets::getDofTypeDim(dof_type); ++j) {
+            dof_to_body[num_processed_dofs + j] = i;
         }
+        num_processed_dofs += num_dofs;
+    }
 
-        // M_{ii} = S_i^T I_i^C S_i = F^T S_i
-        float *M_ii = M + velOffset * total_dofs + velOffset;
-        for(CountT row = 0; row < num_dofs; ++row) {
-            float *F_col = F + 6 * row; // take col for transpose
-            for(CountT col = 0; col < num_dofs; ++col) {
-                float *S_col = S_i + 6 * col;
-                for(CountT k = 0; k < 6; ++k) {
-                    M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
-                }
+    float *buf = mem.scratch(prop);
+    for (int32_t i = 0; i < total_dofs; ++i) {
+        // buf = I_i * S_i
+        InertiaTensor &I_body = spatialVectors[dof_to_body[i]].spatialInertia;
+        float *S_i = S + 6 * i;
+        I_body.multiply(S_i, buf);
+
+        // M_{i,j} += S_j^T * I_i * S_i
+        for (int32_t j = i; j != -1; j = expandedParent[j]) {
+            float *S_j = S + 6 * j;
+            float a = S_j[0] * buf[0] + S_j[1] * buf[1] + S_j[2] * buf[2] +
+                      S_j[3] * buf[3] + S_j[4] * buf[4] + S_j[5] * buf[5];
+            qM(i, j) += a;
+            // M_{j,i} = M_{i,j}
+            if (j != i) {
+                qM(j, i) += a;
             }
-        }
-
-        // Traverse up hierarchy
-        uint8_t j = offsets[i].parent;
-        while(j != 0xFF) {
-            uint32_t velOffset_j = offsets[j].velOffset;
-            uint32_t S_offset_j = 2 * 6 * velOffset_j;
-            uint32_t j_num_dofs = BodyOffsets::getDofTypeDim(offsets[j].dofType);
-            float *S_j = S + S_offset_j;
-
-            // M_{ij} = M{ji} = F^T S_j
-            float *M_ij = M + velOffset + total_dofs * velOffset_j; // row i, col j
-            float *M_ji = M + velOffset_j + total_dofs * velOffset; // row j, col i
-            for(CountT row = 0; row < num_dofs; ++row) {
-                float *F_col = F + 6 * row; // take col for transpose
-                for(CountT col = 0; col < j_num_dofs; ++col) {
-                    float *S_col = S_j + 6 * col;
-                    for(CountT k = 0; k < 6; ++k) {
-                        M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
-                        M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
-                    }
-                }
-            }
-            j = offsets[j].parent;
         }
     }
 
@@ -896,13 +883,9 @@ void compositeRigidBody(
     // First copy M to LTDL
     float *LTDL = mem.massLTDLMatrix(prop);
     memcpy(LTDL, M, total_dofs * total_dofs * sizeof(float));
-
-    // Helper
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
         return LTDL[row + total_dofs * col];
     };
-
-    int32_t *expandedParent = mem.expandedParent(prop);
 
     // Backward pass through DOFs
     for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
@@ -968,7 +951,7 @@ inline void recursiveNewtonEuler(
 
             uint32_t num_dofs = BodyOffsets::getDofTypeDim(dof_type);
             uint32_t velOffset = body_offset.velOffset;
-            uint32_t S_offset = 2 * 6 * velOffset;
+            uint32_t S_offset = 6 * velOffset;
             // uint32_t S_dot_offset = S_offset + 6 * num_dofs;
 
             float *velocity = qv + velOffset;
@@ -1074,7 +1057,7 @@ inline void recursiveNewtonEuler(
             BodySpatialVectors& spatial_vector = spatialVectors[i];
             uint32_t num_dofs = BodyOffsets::getDofTypeDim(body_offset.dofType);
             uint32_t velOffset = body_offset.velOffset;
-            uint32_t S_offset = 2 * 6 * velOffset;
+            uint32_t S_offset = 6 * velOffset;
 
             // tau_i = S_i^T f_i
             dof_index -= num_dofs;
@@ -1526,7 +1509,6 @@ inline void computeExpandedParent(Context &ctx,
                                   BodyGroupProperties p)
 {
     BodyOffsets *offsets = m.offsets(p);
-    BodyInertial *inertials = m.inertials(p);
     uint32_t* is_static = m.isStatic(p);
     int32_t *expandedParent = m.expandedParent(p);
     uint8_t *max_ptr = (uint8_t *)m.qVectorsPtr +
@@ -1536,32 +1518,29 @@ inline void computeExpandedParent(Context &ctx,
     for(int32_t i = 1; i < p.numBodies; ++i) {
         BodyOffsets &current_offset = offsets[i];
         uint8_t parent_idx = offsets[i].parent;
-        if(parent_idx == 0xFF) {
-            continue;
-        }
+        assert(parent_idx != 0xFF); // Can't have a root body
+        current_offset.parentWithDof = parent_idx;
+        // If it turns out that the parent is a fixed body, keep going up
         BodyOffsets parent_offset = offsets[parent_idx];
-        if(parent_offset.numDofs > 0) {
-            current_offset.parentWithDof = parent_idx;
-        } else {
+        if(parent_offset.numDofs == 0) {
             current_offset.parentWithDof = parent_offset.parentWithDof;
         }
     }
+
 
     // Initialize n-N_B elements
     expandedParent[0] = -1;
     for(int32_t i = 1; i < (int32_t)p.qvDim; ++i) {
         expandedParent[i] = i - 1;
     }
-
     // Create a mapping from body index to start of block
     int32_t *map = (int32_t *)ctx.tmpAlloc(sizeof(int32_t) * p.numBodies);
 
-    float total_static_mass = 0.f; // Total mass of all the static bodies
     // First sweep
     for(int32_t i = 0; i < p.numBodies; ++i) {
         uint32_t n_i = offsets[i].numDofs;
         if (i == 0) {
-            map[i] = -1;
+            map[i] = -1 + (int32_t) n_i;
         } else {
             map[i] = map[i - 1] + (int32_t) n_i;
         }
@@ -1569,23 +1548,16 @@ inline void computeExpandedParent(Context &ctx,
         // Whether this body is fixed and root (or fixed and parent is fixed root)
         if(map[i] == -1 && offsets[i].dofType == DofType::FixedBody) {
             is_static[i] = 1;
-            total_static_mass += inertials[i].mass;
         } else {
             is_static[i] = 0;
         }
     }
+
     // Finish expanded parent array
     for(int32_t i = 1; i < p.numBodies; ++i) {
-        int32_t parent_idx = (int32_t)(offsets[i].parent == 0xFF ? -1 :
-                                       offsets[i].parent);
+        int32_t parent_idx = offsets[i].parent;
         expandedParent[map[i - 1] + 1] = map[parent_idx];
         ASSERT_PTR_ACCESS(expandedParent, (map[i - 1] + 1), max_ptr);
-
-        // FIXME: this messes up the COMpos and everything following
-        //  it really is only needed for inverse mass calc for contacts
-        // if(is_static[i]) {
-        //     inertials[i].mass = total_static_mass;
-        // }
     }
 }
 
@@ -1671,7 +1643,7 @@ inline float * computeBodyJacobian(BodyGroupMemory &m,
     while(cur_body_idx != 0xFF) {
         BodyOffsets cur_offset = offsets[cur_body_idx];
 
-        float *S = m.phiFull(p) + 2 * 6 * cur_offset.velOffset;
+        float *S = m.phiFull(p) + 6 * cur_offset.velOffset;
 
         // Populate columns of J_C
         computePhi(cur_offset.dofType, phis[cur_body_idx], S, origin);
@@ -1950,14 +1922,14 @@ inline void computeInvMass(
             return J[row + 6 * col];
         };
 
-        // print J
-        printf("---\n");
-        for (int i = 0; i < 6; ++i) {
-            for (int j = 0; j < p.qvDim; ++j) {
-                printf("%f ", Jb(i, j));
-            }
-            printf("\n");
-        }
+        // // print J
+        // printf("---\n");
+        // for (int i = 0; i < 6; ++i) {
+        //     for (int j = 0; j < p.qvDim; ++j) {
+        //         printf("%f ", Jb(i, j));
+        //     }
+        //     printf("\n");
+        // }
 
 
         auto MinvJTb = [&](int32_t row, int32_t col) -> float& {
@@ -1976,7 +1948,7 @@ inline void computeInvMass(
         // M^{-1} J^T
         for (CountT i = 0; i < 6; ++i) {
             float *col = MinvJT + i * p.qvDim;
-            solveM( p, m, col);
+            solveM(p, m, col);
         }
 
         // A = J M^{-1} J^T

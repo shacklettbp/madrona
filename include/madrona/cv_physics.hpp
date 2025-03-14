@@ -263,11 +263,8 @@ struct BodyGroupMemory {
     inline float * biasVector(BodyGroupProperties);
     inline float * massMatrix(BodyGroupProperties);
     inline float * massLTDLMatrix(BodyGroupProperties);
-    // For a body at index i,
-    // For phi use     phiFull(p) + 2 * 6 * bodyOffsets[i].velOffset0
-    // For phi_dot use phiFull(p) + 2 * 6 * bodyOffsets[i].velOffset + 
-    //                              2 * 6 * BodyOffsets::getDofTypeDim(bodyOffsets[i].type)
     inline float * phiFull(BodyGroupProperties);
+    inline float * phiDot(BodyGroupProperties);
     inline float * scratch(BodyGroupProperties);
 
     static inline uint32_t qVectorsNumBytes(BodyGroupProperties p);

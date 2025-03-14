@@ -56,7 +56,8 @@ float * BodyGroupMemory::biasVector(BodyGroupProperties p) { return (float *)(sp
 float * BodyGroupMemory::massMatrix(BodyGroupProperties p) { return (float *)(biasVector(p) + p.qvDim); }
 float * BodyGroupMemory::massLTDLMatrix(BodyGroupProperties p) { return (float *)(massMatrix(p) + p.qvDim * p.qvDim); }
 float * BodyGroupMemory::phiFull(BodyGroupProperties p) { return (float *)(massLTDLMatrix(p) + p.qvDim * p.qvDim); }
-inline float * BodyGroupMemory::scratch(BodyGroupProperties p) { return (float *)(phiFull(p) + p.qvDim * 2 * 6); }
+float * BodyGroupMemory::phiDot(BodyGroupProperties p) { return (float *)(phiFull(p) + p.qvDim * 6); }
+inline float * BodyGroupMemory::scratch(BodyGroupProperties p) { return (float *)(phiDot(p) + p.qvDim * 6); }
 
 inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
 {
@@ -68,7 +69,7 @@ inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
            p.numEq * sizeof(BodyLimitConstraint) +  // equalities
            p.numBodies * sizeof(BodyInertial) +     // inertias
            p.qvDim * sizeof(int32_t) +              // expanded parent
-           p.numBodies * sizeof(uint32_t) +             // fixed root status
+           p.numBodies * sizeof(uint32_t) +         // fixed root status
            p.numObjData * sizeof(BodyObjectData) +  // body object data
            p.numBodies * sizeof(BodyHierarchy) +    // body hierarchy
            p.numBodies * sizeof(Entity) +           // Entity list
@@ -84,7 +85,7 @@ inline uint32_t BodyGroupMemory::tmpNumBytes(BodyGroupProperties p)
            p.qvDim * sizeof(float) +                    // bias vector
            p.qvDim * p.qvDim * sizeof(float) +          // mass matrix
            p.qvDim * p.qvDim * sizeof(float) +          // LTDL mass matrix
-           p.qvDim * 2 * 6 * sizeof(float) +
+           p.qvDim * 2 * 6 * sizeof(float) +            // PhiFull
            36 * sizeof(float);
 }
 
@@ -150,7 +151,9 @@ InertiaTensor & InertiaTensor::operator+=(const InertiaTensor &rhs)
 }
 
 // Multiply with vector [v] of length 6, storing the result in [out]
-void InertiaTensor::multiply(const float* v, float* out) const
+void InertiaTensor::multiply(
+    const float* v,
+    float* out) const
 {
     math::Vector3 v_trans = {v[0], v[1], v[2]};
     math::Vector3 v_rot = {v[3], v[4], v[5]};
