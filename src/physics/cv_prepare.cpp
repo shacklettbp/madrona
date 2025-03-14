@@ -2064,26 +2064,17 @@ inline void integrationStep(Context &ctx,
         }
 
         // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
-        Vector3 omega = { qv[3], qv[4], qv[5] };
-        Quat rot_quat = { q[3], q[4], q[5], q[6] };
-        Quat new_rot = {rot_quat.w, rot_quat.x, rot_quat.y, rot_quat.z};
-        new_rot.w += 0.5f * h * (-rot_quat.x * omega.x -
-                                 rot_quat.y * omega.y -
-                                 rot_quat.z * omega.z);
-
-        new_rot.x += 0.5f * h * (rot_quat.w * omega.x +
-                                 rot_quat.z * omega.y -
-                                 rot_quat.y * omega.z);
-
-        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x +
-                                 rot_quat.w * omega.y +
-                                 rot_quat.x * omega.z);
-
-        new_rot.z += 0.5f * h * (rot_quat.y * omega.x -
-                                 rot_quat.x * omega.y +
-                                 rot_quat.w * omega.z);
-
-        new_rot = new_rot.normalize();
+        Vector3 axis = Vector3{qv[3], qv[4], qv[5]};
+        float norm = axis.length();
+        float angle = h * norm;
+        if (norm < 1e-12) {
+            axis = {1.f, 0.f, 0.f};
+        } else {
+            axis /= norm;
+        }
+        Quat rot = Quat::angleAxis(angle, axis).normalize();
+        Quat curr_rot = Quat { q[3], q[4], q[5], q[6] }.normalize();
+        Quat new_rot = rot * curr_rot;
 
         q[3] = new_rot.w;
         q[4] = new_rot.x;
