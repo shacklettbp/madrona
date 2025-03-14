@@ -825,7 +825,7 @@ void compositeRigidBody(
     uint32_t num_bodies = prop.numBodies;
     for (CountT i = num_bodies-1; i > 0; --i) {
         InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
-        uint32_t parent_idx = offsets[i].parentWithDof;  // (don't include fixed bodies)
+        uint32_t parent_idx = offsets[i].parent;  // (don't include fixed bodies)
         assert(parent_idx < 0xFF);
 
         InertiaTensor& spatial_inertia_parent =
