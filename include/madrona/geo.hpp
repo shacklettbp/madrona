@@ -73,6 +73,14 @@ float hullClosestPointToOriginGJK(
     float err_tolerance2,
     math::Vector3 *closest_point);
 
+// The segment has to be centered at the origin
+float hullClosestPointToSegmentGJK(
+    HalfEdgeMesh &hull,
+    float err_tolerance2,
+    math::Vector3 p1,
+    math::Vector3 p2,
+    math::Vector3 *closest_point);
+
 }
 
 #include "geo.inl"

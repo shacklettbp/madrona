@@ -102,6 +102,7 @@ enum class NarrowphaseTest : uint32_t {
     SphereCapsule = 0b1001,
     HullPlane = 0b110,
     CapsuleCapsule = 0b1000,
+    HullCapsule = 0b1010,
     PlaneCapsule = 0b1100,
 };
 
@@ -1428,6 +1429,150 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
 
         return result;
     } break;
+    case NarrowphaseTest::HullCapsule: {
+        auto sd_capsule = [](Vector3 p, Vector3 a, Vector3 b, float r) {
+            Vector3 pa = p - a, ba = b - a;
+            float h = clamp(pa.dot(ba)/ba.dot(ba), 0.0f, 1.0f);
+            return (pa - ba * h).length() - r;
+        };
+
+
+        assert(b_prim->type == CollisionPrimitive::Type::Capsule);
+
+        const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
+        assert(a_he_mesh.numFaces < max_num_tmp_faces);
+        assert(a_he_mesh.numVertices <  max_num_tmp_vertices);
+
+
+
+        // Rescale the capsule
+        CollisionPrimitive::Capsule scaled_capsule = b_prim->capsule;
+        // Technically b_scale represents the half height of the cylinder
+        scaled_capsule.cylinderHeight = (b_scale.d2 * 2.f);
+        scaled_capsule.radius = b_scale.d0;
+        assert(b_scale.d0 == b_scale.d1);
+
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+        Vector3 plane_normal = a_rot.rotateVec(base_normal);
+
+        Vector3 cap_axis = b_rot.rotateVec(base_normal);
+        Vector3 cap_p1 = b_pos -
+            cap_axis * scaled_capsule.cylinderHeight * 0.5f;
+        Vector3 cap_p2 = b_pos +
+            cap_axis * scaled_capsule.cylinderHeight * 0.5f;
+
+
+
+        PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
+
+        Vector3 hull_origin = a_pos - b_pos;
+
+        HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
+            a_he_mesh, hull_origin, a_rot, a_scale,
+            txfm_vertex_buffer, txfm_face_buffer);
+
+        MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
+
+        PROF_END(txfm_hull_ctr);
+
+        Vector3 to_hull_closest_pt;
+        float hull_dist2 = hullClosestPointToSegmentGJK(
+            a_hull_state.mesh, 1e-10f, cap_p1, cap_p2, &to_hull_closest_pt);
+
+        float sd = sd_capsule(to_hull_closest_pt, 
+                              cap_p1 - b_pos, cap_p2 - b_pos,
+                              scaled_capsule.radius);
+
+        printf("dist to segment %f (capsule sd = %f)\n", hull_dist2, sd);
+        
+        if (sd > 0.f) {
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        }
+
+        // float hull_dist2 = sd * sd;
+
+        SphereContact sphere_contact;
+
+        Vector3 cap_v = cap_p2 - cap_p1;
+        float t = to_hull_closest_pt.dot(cap_axis);
+        Vector3 center = cap_p1 +
+            clamp(t, 0.f, scaled_capsule.cylinderHeight) * cap_axis;
+
+        Vector3 normal = center - to_hull_closest_pt;
+        float d = normal.length();
+
+        sphere_contact.pt = to_hull_closest_pt;
+        sphere_contact.normal = -normal / d;
+        sphere_contact.depth = scaled_capsule.radius - d;
+
+        NarrowphaseResult result;
+        result.type = ContactType::Sphere;
+        result.sphere = sphere_contact;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aHalfEdges = nullptr;
+        result.bHalfEdges = nullptr;
+        result.aFaceHedgeRoots = nullptr;
+        result.bFaceHedgeRoots = nullptr;
+        return result;
+
+
+#if 0
+        if (hull_dist2 == 0.f) {
+            // Need to do SAT
+            float max_sep = -FLT_MAX;
+            Vector3 sep_normal;
+            const CountT num_faces = a_hull_state.mesh.numFaces;
+            for (CountT i = 0; i < num_faces; i++) {
+                Plane plane = a_hull_state.mesh.facePlanes[i];
+                // hull has already been moved so sphere is at origin
+                float face_dist = -plane.d;
+
+                if (face_dist > max_sep) {
+                    max_sep = face_dist;
+                    sep_normal = plane.normal;
+                }
+            }
+
+            // Discrepancy between SAT and GJK
+            if (max_sep > 0.f) {
+                assert(max_sep < 1e-5f);
+                NarrowphaseResult result;
+                result.type = ContactType::None;
+                return result;
+            }
+            sphere_contact.normal = sep_normal;
+            sphere_contact.pt = a_pos + sep_normal * sphere_radius;
+            sphere_contact.depth = -max_sep;
+        } else {
+            float to_hull_len = sqrtf(hull_dist2);
+
+            float depth = sphere_radius - to_hull_len;
+            Vector3 normal = to_hull_closest_pt / to_hull_len;
+
+            sphere_contact.normal = -normal;
+            sphere_contact.pt = a_pos + normal * sphere_radius;
+            sphere_contact.depth = depth;
+        }
+
+        NarrowphaseResult result;
+        result.type = ContactType::Sphere;
+        result.sphere = sphere_contact;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aHalfEdges = nullptr;
+        result.bHalfEdges = nullptr;
+        result.aFaceHedgeRoots = nullptr;
+        result.bFaceHedgeRoots = nullptr;
+        return result;
+#endif
+    } break;
     case NarrowphaseTest::SphereHull: {
         float sphere_radius;
         {
@@ -1519,6 +1664,73 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         assert(false);
         MADRONA_UNREACHABLE();
     } break;
+
+    case NarrowphaseTest::SphereCapsule: {
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+
+        CollisionPrimitive::Capsule a_scaled_capsule;
+        Vector3 a_cap_axis, a_cap_p1, a_cap_p2;
+        { // Scale capsule properly
+            a_scaled_capsule.cylinderHeight = 0.f;
+            a_scaled_capsule.radius = a_scale.d0 * a_prim->sphere.radius;
+
+            a_cap_axis = a_rot.rotateVec(base_normal);
+            a_cap_p1 = a_pos -
+                a_cap_axis * a_scaled_capsule.cylinderHeight * 0.5f;
+            a_cap_p2 = a_pos +
+                a_cap_axis * a_scaled_capsule.cylinderHeight * 0.5f;
+        }
+
+        CollisionPrimitive::Capsule b_scaled_capsule = b_prim->capsule;
+        Vector3 b_cap_axis, b_cap_p1, b_cap_p2;
+        { // Scale capsule properly
+            b_scaled_capsule.cylinderHeight = (b_scale.d2 * 2.f);
+            b_scaled_capsule.radius = b_scale.d0;
+            assert(b_scale.d0 == b_scale.d1);
+
+            b_cap_axis = b_rot.rotateVec(base_normal);
+            b_cap_p1 = b_pos -
+                b_cap_axis * b_scaled_capsule.cylinderHeight * 0.5f;
+            b_cap_p2 = b_pos +
+                b_cap_axis * b_scaled_capsule.cylinderHeight * 0.5f;
+        }
+
+        // Calculate shorting distance between the two segments.
+        auto [a_point, b_point] = findShortestConnection(
+                a_cap_p1, a_cap_p2,
+                b_cap_p1, b_cap_p2);
+
+        Vector3 diff = b_point - a_point;
+        float d2 = diff.length2();
+        float min_separation = a_scaled_capsule.radius + b_scaled_capsule.radius;
+
+        if (d2 > min_separation * min_separation) {
+            // No collision
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        } else {
+            // We have a collision
+            float d = sqrt(d2);
+
+            Vector3 contact_pt = a_point + a_scaled_capsule.radius *
+                diff / d;
+            float penetration = d - 
+                (a_scaled_capsule.radius + b_scaled_capsule.radius);
+
+            SphereContact contact {
+                .normal = -diff / d,
+                .pt = contact_pt,
+                .depth = -penetration
+            };
+
+            NarrowphaseResult result = {};
+            result.type = ContactType::Sphere;
+            result.sphere = contact;
+            return result;
+        }
+    } break;
+
     case NarrowphaseTest::CapsuleCapsule: {
         constexpr Vector3 base_normal = { 0, 0, 1 };
 
