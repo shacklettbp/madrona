@@ -198,6 +198,7 @@ struct BodySpatialVectors {
     SpatialVector sVel;
     SpatialVector sAcc;
     SpatialVector sForce;
+    // Spatial inertia before CRB, composite spatial inertia after CRB
     InertiaTensor spatialInertia;
 };
 

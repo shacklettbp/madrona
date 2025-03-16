@@ -79,8 +79,8 @@ void compositeRigidBody(Context &ctx,
                         BodyGroupMemory m);
 void computePhi(DofType dof_type,
                 BodyPhi& body_phi,
-                float* S,
-                math::Vector3 origin);
+                math::Vector3 origin,
+                float* S);
 void computePhiTrans(DofType dof_type,
                      BodyPhi &body_phi,
                      math::Vector3 origin,

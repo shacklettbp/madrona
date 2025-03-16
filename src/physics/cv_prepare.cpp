@@ -211,33 +211,27 @@ void forwardKinematics(Context &,
 void computePhi(
     DofType dof_type,
     BodyPhi& body_phi,
-    float* S,
-    Vector3 origin)
+    Vector3 origin,
+    float* S)
 {
     if (dof_type == DofType::FreeBody) {
-        // S = [1_3x3 r^x R; 0 R^T], row-major
+        // S = [1_3x3  r^xR
+        //      0      R    ]
         memset(S, 0.f, 6 * 6 * sizeof(float));
-        // Diagonal identity
+        // 3x3 identity top left
         for(CountT i = 0; i < 3; ++i) {
             S[i * 6 + i] = 1.f;
         }
-        // r^x Skew symmetric matrix
-        Vector3 comPos = {
-            body_phi.phi[0],
-            body_phi.phi[1],
-            body_phi.phi[2]
-        };
-
+        // r^x R (skew symmetric matrix * body rotation)
+        Vector3 comPos = { body_phi.phi[0], body_phi.phi[1], body_phi.phi[2] };
+        Vector3 offset = origin - comPos;
         Mat3x3 rot = Mat3x3::fromQuat(Quat {
             body_phi.phi[3],
             body_phi.phi[4],
             body_phi.phi[5],
             body_phi.phi[6]
         });
-
-        Vector3 offset = origin - comPos;
         Mat3x3 rx_rot = Mat3x3::skewSym(offset) * rot;
-
         for (int col = 3; col < 6; ++col) {
             int m_col = col - 3;
             S[col * 6 + 0] = rx_rot[m_col][0];
@@ -256,21 +250,12 @@ void computePhi(
         S[4] = 0.f;
         S[5] = 0.f;
     } else if (dof_type == DofType::Hinge) {
-        // S = [r \times hinge; hinge]
-        Vector3 hinge = {
-            body_phi.phi[0],
-            body_phi.phi[1],
-            body_phi.phi[2]
-        };
+        // S = [r \cross hinge; hinge]
+        Vector3 hinge = {body_phi.phi[0], body_phi.phi[1], body_phi.phi[2]};
+        Vector3 anchorPos = {body_phi.phi[3], body_phi.phi[4], body_phi.phi[5]};
+        Vector3 offset = origin - anchorPos;
 
-        Vector3 anchorPos = {
-            body_phi.phi[3],
-            body_phi.phi[4],
-            body_phi.phi[5]
-        };
-
-        anchorPos -= origin;
-        Vector3 r_cross_hinge = anchorPos.cross(hinge);
+        Vector3 r_cross_hinge = hinge.cross(offset);
         S[0] = r_cross_hinge.x;
         S[1] = r_cross_hinge.y;
         S[2] = r_cross_hinge.z;
@@ -299,20 +284,14 @@ void computePhiTrans(DofType dof_type,
             S[i * 3 + i] = 1.f;
         }
         // r^x Skew symmetric matrix
-        Vector3 comPos = {
-            body_phi.phi[0],
-            body_phi.phi[1],
-            body_phi.phi[2]
-        };
-
+        Vector3 comPos = { body_phi.phi[0], body_phi.phi[1], body_phi.phi[2] };
+        Vector3 offset = origin - comPos;
         Mat3x3 rot = Mat3x3::fromQuat(Quat {
             body_phi.phi[3],
             body_phi.phi[4],
             body_phi.phi[5],
             body_phi.phi[6]
         });
-
-        Vector3 offset = origin - comPos;
         Mat3x3 rx_rot = Mat3x3::skewSym(offset) * rot;
 
         for (int col = 3; col < 6; ++col) {
@@ -328,18 +307,10 @@ void computePhiTrans(DofType dof_type,
         S[2] = body_phi.phi[2];
     }
     else if (dof_type == DofType::Hinge) {
-        Vector3 hinge = {
-            body_phi.phi[0],
-            body_phi.phi[1],
-            body_phi.phi[2],
-        };
-        Vector3 anchorPos = {
-            body_phi.phi[3],
-            body_phi.phi[4],
-            body_phi.phi[5],
-        };
-        anchorPos -= origin;
-        Vector3 r_cross_hinge = anchorPos.cross(hinge);
+        Vector3 hinge = { body_phi.phi[0], body_phi.phi[1], body_phi.phi[2] };
+        Vector3 anchorPos = { body_phi.phi[3], body_phi.phi[4], body_phi.phi[5] };
+        Vector3 offset = origin - anchorPos;
+        Vector3 r_cross_hinge = hinge.cross(offset);
         S[0] = r_cross_hinge.x;
         S[1] = r_cross_hinge.y;
         S[2] = r_cross_hinge.z;
@@ -440,8 +411,7 @@ void computeSpatialInertiasAndPhi(Context &ctx,
 
     if (dof_type != DofType::None && dof_type != DofType::FixedBody) {
         ASSERT_PTR_ACCESS(S, 0, max_ptr);
-
-        computePhi(dof_type, phis[obj_grp.idx], S, com_pos);
+        computePhi(dof_type, phis[obj_grp.idx], com_pos, S);
     }
 }
 
@@ -844,9 +814,7 @@ void compositeRigidBody(
         return M[row + total_dofs * col];
     };
 
-
-    // TODO: don't recompute this
-    /// map from dof index to body index
+    // map from dof index to body index TODO: don't recompute this
     uint32_t dof_to_body[prop.qvDim];
     uint32_t num_processed_dofs = 0;
     for (uint32_t i = 0; i < prop.numBodies; ++i) {
@@ -931,126 +899,126 @@ inline void recursiveNewtonEuler(
         BodyGroupMemory mem)
 {
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
-    uint32_t total_dofs = prop.qvDim;
-
-    // Forward pass. Find in Plücker coordinates:
-    //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
-    //  2. accelerations. a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i}
-    //  3. forces. f_i = I_i a_i + v_i [spatial star cross] I_i v_i
-    float* qv = mem.qv(prop);
     BodyOffsets* offsets = mem.offsets(prop);
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
+    float* qvs = mem.qv(prop);
 
     MADRONA_GPU_SINGLE_THREAD {
-        bool fixed = false;
-
-        for (uint32_t i = 0; i < prop.numBodies; ++i) {
-            BodyOffsets body_offset = offsets[i];
+        // Forward pass. Find in Plücker coordinates:
+        //  1. Velocities: v_i = v_{parent} + S_i * \dot{q_i}
+        //  2. Accelerations: a_i = a_{parent} + \dot{S}_i * \dot{q_i} + S_i * \ddot{q_i}
+        //  3. Forces: f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+        for (uint32_t i_body = 0; i_body < prop.numBodies; ++i_body) {
+            BodyOffsets body_offset = offsets[i_body];
             DofType dof_type = body_offset.dofType;
-            BodySpatialVectors& spatial_vector = spatialVectors[i];
+            BodySpatialVectors& spatial_vector = spatialVectors[i_body];
 
-            uint32_t num_dofs = BodyOffsets::getDofTypeDim(dof_type);
+            // S_i, \dot{S}_i, \dot{q}_i
             uint32_t velOffset = body_offset.velOffset;
             uint32_t S_offset = 6 * velOffset;
-            // uint32_t S_dot_offset = S_offset + 6 * num_dofs;
+            float *S = mem.phiFull(prop) + S_offset;
+            float *S_dot = mem.phiDot(prop) + S_offset;
+            float *qv = qvs + velOffset;
+            float *qacc = mem.dqv(prop) + velOffset;
+            auto S_i = [&](uint32_t row, uint32_t col) -> float& { return S[row + 6 * col]; };
+            auto S_dot_i = [&](uint32_t row, uint32_t col) -> float& { return S_dot[row + 6 * col]; };
 
-            float *velocity = qv + velOffset;
-
-            float *S_ptr = mem.phiFull(prop) + S_offset;
-            // float* S_dot = mem.phiFull(prop) + S_dot_offset;
-
-            float S[6 * 6];
-            float S_dot[6 * 6];
-
-            MADRONA_UNROLL
-            for (uint32_t i = 0; i < 6; ++i) {
-                if (i < num_dofs) {
-                    MADRONA_UNROLL
-                    for (uint32_t j = 0; j < 6; ++j) {
-                        S[j + i * num_dofs] = S_ptr[j + i * num_dofs];
-                    }
-                }
-            }
-
-            // Common initialization for all joint types
-            SpatialVector v_body = {};
+            // Initialization: gather parent spatial velocity and acceleration
             if (body_offset.parent == 0xFF || dof_type == DofType::FreeBody) {
                 // v_0 = 0, a_0 = -g (fictitious upward acceleration)
                 spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
                 spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
-
-                // Free bodies must be root of their hierarchy
-                v_body = {{velocity[0], velocity[1], velocity[2]}, Vector3::zero()};
             } else {
-                BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-                spatial_vector.sVel = parent_spatial_vector.sVel;
-                spatial_vector.sAcc = parent_spatial_vector.sAcc;
-
-                // Note: we are using the parent velocity here (for hinge itself)
-                v_body = parent_spatial_vector.sVel;
+                BodySpatialVectors &p_sv = spatialVectors[body_offset.parent];
+                spatial_vector.sVel = p_sv.sVel;
+                spatial_vector.sAcc = p_sv.sAcc;
             }
 
-            if (dof_type != DofType::FixedBody) {
-                computePhiDot(dof_type, S, S_dot, v_body);
-            }
-
-            if (dof_type == DofType::FreeBody) {
-                // S\dot{q_i} and \dot{S}\dot{q_i}
-                MADRONA_UNROLL
-                for (uint32_t j = 0; j < 6; ++j) {
-                    MADRONA_UNROLL
-                    for (uint32_t k = 0; k < 6; ++k) {
-                        spatial_vector.sVel[j] += S[j + 6 * k] * velocity[k];
-                        spatial_vector.sAcc[j] += S_dot[j + 6 * k] * velocity[k];
+            // Update velocity, compute S_dot, update acceleration
+            switch(dof_type) {
+                case DofType::FreeBody: {
+                    // Translational part (first three columns)
+                    memset(S_dot, 0, 18 * sizeof(float));
+                    // Update velocity: S_i * \dot{q}_i (translational part)
+                    for (uint32_t j = 0; j < 3; ++j) {
+                        for (uint32_t k = 0; k < 6; ++k) {
+                            spatial_vector.sVel[j] += S_i(j, k) * qv[k];
+                        }
                     }
+
+                    // Rotational part (last three cols)
+                    // Each column of S_dot = v [spatial cross] S_col
+                    for (uint32_t j = 3; j < 6; ++j) {
+                        SpatialVector S_col = SpatialVector::fromVec(S + 6 * j);
+                        SpatialVector tmp = spatial_vector.sVel.cross(S_col);
+                        // Copy to S_dot
+                        for (uint32_t k = 0; k < 6; ++k) {
+                            S_dot_i(k, j) = tmp[k];
+                        }
+                    }
+                    // Update velocity: S_i * \dot{q}_i (rotational part)
+                    for (uint32_t j = 3; j < 6; ++j) {
+                        for (uint32_t k = 0; k < 6; ++k) {
+                            spatial_vector.sVel[j] += S[j + 6 * k] * qv[k];
+                        }
+                    }
+
+                    // Update acceleration: \dot{S}_i * \dot{q}_i + S_i * \ddot{q}_i
+                    for (uint32_t j = 0; j < 6; ++j) {
+                        for (uint32_t k = 0; k < 6; ++k) {
+                            spatial_vector.sAcc[j] += S_dot_i(j, k) * qv[k];
+                            spatial_vector.sAcc[j] += S_i(j, k) * qacc[k];
+                        }
+                    }
+                    break;
                 }
-            } else if (dof_type == DofType::FixedBody) {
-                fixed = true;
-            } else if (dof_type == DofType::Slider || dof_type == DofType::Hinge) {
-                assert(body_offset.parent != 0xFF);
-
-                float q_dot = velocity[0];
-
-                MADRONA_UNROLL
-                for (int j = 0; j < 6; ++j) {
-                    spatial_vector.sVel[j] += S[j] * q_dot;
-                    spatial_vector.sAcc[j] += S_dot[j] * q_dot;
+                case DofType::Ball: {
+                    assert(false); // TODO!
+                    break;
                 }
-            } else if (dof_type == DofType::Ball) {
-                assert(body_offset.parent != 0xFF);
-
-                float *q_dot = velocity;
-
-                MADRONA_UNROLL
-                for (int j = 0; j < 6; ++j) {
-                    // TODO: Probably should switch to row major - this isn't
-                    // particularly cache-friendly.
-                    spatial_vector.sVel[j] += S[j + 6 * 0] * q_dot[0] +
-                                         S[j + 6 * 1] * q_dot[1] +
-                                         S[j + 6 * 2] * q_dot[2];
-
-                    spatial_vector.sAcc[j] += S_dot[j + 6 * 0] * q_dot[0] +
-                                         S_dot[j + 6 * 1] * q_dot[1] +
-                                         S_dot[j + 6 * 2] * q_dot[2];
+                case DofType::FixedBody: {
+                    break;
                 }
-            } else {
-                MADRONA_UNREACHABLE();
+                case DofType::Slider:
+                case DofType::Hinge: {
+                    assert(body_offset.parent != 0xFF);
+                    float q_dot = qv[0];
+                    float q_ddot = qacc[0];
+                    SpatialVector S_col = SpatialVector::fromVec(S);
+                    SpatialVector tmp = spatial_vector.sVel.crossStar(S_col);
+                    // Update velocity and acceleration (don't need to update S_dot)
+                    MADRONA_UNROLL
+                    for (int j = 0; j < 6; ++j) {
+                        spatial_vector.sVel[j] += S[j] * q_dot;
+                        spatial_vector.sAcc[j] += tmp[j] * q_dot;
+                        spatial_vector.sAcc[j] += S[j] * q_ddot;
+                    }
+                    break;
+                }
+                default: MADRONA_UNREACHABLE();
             }
 
-            // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
-            spatial_vector.sForce = spatial_vector.spatialInertia.multiply(spatial_vector.sAcc);
+            // Update forces: I_i a_i + v_i [spatial cross] I_i v_i
+            spatial_vector.sForce = spatial_vector.spatialInertia.multiply(
+                spatial_vector.sAcc);
             spatial_vector.sForce += spatial_vector.sVel.crossStar(
                 spatial_vector.spatialInertia.multiply(spatial_vector.sVel));
         }
 
-        // Backward pass to find bias forces (added to external forces)
-        float *tau = mem.biasVector(prop);
-        memcpy(tau, mem.f(prop), prop.qvDim * sizeof(float));
-
-        if (!fixed) {
-            printInfo(mem, prop, "rne");
+        // Backward pass to accumulate
+        for (CountT i = prop.numBodies-1; i >= 0; --i) {
+            if (offsets[i].parent != 0xFF) {
+                BodySpatialVectors& spatial_vector = spatialVectors[i];
+                BodySpatialVectors& parent_spatial_vector = spatialVectors[offsets[i].parent];
+                parent_spatial_vector.sForce += spatial_vector.sForce;
+            }
         }
 
+        // First set bias force to external force
+        float *tau = mem.biasVector(prop);
+        memcpy(tau, mem.f(prop), prop.qvDim * sizeof(float));
+        // Then add the internal forces, mapped to generalized forces
+        uint32_t total_dofs = prop.qvDim;
         CountT dof_index = total_dofs;
         for (CountT i = prop.numBodies-1; i >= 0; --i) {
             BodyOffsets body_offset = offsets[i];
@@ -1058,7 +1026,6 @@ inline void recursiveNewtonEuler(
             uint32_t num_dofs = BodyOffsets::getDofTypeDim(body_offset.dofType);
             uint32_t velOffset = body_offset.velOffset;
             uint32_t S_offset = 6 * velOffset;
-
             // tau_i = S_i^T f_i
             dof_index -= num_dofs;
             float* S = mem.phiFull(prop) + S_offset;
@@ -1068,16 +1035,11 @@ inline void recursiveNewtonEuler(
                     tau[dof_index + row] += S_col[k] * spatial_vector.sForce[k];
                 }
             }
-
-            // Add to parent's force
-            if (body_offset.parent != 0xFF) {
-                BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-                parent_spatial_vector.sForce += spatial_vector.sForce;
-            }
         }
     }
 }
 
+// Filter contacts and build contact reference frames
 inline void processContacts(Context &ctx,
                             ContactConstraint &contact,
                             ContactTmpState &tmp_state)
@@ -1646,7 +1608,7 @@ inline float * computeBodyJacobian(BodyGroupMemory &m,
         float *S = m.phiFull(p) + 6 * cur_offset.velOffset;
 
         // Populate columns of J_C
-        computePhi(cur_offset.dofType, phis[cur_body_idx], S, origin);
+        computePhi(cur_offset.dofType, phis[cur_body_idx], origin, S);
 
         for(CountT i = 0; i < cur_offset.numDofs; ++i) {
             float *J_col = J +
