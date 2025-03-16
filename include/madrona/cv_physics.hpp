@@ -251,6 +251,7 @@ struct BodyGroupMemory {
     inline BodyLimitConstraint * limits(BodyGroupProperties);
     inline BodyInertial * inertials(BodyGroupProperties);
     inline int32_t * expandedParent(BodyGroupProperties);
+    inline int32_t * dofToBody(BodyGroupProperties);
     inline uint32_t * isStatic(BodyGroupProperties);
     inline BodyObjectData * objectData(BodyGroupProperties);
     inline BodyHierarchy * hierarchies(BodyGroupProperties);

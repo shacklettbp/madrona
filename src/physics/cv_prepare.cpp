@@ -274,11 +274,11 @@ void computePhi(
 void computePhiTrans(DofType dof_type,
                      BodyPhi &body_phi,
                      Vector3 origin,
-                     float (&S)[18])
+                     float *S)
 {
     if (dof_type == DofType::FreeBody) {
         // S = [1_3x3 r^x R], col-major
-        memset(S, 0.f, 6 * 3 * sizeof(float));
+        memset(S, 0.f, 3 * 6 * sizeof(float));
         // Diagonal identity
         for(CountT i = 0; i < 3; ++i) {
             S[i * 3 + i] = 1.f;
@@ -415,70 +415,11 @@ void computeSpatialInertiasAndPhi(Context &ctx,
     }
 }
 
-inline void computePhiDot(DofType dof_type,
-                          float (&S)[6 * 6],
-                          float (&S_dot)[6 * 6],
-                          SpatialVector &v_hat)
-{
-    if (dof_type == DofType::FreeBody) {
-        // S_dot = [0_3x3 v^x; 0_3x3 0_3x3], column-major
-        MADRONA_UNROLL
-        for (uint32_t i = 0; i < 6 * 6; ++i) {
-            S_dot[i] = 0.f;
-        }
-
-        // v^x Skew symmetric matrix
-        Vector3 v_trans = v_hat.linear;
-        S_dot[0 + 6 * 4] = -v_trans.z;
-        S_dot[0 + 6 * 5] = v_trans.y;
-        S_dot[1 + 6 * 3] = v_trans.z;
-        S_dot[1 + 6 * 5] = -v_trans.x;
-        S_dot[2 + 6 * 3] = -v_trans.y;
-        S_dot[2 + 6 * 4] = v_trans.x;
-    }
-    else if (dof_type == DofType::Slider) {
-        // S_dot = v [spatial cross] S
-        SpatialVector S_sv = SpatialVector::fromVec(S);
-        SpatialVector S_dot_sv = v_hat.crossMotion(S_sv);
-        S_dot[0] = S_dot_sv.linear.x;
-        S_dot[1] = S_dot_sv.linear.y;
-        S_dot[2] = S_dot_sv.linear.z;
-        S_dot[3] = S_dot_sv.angular.x;
-        S_dot[4] = S_dot_sv.angular.y;
-        S_dot[5] = S_dot_sv.angular.z;
-    }
-    else if (dof_type == DofType::Hinge) {
-        // S_dot = v [spatial cross] S
-        SpatialVector S_sv = SpatialVector::fromVec(S);
-        SpatialVector S_dot_sv = v_hat.crossMotion(S_sv);
-        S_dot[0] = S_dot_sv.linear.x;
-        S_dot[1] = S_dot_sv.linear.y;
-        S_dot[2] = S_dot_sv.linear.z;
-        S_dot[3] = S_dot_sv.angular.x;
-        S_dot[4] = S_dot_sv.angular.y;
-        S_dot[5] = S_dot_sv.angular.z;
-    }
-    else if (dof_type == DofType::Ball) {
-        // S_dot = v [spatial cross] S
-        for (int i = 0; i < 3; ++i) {
-            SpatialVector S_sv = SpatialVector::fromVec(S + (i * 6));
-            SpatialVector S_dot_sv = v_hat.crossMotion(S_sv);
-
-            S_dot[i * 6 + 0] = S_dot_sv.linear.x;
-            S_dot[i * 6 + 1] = S_dot_sv.linear.y;
-            S_dot[i * 6 + 2] = S_dot_sv.linear.z;
-            S_dot[i * 6 + 3] = S_dot_sv.angular.x;
-            S_dot[i * 6 + 4] = S_dot_sv.angular.y;
-            S_dot[i * 6 + 5] = S_dot_sv.angular.z;
-        }
-    }
-}
-
 // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
 //  where e_{bi} = 1 if body i is an ancestor of b
 //  C^T projects into the contact space
-inline float * computeContactJacobian(BodyGroupProperties &prop,
-                                      BodyGroupMemory &mem,
+inline float * computeContactJacobian(BodyGroupProperties &p,
+                                      BodyGroupMemory &m,
                                       uint32_t body_idx,
                                       Mat3x3 &C,
                                       Vector3 &origin,
@@ -492,38 +433,36 @@ inline float * computeContactJacobian(BodyGroupProperties &prop,
     (void)dbg;
 
     // Compute prefix sum to determine the start of the block for each body
-    BodyOffsets *all_offsets = mem.offsets(prop);
-    BodyPhi *all_phis = mem.bodyPhi(prop);
+    BodyOffsets *offsets = m.offsets(p);
+    BodyPhi *phis = m.bodyPhi(p);
 
     // Populate J_C by traversing up the hierarchy
     uint8_t curr_idx = body_idx;
     while (curr_idx != 0xFF) {
-        BodyOffsets offsets = all_offsets[curr_idx];
+        BodyOffsets cur_offset = offsets[curr_idx];
+        float *S = m.phiFull(p) + 6 * cur_offset.velOffset;
 
         // Populate columns of J_C
-        float S[18] = {};
-        computePhiTrans(offsets.dofType, all_phis[curr_idx], origin, S);
+        computePhiTrans(cur_offset.dofType, phis[curr_idx], origin, S);
 
         // Only use translational part of S
-        for(CountT i = 0; i < BodyOffsets::getDofTypeDim(offsets.dofType); ++i) {
+        for(CountT i = 0; i < cur_offset.numDofs; ++i) {
             float *J_col = J +
-                    j_num_rows * (body_dof_offset + (uint32_t)offsets.velOffset + i) +
+                    j_num_rows * (body_dof_offset + cur_offset.velOffset + i) +
                     jac_row;
+
             float *S_col = S + 3 * i;
             for(CountT j = 0; j < 3; ++j) {
                 J_col[j] = S_col[j];
             }
         }
 
-        curr_idx = offsets.parent;
+        curr_idx = cur_offset.parent;
     }
 
     // Multiply by C^T to project into contact space
-    for (CountT i = 0; i < prop.qvDim; ++i) {
-        float *J_col = J +
-                j_num_rows * (body_dof_offset + i) +
-                jac_row;
-
+    for (CountT i = 0; i < p.qvDim; ++i) {
+        float *J_col = J + j_num_rows * (body_dof_offset + i) + jac_row;
         Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
         J_col_vec = C.transpose() * J_col_vec;
         J_col[0] = coeff * J_col_vec.x;
@@ -806,6 +745,7 @@ void compositeRigidBody(
     // ----------------- Composite rigid body -----------------
     // Mass Matrix of this entire body group, column-major
     int32_t *expandedParent = mem.expandedParent(prop);
+    int32_t *dof_to_body = mem.dofToBody(prop);
     uint32_t total_dofs = prop.qvDim;
     float *S = mem.phiFull(prop);
     float *M = mem.massMatrix(prop);
@@ -813,19 +753,6 @@ void compositeRigidBody(
     auto qM = [&](int32_t row, int32_t col) -> float& {
         return M[row + total_dofs * col];
     };
-
-    // map from dof index to body index TODO: don't recompute this
-    uint32_t dof_to_body[prop.qvDim];
-    uint32_t num_processed_dofs = 0;
-    for (uint32_t i = 0; i < prop.numBodies; ++i) {
-        BodyOffsets body_offset = offsets[i];
-        DofType dof_type = body_offset.dofType;
-        CountT num_dofs = BodyOffsets::getDofTypeDim(dof_type);
-        for (CountT j = 0; j < BodyOffsets::getDofTypeDim(dof_type); ++j) {
-            dof_to_body[num_processed_dofs + j] = i;
-        }
-        num_processed_dofs += num_dofs;
-    }
 
     float *buf = mem.scratch(prop);
     for (int32_t i = 0; i < total_dofs; ++i) {
@@ -1014,24 +941,16 @@ inline void recursiveNewtonEuler(
 
         // First set bias force to external force
         float *tau = mem.biasVector(prop);
+        int32_t *dof_to_body = mem.dofToBody(prop);
         memcpy(tau, mem.f(prop), prop.qvDim * sizeof(float));
+
         // Then add the internal forces, mapped to generalized forces
-        uint32_t total_dofs = prop.qvDim;
-        CountT dof_index = total_dofs;
-        for (CountT i = prop.numBodies-1; i >= 0; --i) {
-            BodyOffsets body_offset = offsets[i];
-            BodySpatialVectors& spatial_vector = spatialVectors[i];
-            uint32_t num_dofs = BodyOffsets::getDofTypeDim(body_offset.dofType);
-            uint32_t velOffset = body_offset.velOffset;
-            uint32_t S_offset = 6 * velOffset;
-            // tau_i = S_i^T f_i
-            dof_index -= num_dofs;
-            float* S = mem.phiFull(prop) + S_offset;
-            for(CountT row = 0; row < num_dofs; ++row) {
-                float *S_col = S + 6 * row;
-                for(CountT k = 0; k < 6; ++k) {
-                    tau[dof_index + row] += S_col[k] * spatial_vector.sForce[k];
-                }
+        float *S_ptr = mem.phiFull(prop);
+        for (int32_t i = 0; i < prop.qvDim; ++i) {
+            SpatialVector f_i = spatialVectors[dof_to_body[i]].sForce;
+            float *S_i = S_ptr + 6 * i;
+            for (int32_t j = 0; j < 6; ++j) {
+                tau[i] += S_i[j] * f_i[j];
             }
         }
     }
@@ -1519,6 +1438,19 @@ inline void computeExpandedParent(Context &ctx,
         expandedParent[map[i - 1] + 1] = map[parent_idx];
         ASSERT_PTR_ACCESS(expandedParent, (map[i - 1] + 1), max_ptr);
     }
+
+    // Also compute DOF to body index mapping
+    int32_t *dof_to_body = m.dofToBody(p);
+    uint32_t num_processed_dofs = 0;
+    for (uint32_t i = 0; i < p.numBodies; ++i) {
+        BodyOffsets body_offset = offsets[i];
+        DofType dof_type = body_offset.dofType;
+        CountT num_dofs = BodyOffsets::getDofTypeDim(dof_type);
+        for (CountT j = 0; j < BodyOffsets::getDofTypeDim(dof_type); ++j) {
+            dof_to_body[num_processed_dofs + j] = i;
+        }
+        num_processed_dofs += num_dofs;
+    }
 }
 
 void initHierarchies(Context &ctx,
@@ -1602,7 +1534,6 @@ inline float * computeBodyJacobian(BodyGroupMemory &m,
     // Populate J_C by traversing up the hierarchy
     while(cur_body_idx != 0xFF) {
         BodyOffsets cur_offset = offsets[cur_body_idx];
-
         float *S = m.phiFull(p) + 6 * cur_offset.velOffset;
 
         // Populate columns of J_C
@@ -2034,7 +1965,7 @@ inline void integrationStep(Context &ctx,
         }
         Quat rot = Quat::angleAxis(angle, axis).normalize();
         Quat curr_rot = Quat { q[3], q[4], q[5], q[6] }.normalize();
-        Quat new_rot = rot * curr_rot;
+        Quat new_rot = curr_rot * rot;
 
         q[3] = new_rot.w;
         q[4] = new_rot.x;
