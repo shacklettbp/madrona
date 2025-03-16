@@ -1034,7 +1034,6 @@ inline void recursiveNewtonEuler(
                 }
             }
         }
-        printf("hi");
     }
 }
 
