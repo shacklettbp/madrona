@@ -439,7 +439,7 @@ inline void computePhiDot(DofType dof_type,
     else if (dof_type == DofType::Slider) {
         // S_dot = v [spatial cross] S
         SpatialVector S_sv = SpatialVector::fromVec(S);
-        SpatialVector S_dot_sv = v_hat.cross(S_sv);
+        SpatialVector S_dot_sv = v_hat.crossMotion(S_sv);
         S_dot[0] = S_dot_sv.linear.x;
         S_dot[1] = S_dot_sv.linear.y;
         S_dot[2] = S_dot_sv.linear.z;
@@ -450,7 +450,7 @@ inline void computePhiDot(DofType dof_type,
     else if (dof_type == DofType::Hinge) {
         // S_dot = v [spatial cross] S
         SpatialVector S_sv = SpatialVector::fromVec(S);
-        SpatialVector S_dot_sv = v_hat.cross(S_sv);
+        SpatialVector S_dot_sv = v_hat.crossMotion(S_sv);
         S_dot[0] = S_dot_sv.linear.x;
         S_dot[1] = S_dot_sv.linear.y;
         S_dot[2] = S_dot_sv.linear.z;
@@ -462,7 +462,7 @@ inline void computePhiDot(DofType dof_type,
         // S_dot = v [spatial cross] S
         for (int i = 0; i < 3; ++i) {
             SpatialVector S_sv = SpatialVector::fromVec(S + (i * 6));
-            SpatialVector S_dot_sv = v_hat.cross(S_sv);
+            SpatialVector S_dot_sv = v_hat.crossMotion(S_sv);
 
             S_dot[i * 6 + 0] = S_dot_sv.linear.x;
             S_dot[i * 6 + 1] = S_dot_sv.linear.y;
@@ -950,7 +950,7 @@ inline void recursiveNewtonEuler(
                     // Each column of S_dot = v [spatial cross] S_col
                     for (uint32_t j = 3; j < 6; ++j) {
                         SpatialVector S_col = SpatialVector::fromVec(S + 6 * j);
-                        SpatialVector tmp = sv.sVel.cross(S_col);
+                        SpatialVector tmp = sv.sVel.crossMotion(S_col);
                         // Copy to S_dot
                         for (uint32_t k = 0; k < 6; ++k) {
                             S_dot_i(k, j) = tmp[k];
@@ -985,7 +985,7 @@ inline void recursiveNewtonEuler(
                     float q_dot = qv[0];
                     SpatialVector S_col = SpatialVector::fromVec(S);
                     // S_dot = v [spatial cross] S
-                    SpatialVector tmp = sv.sVel.cross(S_col);
+                    SpatialVector tmp = sv.sVel.crossMotion(S_col);
                     // Update velocity and acceleration (don't need to update S_dot)
                     MADRONA_UNROLL
                     for (int j = 0; j < 6; ++j) {

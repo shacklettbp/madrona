@@ -165,7 +165,7 @@ struct SpatialVector {
     inline float & operator[](const CountT i);
     inline SpatialVector & operator+=(const SpatialVector &rhs);
     inline SpatialVector & operator-=(const SpatialVector &rhs);
-    inline SpatialVector cross(const SpatialVector &rhs) const;
+    inline SpatialVector crossMotion(const SpatialVector &rhs) const;
     inline SpatialVector crossStar(const SpatialVector &rhs) const;
 };
 

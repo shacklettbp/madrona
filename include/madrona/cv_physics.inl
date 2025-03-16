@@ -121,7 +121,7 @@ SpatialVector & SpatialVector::operator-=(const SpatialVector &rhs)
     return *this;
 }
 
-SpatialVector SpatialVector::cross(const SpatialVector &rhs) const
+SpatialVector SpatialVector::crossMotion(const SpatialVector &rhs) const
 {
     return {
         angular.cross(rhs.linear) + linear.cross(rhs.angular),
