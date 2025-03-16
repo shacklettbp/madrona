@@ -911,7 +911,7 @@ inline void recursiveNewtonEuler(
         for (uint32_t i_body = 0; i_body < prop.numBodies; ++i_body) {
             BodyOffsets body_offset = offsets[i_body];
             DofType dof_type = body_offset.dofType;
-            BodySpatialVectors& spatial_vector = spatialVectors[i_body];
+            BodySpatialVectors& sv = spatialVectors[i_body];
 
             // S_i, \dot{S}_i, \dot{q}_i
             uint32_t velOffset = body_offset.velOffset;
@@ -926,12 +926,12 @@ inline void recursiveNewtonEuler(
             // Initialization: gather parent spatial velocity and acceleration
             if (body_offset.parent == 0xFF || dof_type == DofType::FreeBody) {
                 // v_0 = 0, a_0 = -g (fictitious upward acceleration)
-                spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
-                spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
+                sv.sVel = {Vector3::zero(), Vector3::zero()};
+                sv.sAcc = {-physics_state.g, Vector3::zero()};
             } else {
                 BodySpatialVectors &p_sv = spatialVectors[body_offset.parent];
-                spatial_vector.sVel = p_sv.sVel;
-                spatial_vector.sAcc = p_sv.sAcc;
+                sv.sVel = p_sv.sVel;
+                sv.sAcc = p_sv.sAcc;
             }
 
             // Update velocity, compute S_dot, update acceleration
@@ -939,10 +939,11 @@ inline void recursiveNewtonEuler(
                 case DofType::FreeBody: {
                     // Translational part (first three columns)
                     memset(S_dot, 0, 18 * sizeof(float));
+
                     // Update velocity: S_i * \dot{q}_i (translational part)
-                    for (uint32_t j = 0; j < 3; ++j) {
-                        for (uint32_t k = 0; k < 6; ++k) {
-                            spatial_vector.sVel[j] += S_i(j, k) * qv[k];
+                    for (uint32_t j = 0; j < 6; ++j) {
+                        for (uint32_t k = 0; k < 3; ++k) {
+                            sv.sVel[j] += S_i(j, k) * qv[k];
                         }
                     }
 
@@ -950,24 +951,24 @@ inline void recursiveNewtonEuler(
                     // Each column of S_dot = v [spatial cross] S_col
                     for (uint32_t j = 3; j < 6; ++j) {
                         SpatialVector S_col = SpatialVector::fromVec(S + 6 * j);
-                        SpatialVector tmp = spatial_vector.sVel.cross(S_col);
+                        SpatialVector tmp = sv.sVel.cross(S_col);
                         // Copy to S_dot
                         for (uint32_t k = 0; k < 6; ++k) {
                             S_dot_i(k, j) = tmp[k];
                         }
                     }
+
                     // Update velocity: S_i * \dot{q}_i (rotational part)
-                    for (uint32_t j = 3; j < 6; ++j) {
-                        for (uint32_t k = 0; k < 6; ++k) {
-                            spatial_vector.sVel[j] += S[j + 6 * k] * qv[k];
+                    for (uint32_t j = 0; j < 6; ++j) {
+                        for (uint32_t k = 3; k < 6; ++k) {
+                            sv.sVel[j] += S_i(j, k) * qv[k];
                         }
                     }
 
                     // Update acceleration: \dot{S}_i * \dot{q}_i + S_i * \ddot{q}_i
                     for (uint32_t j = 0; j < 6; ++j) {
                         for (uint32_t k = 0; k < 6; ++k) {
-                            spatial_vector.sAcc[j] += S_dot_i(j, k) * qv[k];
-                            spatial_vector.sAcc[j] += S_i(j, k) * qacc[k];
+                            sv.sAcc[j] += S_dot_i(j, k) * qv[k];
                         }
                     }
                     break;
@@ -985,13 +986,13 @@ inline void recursiveNewtonEuler(
                     float q_dot = qv[0];
                     float q_ddot = qacc[0];
                     SpatialVector S_col = SpatialVector::fromVec(S);
-                    SpatialVector tmp = spatial_vector.sVel.crossStar(S_col);
+                    SpatialVector tmp = sv.sVel.crossStar(S_col);
                     // Update velocity and acceleration (don't need to update S_dot)
                     MADRONA_UNROLL
                     for (int j = 0; j < 6; ++j) {
-                        spatial_vector.sVel[j] += S[j] * q_dot;
-                        spatial_vector.sAcc[j] += tmp[j] * q_dot;
-                        spatial_vector.sAcc[j] += S[j] * q_ddot;
+                        sv.sVel[j] += S[j] * q_dot;
+                        sv.sAcc[j] += tmp[j] * q_dot;
+                        sv.sAcc[j] += S[j] * q_ddot;
                     }
                     break;
                 }
@@ -999,10 +1000,8 @@ inline void recursiveNewtonEuler(
             }
 
             // Update forces: I_i a_i + v_i [spatial cross] I_i v_i
-            spatial_vector.sForce = spatial_vector.spatialInertia.multiply(
-                spatial_vector.sAcc);
-            spatial_vector.sForce += spatial_vector.sVel.crossStar(
-                spatial_vector.spatialInertia.multiply(spatial_vector.sVel));
+            sv.sForce = sv.spatialInertia.multiply(sv.sAcc);
+            sv.sForce += sv.sVel.crossStar(sv.spatialInertia.multiply(sv.sVel));
         }
 
         // Backward pass to accumulate
