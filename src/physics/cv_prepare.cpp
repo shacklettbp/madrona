@@ -985,7 +985,7 @@ inline void recursiveNewtonEuler(
                     float q_dot = qv[0];
                     SpatialVector S_col = SpatialVector::fromVec(S);
                     // S_dot = v [spatial cross] S
-                    SpatialVector tmp = sv.sVel.crossStar(S_col);
+                    SpatialVector tmp = sv.sVel.cross(S_col);
                     // Update velocity and acceleration (don't need to update S_dot)
                     MADRONA_UNROLL
                     for (int j = 0; j < 6; ++j) {
@@ -1034,6 +1034,7 @@ inline void recursiveNewtonEuler(
                 }
             }
         }
+        printf("hi");
     }
 }
 
