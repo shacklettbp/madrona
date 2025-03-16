@@ -161,11 +161,11 @@ ArchetypeID StateManager::registerArchetype(
 }
 
 template <typename SingletonT>
-void StateManager::registerSingleton()
+void StateManager::registerSingleton(uint32_t num_bytes)
 {
     using ArchetypeT = SingletonArchetype<SingletonT>;
 
-    registerComponent<SingletonT>();
+    registerComponent<SingletonT>(num_bytes);
     registerArchetype<ArchetypeT>(
         ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
 

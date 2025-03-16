@@ -1812,6 +1812,7 @@ static GPUEngineState initEngineAndUserState(
     uint32_t num_user_cfg_bytes,
     uint32_t num_taskgraphs,
     uint32_t num_exported,
+    uint32_t num_checkpoints,
     const GPUKernels &gpu_kernels,
     const BVHKernels &bvh_kernels,
     const Optional<CudaBatchRenderConfig> &render_cfg,
@@ -1859,6 +1860,12 @@ static GPUEngineState initEngineAndUserState(
 
     auto exported_readback = (void **)cu::allocReadback(
         sizeof(void *) * num_exported);
+
+    auto checkpoint_ptr_readback = (void **)cu::allocReadback(
+        sizeof(void *) * num_checkpoints);
+
+    auto checkpoint_size_readback = (uint32_t *)cu::allocReadback(
+        sizeof(uint32_t) * num_checkpoints);
 
     CUdeviceptr allocator_channel_devptr;
     REQ_CU(cuMemAllocManaged(&allocator_channel_devptr,
@@ -1933,7 +1940,10 @@ static GPUEngineState initEngineAndUserState(
     auto init_ecs_args = makeKernelArgBuffer(alloc_init,
                                              host_print->getChannelPtr(),
                                              exported_readback,
-                                             user_cfg_gpu_buffer);
+                                             user_cfg_gpu_buffer,
+                                             checkpoint_ptr_readback,
+                                             checkpoint_size_readback,
+                                             num_checkpoints);
 
     auto init_tasks_args = makeKernelArgBuffer(
         num_taskgraphs, user_cfg_gpu_buffer);
@@ -2476,6 +2486,7 @@ MWCudaExecutor::MWCudaExecutor(
         state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
         state_cfg.numUserConfigBytes,  state_cfg.numTaskGraphs,
         state_cfg.numExportedBuffers,
+        state_cfg.numCheckpoints,
         gpu_kernels,
         bvh_kernels, render_cfg,
         exec_mode, cu_gpu, cu_ctx, strm);

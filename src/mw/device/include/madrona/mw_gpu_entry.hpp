@@ -12,7 +12,9 @@ namespace entryKernels {
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 __launch_bounds__(madrona::consts::numMegakernelThreads, 1)
 __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
-                        void **exported_columns, void *cfg)
+                        void **exported_columns, void *cfg,
+                        void **checkpoint_ptrs_, uint32_t *checkpoint_sizes_,
+                        uint32_t num_checkpoints)
 {
     HostAllocator *host_alloc = mwGPU::getHostAllocator();
     new (host_alloc) HostAllocator(alloc_init);
@@ -28,7 +30,8 @@ __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
 #endif
 
     StateManager *state_mgr = mwGPU::getStateManager();
-    new (state_mgr) StateManager(0);
+    new (state_mgr) StateManager(0, num_checkpoints, 
+                                 checkpoint_ptrs_, checkpoint_sizes_);
 
     ECSRegistry ecs_registry(state_mgr, exported_columns);
     WorldT::registerTypes(ecs_registry, *(ConfigT *)cfg);

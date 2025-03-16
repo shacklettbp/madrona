@@ -49,7 +49,7 @@ public:
     // component type to this function, not an archetype (singletons implicitly
     // create an archetype with 1 component).
     template <typename SingletonT>
-    void registerSingleton();
+    void registerSingleton(uint32_t num_bytes = 0);
 
     // Export ComponentT of ArchetypeT for use by code outside the ECS,
     // such as learning. The exported pointer can be retrieved from the CPU or

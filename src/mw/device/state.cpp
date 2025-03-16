@@ -76,7 +76,11 @@ ECSRegistry::ECSRegistry(StateManager *state_mgr, void **export_ptr)
       export_ptrs_(export_ptr)
 {}
 
-StateManager::StateManager(uint32_t)
+StateManager::StateManager(uint32_t, uint32_t num_checkpoints,
+                           void **checkpoint_ptrs, uint32_t *checkpoint_sizes)
+    : num_checkpoints_(num_checkpoints),
+      checkpoint_ptr_readback_(checkpoint_ptrs),
+      checkpoint_size_readback_(checkpoint_sizes)
 {
     using namespace mwGPU;
 
@@ -185,6 +189,18 @@ StateManager::StateManager(uint32_t)
 
     registerComponent<Entity>();
     registerComponent<WorldID>();
+
+    // Start allocating memory ranges with ID `num_checkpoints`
+    num_memory_range_elements_ = num_checkpoints;
+
+    for (int32_t i = 0; i < (int32_t)num_checkpoints; i++) {
+        TypeInfo type_info = {
+            .alignment = checkpoint_element_num_bytes_,
+            .numBytes = checkpoint_element_num_bytes_
+        };
+
+        memory_range_elements_[i].emplace(0, type_info);
+    }
 }
 
 void StateManager::registerComponent(uint32_t id, uint32_t alignment,

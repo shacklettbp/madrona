@@ -111,7 +111,7 @@ public:
         CountT max_num_entities_per_world);
 
     template <typename SingletonT>
-    void registerSingleton();
+    void registerSingleton(uint32_t num_bytes);
 
     template <typename BundleT>
     void registerBundle();

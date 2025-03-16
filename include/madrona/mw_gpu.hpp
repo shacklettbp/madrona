@@ -48,6 +48,9 @@ struct StateConfig {
 
     // Number of exported ECS components
     uint32_t numExportedBuffers;
+
+    // Number of checkpoints
+    uint32_t numCheckpoints;
 };
 
 struct CompileConfig {

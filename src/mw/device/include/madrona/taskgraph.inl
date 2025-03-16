@@ -346,7 +346,7 @@ TaskGraph::NodeID SortMemoryRangeNode<ElementT, move_data>::addToGraph(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies)
 {
-    // This always is going to sort by world ID no matter what
+    // This always is going to sort by status no matter what
     return SortNodeBase::addToGraphMemoryRange(builder, dependencies,
         TypeTracker::typeID<ElementT>(), move_data);
 }

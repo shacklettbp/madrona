@@ -150,13 +150,17 @@ void StateManager::registerBundleAlias()
 }
 
 template <typename SingletonT>
-void StateManager::registerSingleton()
+void StateManager::registerSingleton(uint32_t num_bytes)
 {
     uint32_t num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
 
     using ArchetypeT = SingletonArchetype<SingletonT>;
 
-    registerComponent<SingletonT>();
+    if (num_bytes == 0) {
+        num_bytes = sizeof(SingletonT);
+    }
+
+    registerComponent<SingletonT>(num_bytes);
     registerArchetype<ArchetypeT>(
         ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
 
@@ -169,8 +173,8 @@ void StateManager::registerSingleton()
 template <typename SingletonT>
 SingletonT & StateManager::getSingleton(WorldID world_id)
 {
-    SingletonT *col = getSingletonColumn<SingletonT>();
-    return col[world_id.idx];
+    auto [col, size] = getSingletonColumnAndSize<SingletonT>();
+    return *(SingletonT *)((uint8_t *)col + world_id.idx * size);
 }
 
 template <typename... ComponentTs>
@@ -576,6 +580,19 @@ void StateManager::remapMemoryRangeElement(MemoryRange mr, int32_t row_idx)
 }
 
 template <typename SingletonT>
+std::pair<SingletonT *, uint32_t> StateManager::getSingletonColumnAndSize()
+{
+    using ArchetypeT = SingletonArchetype<SingletonT>;
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+
+    // Abuse the fact that the singleton only has one component that is going
+    // to be in column 2
+    
+    ArchetypeTable &tbl = archetypes_[archetype_id]->tbl;
+    return { (SingletonT *)tbl.columns[2], tbl.columnSizes[2] };
+}
+
+template <typename SingletonT>
 SingletonT * StateManager::getSingletonColumn()
 {
     using ArchetypeT = SingletonArchetype<SingletonT>;
@@ -628,6 +645,11 @@ template <typename SingletonT>
 SingletonT * StateManager::exportSingleton()
 {
     return getSingletonColumn<SingletonT>();
+}
+
+uint32_t StateManager::getNumCheckpoints() const
+{
+    return num_checkpoints_;
 }
 
 }

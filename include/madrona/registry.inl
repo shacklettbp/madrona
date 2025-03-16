@@ -38,9 +38,9 @@ void ECSRegistry::registerBundleAlias()
 }
 
 template <typename SingletonT>
-void ECSRegistry::registerSingleton()
+void ECSRegistry::registerSingleton(uint32_t num_bytes)
 {
-    state_mgr_->registerSingleton<SingletonT>();
+    state_mgr_->registerSingleton<SingletonT>(num_bytes);
 }
 
 template <typename ArchetypeT, typename ComponentT>

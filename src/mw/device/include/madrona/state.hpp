@@ -79,7 +79,8 @@ struct MemoryRangeElementStore {
 
 class StateManager {
 public:
-    StateManager(uint32_t max_components);
+    StateManager(uint32_t max_components, uint32_t num_checkpoints,
+                 void **checkpoint_ptrs, uint32_t *checkpoint_sizes);
 
     template <typename ComponentT>
     ComponentID registerComponent(uint32_t num_bytes = 0);
@@ -94,7 +95,7 @@ public:
     MemoryRangeElementID registerMemoryRangeElement();
 
     template <typename SingletonT>
-    void registerSingleton();
+    void registerSingleton(uint32_t num_bytes = 0);
 
     template <typename BundleT>
     void registerBundle();
@@ -226,6 +227,10 @@ public:
     inline void remapEntity(Entity e, int32_t row_idx);
     inline void remapMemoryRangeElement(MemoryRange mr, int32_t row_idx);
 
+    // Returns size too
+    template <typename SingletonT>
+    std::pair<SingletonT *, uint32_t> getSingletonColumnAndSize();
+
     template <typename SingletonT>
     SingletonT * getSingletonColumn();
 
@@ -258,6 +263,8 @@ public:
 
     void freeTables();
 
+    inline uint32_t getNumCheckpoints() const;
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
@@ -270,9 +277,10 @@ private:
     static inline uint32_t num_archetypes_ = 0;
     static inline uint32_t num_memory_range_elements_ = 0;
     static inline uint32_t next_bundle_id_ = bundle_typeid_mask_;
+    static inline uint32_t checkpoint_element_num_bytes_ = 256;
 
     static inline constexpr uint32_t max_components_ = 1024;
-    static inline constexpr uint32_t max_memory_range_elements_ = 64;
+    static inline constexpr uint32_t max_memory_range_elements_ = 256;
     static inline constexpr uint32_t max_bundles_ = 512;
     static inline constexpr uint32_t max_archetypes_ = 256;
     static inline constexpr uint32_t user_component_offset_ = 2;
@@ -348,16 +356,15 @@ private:
     uint32_t archetype_component_offset_ = 0;
     uint32_t bundle_component_offset_ = 0;
     uint32_t query_data_offset_ = 0;
+    uint32_t num_checkpoints_ = 0;
+    void **checkpoint_ptr_readback_ = nullptr;
+    uint32_t *checkpoint_size_readback_ = nullptr;
     SpinLock query_data_lock_ {};
-    
     FixedInlineArray<Optional<TypeInfo>, max_components_> components_ {};
-
     FixedInlineArray<Optional<MemoryRangeStore>, max_memory_range_elements_>
         memory_range_elements_ {};
-
     std::array<uint32_t, max_archetype_components_ * max_archetypes_>
         archetype_components_ {};
-
     FixedInlineArray<Optional<ArchetypeStore>, max_archetypes_> archetypes_ {};
     std::array<uint32_t, max_archetype_components_ * max_archetypes_>
         bundle_components_ {};
