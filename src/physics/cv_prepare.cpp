@@ -919,7 +919,6 @@ inline void recursiveNewtonEuler(
             float *S = mem.phiFull(prop) + S_offset;
             float *S_dot = mem.phiDot(prop) + S_offset;
             float *qv = qvs + velOffset;
-            float *qacc = mem.dqv(prop) + velOffset;
             auto S_i = [&](uint32_t row, uint32_t col) -> float& { return S[row + 6 * col]; };
             auto S_dot_i = [&](uint32_t row, uint32_t col) -> float& { return S_dot[row + 6 * col]; };
 
@@ -984,15 +983,15 @@ inline void recursiveNewtonEuler(
                 case DofType::Hinge: {
                     assert(body_offset.parent != 0xFF);
                     float q_dot = qv[0];
-                    float q_ddot = qacc[0];
                     SpatialVector S_col = SpatialVector::fromVec(S);
+                    // S_dot = v [spatial cross] S
                     SpatialVector tmp = sv.sVel.crossStar(S_col);
                     // Update velocity and acceleration (don't need to update S_dot)
                     MADRONA_UNROLL
                     for (int j = 0; j < 6; ++j) {
                         sv.sVel[j] += S[j] * q_dot;
                         sv.sAcc[j] += tmp[j] * q_dot;
-                        sv.sAcc[j] += S[j] * q_ddot;
+                        // sv.sAcc[j] += S[j] * q_ddot;
                     }
                     break;
                 }
