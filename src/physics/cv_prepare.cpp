@@ -557,7 +557,6 @@ void compositeRigidBody(
 
     // ----------------- Composite rigid body -----------------
     // Mass Matrix of this entire body group, column-major
-    uint32_t total_dofs = prop.qvDim;
     BodyOffsets *offsets = mem.offsets(prop);
     BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
 
@@ -566,7 +565,7 @@ void compositeRigidBody(
     MADRONA_GPU_SINGLE_THREAD {
         for (CountT i = num_bodies-1; i > 0; --i) {
             InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
-            uint32_t parent_idx = offsets[i].parent;
+            uint32_t parent_idx = offsets[i].parent;  // (don't include fixed bodies)
             assert(parent_idx < 0xFF);
 
             InertiaTensor& spatial_inertia_parent =
@@ -575,8 +574,16 @@ void compositeRigidBody(
         }
     }
 
+    // ----------------- Composite rigid body -----------------
+    // Mass Matrix of this entire body group, column-major
+    int32_t *expandedParent = mem.expandedParent(prop);
+    int32_t *dof_to_body = mem.dofToBody(prop);
+    uint32_t total_dofs = prop.qvDim;
     float *S =  mem.phiFull(prop);
     float *M = mem.massMatrix(prop);
+    auto qM = [&](int32_t row, int32_t col) -> float& {
+        return M[row + total_dofs * col];
+    };
 
     // memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
     gpu_utils::warpSetZero(M, total_dofs * total_dofs * sizeof(float));
@@ -587,74 +594,26 @@ void compositeRigidBody(
     auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
                     num_smem_bytes_per_warp * warp_id;
 
-    // Backward pass
-    for (CountT i = prop.numBodies-1; i >= 0; --i) {
-        uint32_t velOffset = offsets[i].velOffset;
-        uint32_t S_offset = 2 * 6 * velOffset;
-        uint32_t num_dofs = BodyOffsets::getDofTypeDim(offsets[i].dofType);
+    // Build M
+    MADRONA_GPU_SINGLE_THREAD {
+        for (int32_t i = 0; i < total_dofs; ++i) {
+            // buf = I_i * S_i
+            float buf[6];
+            float *S_i = S + 6 * i;
+            InertiaTensor &I_body = spatialVectors[dof_to_body[i]].spatialInertia;
+            I_body.multiply(S_i, buf);
 
-        float* S_i = S + S_offset;
-
-        // float *F = mem.scratch(prop);
-        float *F = (float *)smem_buf;
-
-        if (lane_id == 0) {
-            for(CountT col = 0; col < num_dofs; ++col) {
-                float *S_col = S_i + 6 * col;
-                float *F_col = F + 6 * col;
-                spatialVectors[i].spatialInertia.multiply(S_col, F_col);
-            }
-        }
-
-        __syncwarp();
-
-        // M_{ii} = S_i^T I_i^C S_i = F^T S_i
-        float *M_ii = M + velOffset * total_dofs + velOffset;
-
-        gpu_utils::warpLoop(num_dofs * num_dofs,
-            [&](uint32_t iter) {
-                uint32_t row = iter / num_dofs;
-                uint32_t col = iter % num_dofs;
-
-                float *F_col = F + 6 * row;
-                float *S_col = S_i + 6 * col;
-
-                #pragma unroll
-                for (uint32_t k = 0; k < 6; ++k) {
-                    M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
+            // M_{i,j} += S_j^T * I_i * S_i
+            for (int32_t j = i; j != -1; j = expandedParent[j]) {
+                float *S_j = S + 6 * j;
+                float a = S_j[0] * buf[0] + S_j[1] * buf[1] + S_j[2] * buf[2] +
+                          S_j[3] * buf[3] + S_j[4] * buf[4] + S_j[5] * buf[5];
+                qM(i, j) += a;
+                // M_{j,i} = M_{i,j}
+                if (j != i) {
+                    qM(j, i) += a;
                 }
-            });
-
-        // Traverse up hierarchy
-        uint8_t j = offsets[i].parent;
-
-        while(j != 0xFF) {
-            uint32_t velOffset_j = offsets[j].velOffset;
-            uint32_t S_offset_j = 2 * 6 * velOffset_j;
-            uint32_t j_num_dofs = BodyOffsets::getDofTypeDim(offsets[j].dofType);
-            float *S_j = S + S_offset_j;
-
-            // M_{ij} = M{ji} = F^T S_j
-            float *M_ij = M + velOffset + total_dofs * velOffset_j; // row i, col j
-            float *M_ji = M + velOffset_j + total_dofs * velOffset; // row j, col i
-
-
-            gpu_utils::warpLoop(num_dofs * j_num_dofs,
-                [&](uint32_t iter) {
-                    uint32_t row = iter / j_num_dofs;
-                    uint32_t col = iter % j_num_dofs;
-
-                    float *F_col = F + 6 * row; // take col for transpose
-                    float *S_col = S_j + 6 * col;
-
-                    #pragma unroll
-                    for(CountT k = 0; k < 6; ++k) {
-                        M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
-                        M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
-                    }
-                });
-
-            j = offsets[j].parent;
+            }
         }
     }
 
@@ -669,8 +628,6 @@ void compositeRigidBody(
         auto ltdl = [&](int32_t row, int32_t col) -> float& {
             return LTDL[row + total_dofs * col];
         };
-
-        int32_t *expandedParent = mem.expandedParent(prop);
 
         // Backward pass through DOFs
         for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
@@ -755,7 +712,6 @@ void compositeRigidBody(
     };
 
     for (int32_t i = 0; i < total_dofs; ++i) {
-
         // buf = I_i * S_i
         float buf[6];
         float *S_i = S + 6 * i;
@@ -1612,10 +1568,16 @@ inline void computeInvMassGPU(
     BodyOffsets *offsets = m.offsets(p);
     BodyTransform *transforms = m.bodyTransforms(p);
     BodyInertial *inertials = m.inertials(p);
+    uint32_t *is_static = m.isStatic(p);
 
     warpLoop(
         p.numBodies,
         [&](uint32_t i_body) {
+            if(is_static[i_body]) {
+                inertials[i_body].approxInvMassTrans = 0.f;
+                inertials[i_body].approxInvMassRot = 0.f;
+                return;
+            }
             float *A = data_start;
             float *J = A + 36;
             float *MinvJT = J + 6 * p.qvDim;
@@ -1759,31 +1721,11 @@ inline void computeInvMass(
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
-#ifdef MADRONA_GPU_MODE
-    if (threadIdx.x % 32 != 0) {
-        return;
-    }
-
-    uint32_t warp_id = threadIdx.x / 32;
-
-    const int32_t num_smem_bytes_per_warp =
-        mwGPU::SharedMemStorage::numBytesPerWarp();
-    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
-                    num_smem_bytes_per_warp * warp_id;
-
-    float *A = (float *)smem_buf;
-    float *J = A + 36;
-    float *MinvJT = J + 6 * p.qvDim;
-
-    assert(sizeof(float) * (36 + 6 * p.qvDim + p.qvDim * 6) <
-            num_smem_bytes_per_warp);
-#else
     // For each body, find translational and rotational inverse weight
     //  by computing A = J M^{-1} J^T
     float A[36] = {}; // 6x6
     float J[6 * p.qvDim]; // col-major (shape 6 x numDofs)
     float MinvJT[p.qvDim * 6]; // col-major (shape numDofs x 6)
-#endif
 
     BodyOffsets *offsets = m.offsets(p);
     BodyTransform *transforms = m.bodyTransforms(p);
@@ -1855,11 +1797,6 @@ inline void computeInvMass(
     // For each DOF, find the inverse weight
     uint32_t dof_offset = 0;
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
-#if 0
-        Entity body = grp.bodies(ctx)[i_body];
-        auto body_dofs = ctx.get<DofObjectNumDofs>(body);
-        auto &dof_inertial = ctx.get<DofObjectInertial>(body);
-#endif
         BodyOffsets offset = offsets[i_body];
         auto &dof_inertial = inertials[i_body];
 
