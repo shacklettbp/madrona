@@ -39,7 +39,8 @@ float * BodyGroupMemory::mus(BodyGroupProperties p) { return f(p) + p.qvDim; }
 BodyLimitConstraint * BodyGroupMemory::limits(BodyGroupProperties p) { return (BodyLimitConstraint *)(mus(p) + p.numBodies); }
 BodyInertial * BodyGroupMemory::inertials(BodyGroupProperties p) { return (BodyInertial *)(limits(p) + p.numEq); }
 int32_t * BodyGroupMemory::expandedParent(BodyGroupProperties p) { return (int32_t *)(inertials(p) + p.numBodies); }
-uint32_t * BodyGroupMemory::isStatic(BodyGroupProperties p) { return (uint32_t *)(expandedParent(p) + p.qvDim); }
+int32_t * BodyGroupMemory::dofToBody(BodyGroupProperties p) { return (int32_t *)(expandedParent(p) + p.qvDim); }
+uint32_t * BodyGroupMemory::isStatic(BodyGroupProperties p) { return (uint32_t *)(dofToBody(p) + p.qvDim); }
 BodyObjectData * BodyGroupMemory::objectData(BodyGroupProperties p) { return (BodyObjectData *)(isStatic(p) + p.numBodies); }
 BodyHierarchy * BodyGroupMemory::hierarchies(BodyGroupProperties p) { return (BodyHierarchy *)(objectData(p) + p.numObjData); }
 Entity * BodyGroupMemory::entities(BodyGroupProperties p) { return (Entity *)(hierarchies(p) + p.numBodies); }
@@ -56,7 +57,8 @@ float * BodyGroupMemory::biasVector(BodyGroupProperties p) { return (float *)(sp
 float * BodyGroupMemory::massMatrix(BodyGroupProperties p) { return (float *)(biasVector(p) + p.qvDim); }
 float * BodyGroupMemory::massLTDLMatrix(BodyGroupProperties p) { return (float *)(massMatrix(p) + p.qvDim * p.qvDim); }
 float * BodyGroupMemory::phiFull(BodyGroupProperties p) { return (float *)(massLTDLMatrix(p) + p.qvDim * p.qvDim); }
-inline float * BodyGroupMemory::scratch(BodyGroupProperties p) { return (float *)(phiFull(p) + p.qvDim * 2 * 6); }
+float * BodyGroupMemory::phiDot(BodyGroupProperties p) { return (float *)(phiFull(p) + p.qvDim * 6); }
+inline float * BodyGroupMemory::scratch(BodyGroupProperties p) { return (float *)(phiDot(p) + p.qvDim * 6); }
 
 inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
 {
@@ -68,7 +70,8 @@ inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
            p.numEq * sizeof(BodyLimitConstraint) +  // equalities
            p.numBodies * sizeof(BodyInertial) +     // inertias
            p.qvDim * sizeof(int32_t) +              // expanded parent
-           p.numBodies * sizeof(uint32_t) +             // fixed root status
+           p.qvDim * sizeof(int32_t) +              // dof to body index
+           p.numBodies * sizeof(uint32_t) +         // fixed root status
            p.numObjData * sizeof(BodyObjectData) +  // body object data
            p.numBodies * sizeof(BodyHierarchy) +    // body hierarchy
            p.numBodies * sizeof(Entity) +           // Entity list
@@ -84,7 +87,7 @@ inline uint32_t BodyGroupMemory::tmpNumBytes(BodyGroupProperties p)
            p.qvDim * sizeof(float) +                    // bias vector
            p.qvDim * p.qvDim * sizeof(float) +          // mass matrix
            p.qvDim * p.qvDim * sizeof(float) +          // LTDL mass matrix
-           p.qvDim * 2 * 6 * sizeof(float) +
+           p.qvDim * 2 * 6 * sizeof(float) +            // PhiFull
            36 * sizeof(float);
 }
 
@@ -120,7 +123,7 @@ SpatialVector & SpatialVector::operator-=(const SpatialVector &rhs)
     return *this;
 }
 
-SpatialVector SpatialVector::cross(const SpatialVector &rhs) const
+SpatialVector SpatialVector::crossMotion(const SpatialVector &rhs) const
 {
     return {
         angular.cross(rhs.linear) + linear.cross(rhs.angular),
@@ -150,7 +153,9 @@ InertiaTensor & InertiaTensor::operator+=(const InertiaTensor &rhs)
 }
 
 // Multiply with vector [v] of length 6, storing the result in [out]
-void InertiaTensor::multiply(const float* v, float* out) const
+void InertiaTensor::multiply(
+    const float* v,
+    float* out) const
 {
     math::Vector3 v_trans = {v[0], v[1], v[2]};
     math::Vector3 v_rot = {v[3], v[4], v[5]};

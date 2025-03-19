@@ -165,7 +165,7 @@ struct SpatialVector {
     inline float & operator[](const CountT i);
     inline SpatialVector & operator+=(const SpatialVector &rhs);
     inline SpatialVector & operator-=(const SpatialVector &rhs);
-    inline SpatialVector cross(const SpatialVector &rhs) const;
+    inline SpatialVector crossMotion(const SpatialVector &rhs) const;
     inline SpatialVector crossStar(const SpatialVector &rhs) const;
 };
 
@@ -198,6 +198,7 @@ struct BodySpatialVectors {
     SpatialVector sVel;
     SpatialVector sAcc;
     SpatialVector sForce;
+    // Spatial inertia before CRB, composite spatial inertia after CRB
     InertiaTensor spatialInertia;
 };
 
@@ -250,6 +251,7 @@ struct BodyGroupMemory {
     inline BodyLimitConstraint * limits(BodyGroupProperties);
     inline BodyInertial * inertials(BodyGroupProperties);
     inline int32_t * expandedParent(BodyGroupProperties);
+    inline int32_t * dofToBody(BodyGroupProperties);
     inline uint32_t * isStatic(BodyGroupProperties);
     inline BodyObjectData * objectData(BodyGroupProperties);
     inline BodyHierarchy * hierarchies(BodyGroupProperties);
@@ -263,11 +265,8 @@ struct BodyGroupMemory {
     inline float * biasVector(BodyGroupProperties);
     inline float * massMatrix(BodyGroupProperties);
     inline float * massLTDLMatrix(BodyGroupProperties);
-    // For a body at index i,
-    // For phi use     phiFull(p) + 2 * 6 * bodyOffsets[i].velOffset0
-    // For phi_dot use phiFull(p) + 2 * 6 * bodyOffsets[i].velOffset + 
-    //                              2 * 6 * BodyOffsets::getDofTypeDim(bodyOffsets[i].type)
     inline float * phiFull(BodyGroupProperties);
+    inline float * phiDot(BodyGroupProperties);
     inline float * scratch(BodyGroupProperties);
 
     static inline uint32_t qVectorsNumBytes(BodyGroupProperties p);

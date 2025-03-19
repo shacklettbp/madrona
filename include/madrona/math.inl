@@ -23,6 +23,11 @@ inline constexpr float rsqrtApprox(float x)
 #endif
 }
 
+inline constexpr float clamp(float v, float a, float b)
+{
+    return fmin(b, fmax(a, v));
+}
+
 bool solveQuadraticUnsafe(
     float a, float b, float c, float *t1, float *t2)
 {

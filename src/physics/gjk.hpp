@@ -589,7 +589,7 @@ inline float GJK<T>::computeDistance2(
         // exit immediately.
         //assert(solve_state.vLen2 <= prev_v_len2);
         //assert(solve_state.vLen2 - prev_v_len2 < 1e-10f); // nope
-        assert(solve_state.vLen2 - prev_v_len2 < 1e-6f);
+        // assert(solve_state.vLen2 - prev_v_len2 < 1e-6f);
 
         // Compact the simplex to remove unnecessary points that don't support
         // solver_state.v

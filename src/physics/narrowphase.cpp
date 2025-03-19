@@ -99,8 +99,10 @@ enum class NarrowphaseTest : uint32_t {
     SphereHull = 0b11,
     PlanePlane = 0b100,
     SpherePlane = 0b101,
+    SphereCapsule = 0b1001,
     HullPlane = 0b110,
     CapsuleCapsule = 0b1000,
+    HullCapsule = 0b1010,
     PlaneCapsule = 0b1100,
 };
 
@@ -136,6 +138,7 @@ enum class ContactType {
     SATPlane,
     SATFace,
     SATEdge,
+    SATCapsule,
 };
 
 struct SphereContact {
@@ -439,6 +442,65 @@ static float getHullDistanceFromPlane(
     return min_dot_n - plane.d;
 }
 
+struct CapsuleState {
+    float radius;
+    float cylinderHeight;
+    Vector3 p1;
+    Vector3 p2;
+};
+
+#if 0
+static float getCapsuleDistanceFromPlane(
+    MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+    const Plane &plane,
+    const CapsuleState &cap)
+{
+    auto point_plane_dist = [](const Vector3 &point, const Plane &plane) {
+        return (dot(point, plane.normal) - d) / plane.normal.length();
+    };
+
+    float d_p1 = point_plane_dist(cap.p1, plane);
+    float d_p2 = point_plane_dist(cap.p2, plane);
+
+    // Check if the segment intersects the plane
+    if (d_p1 * d_p2 <= 0) {
+        return 0.0f; // Segment crosses the plane
+    }
+
+    // FIXME: Return signed distance?
+    return std::min(d_p1, d_p2);
+}
+
+static FaceQuery queryFaceDirections(
+    MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+    const HullState &hull, const CapsuleState &cap)
+{
+    Plane max_face_plane;
+    CountT max_dist_face = -1;
+    float max_dist = -FLT_MAX;
+
+    const CountT num_hull_faces = (CountT)hull.mesh.numFaces;
+
+    for (CountT face_idx = 0; face_idx < num_hull_faces; face_idx++) {
+        Plane plane = hull.mesh.facePlanes[face_idx];
+        float face_dist = getCapsuleDistanceFromPlane(
+            MADRONA_GPU_COND(mwgpu_lane_id,) plane, cap);
+
+        if (face_dist > max_dist) {
+            max_dist = face_dist;
+            max_dist_face = face_idx;
+            max_face_plane = plane;
+
+            if (max_dist > 0) {
+                break;
+            }
+        }
+    }
+
+    return { max_dist, max_dist_face, max_face_plane };
+}
+#endif
+
 static FaceQuery queryFaceDirections(
     MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     const HullState &a, const HullState &b)
@@ -563,6 +625,119 @@ static inline EdgeTestResult edgeDistance(
         separation,
     };
 }
+
+#if 0
+static EdgeQuery queryEdgeDirections(
+    MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+    const HullState &hull, const CapsuleState &cap)
+{
+    Vector3 normal {};
+    int edgeAMaxDistance = 0;
+    int edgeBMaxDistance = 0;
+    float maxDistance = -FLT_MAX;
+
+    auto testEdgeSeparation = [&hull, &cap](uint32_t hedge_idx_a) {
+        HalfEdge cur_hedge_hull = hull.mesh.halfEdges[hedge_idx_hull];
+        uint32_t root_vertex1 = cur_hedge_hull.rootVertex;
+        HalfEdge next_hedge_hull = hull.mesh.halfEdges[cur_hedge_hull.next];
+        uint32_t root_vertex2 = next_hedge_hull.rootVertex;
+
+        Vector3 edge_p1 = hull.mesh.vertices[root_vertex1];
+        Vector3 edge_p2 = hull.mesh.vertices[root_vertex2];
+
+        auto [hull_point, cap_point] = 
+            findShortestConnection(edge_p1, edge_p2,
+                                   cap.p1, cap.p2);
+
+        Vector3 diff = cap_point - hull_point;
+        float d = diff.length() - cap.radius;
+
+        EdgeTestResult result = {
+            .normal = diff.normalize(),
+            .separation = d
+        };
+
+        return result;
+    };
+
+    const CountT hull_num_edges = hull.mesh.numEdges();
+
+#ifdef MADRONA_GPU_MODE
+    static_assert(false, "Need to implement this");
+
+#if 0
+    const int32_t num_edge_tests = a_num_edges * b_num_edges;
+    for (int32_t edge_offset_linear = 0; edge_offset_linear < num_edge_tests;
+         edge_offset_linear += 32) {
+        int32_t edge_idx_linear = edge_offset_linear + mwgpu_lane_id;
+
+        // FIXME: get rid of this level of indirection
+        int32_t edge_idx_a = edge_idx_linear / b_num_edges;
+        int32_t edge_idx_b = edge_idx_linear % b_num_edges;
+
+        EdgeTestResult edge_cmp;
+        int32_t he_a_idx;
+        int32_t he_b_idx;
+
+        if (edge_idx_linear >= num_edge_tests ) {
+            edge_cmp.separation = -FLT_MAX;
+        } else {
+            he_a_idx = a.mesh.edgeToHalfEdge(edge_idx_a);
+            he_b_idx = b.mesh.edgeToHalfEdge(edge_idx_b);
+
+            edge_cmp = testEdgeSeparation(he_a_idx, he_b_idx);
+        }
+
+        if (edge_cmp.separation > maxDistance) {
+            maxDistance = edge_cmp.separation;
+            normal = edge_cmp.normal;
+            edgeAMaxDistance = he_a_idx;
+            edgeBMaxDistance = he_b_idx;
+        }
+
+        if (__ballot_sync(mwGPU::allActive, maxDistance > 0) != 0) {
+            break;
+        }
+    }
+
+    int32_t max_lane_idx;
+    std::tie(maxDistance, max_lane_idx) =
+        warpFloatMaxAndIdx(maxDistance, mwgpu_lane_id);
+
+    normal.x =  __shfl_sync(mwGPU::allActive, normal.x, max_lane_idx);
+    normal.y =  __shfl_sync(mwGPU::allActive, normal.y, max_lane_idx);
+    normal.z =  __shfl_sync(mwGPU::allActive, normal.z, max_lane_idx);
+
+    edgeAMaxDistance = __shfl_sync(mwGPU::allActive,
+        edgeAMaxDistance, max_lane_idx);
+    edgeBMaxDistance = __shfl_sync(mwGPU::allActive,
+        edgeBMaxDistance, max_lane_idx);
+#endif
+
+#else
+    for (CountT edge_idx_hull = 0; edge_idx_hull < hull_num_edges; edge_idx_hull++) {
+        int32_t he_idx_hull = hull.mesh.edgeToHalfEdge(edge_idx_hull);
+
+        EdgeTestResult edge_cmp = testEdgeSeparation(he_idx_hull);
+
+        if (edge_cmp.sepration > maxDistance) {
+            maxDistance = edge_cmp.separation;
+            normal = edge_cmp.normal;
+            edgeHullMaxDistance = he_idx_a;
+
+            if (maxDistance > 0) {
+                // FIXME: this goto probably kills autovectorization
+                goto early_out;
+            }
+        }
+    }
+
+    early_out:
+#endif
+
+    return { maxDistance, normal, edgeAMaxDistance, edgeBMaxDistance };
+}
+#endif
 
 static EdgeQuery queryEdgeDirections(
     MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
@@ -759,6 +934,35 @@ struct SATResult {
     SATContact contact;
 };
 
+#if 0
+static inline std::pair<bool, SphereContact> doSAT(
+        MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+        const HullState &hull,
+        const CapsuleState &cap)
+{
+    FaceQuery face_query =
+        queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,), hull, cap);
+    if (face_query.separation > 0.f) {
+        return { false, SphereContact {} };
+    }
+
+    EdgeQuery edge_query =
+        queryEdgeDirections(MADRONA_GPU_COND(mwgpu_land_id,), hull, cap);
+    if (edge_query.separation > 0.f) {
+        return { false, SphereContact {} };
+    }
+
+    bool is_face_contact = face_query.separation > edge_query.separation;
+
+    if (is_face_contact) {
+        SphereContact sphere_contact = {
+            face_query.normal,
+
+        };
+    }
+}
+#endif
+
 static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
                               const HullState &a, const HullState &b)
 {
@@ -815,6 +1019,7 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         // Find incident face
         CountT incident_face_idx = findIncidentFace(
             MADRONA_GPU_COND(mwgpu_lane_id,) incident_hull, ref_plane.normal);
+
 
         SATResult result;
         result.type = ContactType::SATFace,
@@ -1427,6 +1632,105 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
 
         return result;
     } break;
+    case NarrowphaseTest::HullCapsule: {
+#if 0
+        auto sd_capsule = [](Vector3 p, Vector3 a, Vector3 b, float r) {
+            Vector3 pa = p - a, ba = b - a;
+            float h = clamp(pa.dot(ba)/ba.dot(ba), 0.0f, 1.0f);
+            return (pa - ba * h).length() - r;
+        };
+
+
+        assert(b_prim->type == CollisionPrimitive::Type::Capsule);
+
+        const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
+        assert(a_he_mesh.numFaces < max_num_tmp_faces);
+        assert(a_he_mesh.numVertices <  max_num_tmp_vertices);
+
+
+
+        // Rescale the capsule
+        CollisionPrimitive::Capsule scaled_capsule = b_prim->capsule;
+        // Technically b_scale represents the half height of the cylinder
+        scaled_capsule.cylinderHeight = (b_scale.d2 * 2.f);
+        scaled_capsule.radius = b_scale.d0;
+        assert(b_scale.d0 == b_scale.d1);
+
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+        Vector3 plane_normal = a_rot.rotateVec(base_normal);
+
+        Vector3 cap_axis = b_rot.rotateVec(base_normal);
+        Vector3 cap_p1 = b_pos -
+            cap_axis * scaled_capsule.cylinderHeight * 0.5f;
+        Vector3 cap_p2 = b_pos +
+            cap_axis * scaled_capsule.cylinderHeight * 0.5f;
+
+
+
+        PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
+
+        Vector3 hull_origin = a_pos - b_pos;
+
+        HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
+            a_he_mesh, hull_origin, a_rot, a_scale,
+            txfm_vertex_buffer, txfm_face_buffer);
+
+        MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
+
+        PROF_END(txfm_hull_ctr);
+
+        Vector3 to_hull_closest_pt;
+        float hull_dist2 = hullClosestPointToSegmentGJK(
+            a_hull_state.mesh, 1e-10f, cap_p1, cap_p2, &to_hull_closest_pt);
+
+        float sd = sd_capsule(to_hull_closest_pt, 
+                              cap_p1 - b_pos, cap_p2 - b_pos,
+                              scaled_capsule.radius);
+
+        // printf("dist to segment %f (capsule sd = %f)\n", hull_dist2, sd);
+        
+        if (sd > 0.f) {
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        }
+
+        // float hull_dist2 = sd * sd;
+
+        printf("ADD CONTACT###############################\n");
+
+        SphereContact sphere_contact;
+
+        Vector3 cap_v = cap_p2 - cap_p1;
+        float t = to_hull_closest_pt.dot(cap_axis);
+        Vector3 center = cap_p1 +
+            clamp(t, 0.f, scaled_capsule.cylinderHeight) * cap_axis;
+
+        Vector3 normal = center - to_hull_closest_pt;
+        float d = normal.length();
+
+        sphere_contact.pt = to_hull_closest_pt;
+        sphere_contact.normal = -normal / d;
+        sphere_contact.depth = scaled_capsule.radius - d;
+
+        NarrowphaseResult result;
+        result.type = ContactType::Sphere;
+        result.sphere = sphere_contact;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aHalfEdges = nullptr;
+        result.bHalfEdges = nullptr;
+        result.aFaceHedgeRoots = nullptr;
+        result.bFaceHedgeRoots = nullptr;
+        return result;
+#endif
+
+        NarrowphaseResult result;
+        result.type = ContactType::None;
+        return result;
+    } break;
     case NarrowphaseTest::SphereHull: {
         float sphere_radius;
         {
@@ -1518,6 +1822,73 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         assert(false);
         MADRONA_UNREACHABLE();
     } break;
+
+    case NarrowphaseTest::SphereCapsule: {
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+
+        CollisionPrimitive::Capsule a_scaled_capsule;
+        Vector3 a_cap_axis, a_cap_p1, a_cap_p2;
+        { // Scale capsule properly
+            a_scaled_capsule.cylinderHeight = 0.f;
+            a_scaled_capsule.radius = a_scale.d0 * a_prim->sphere.radius;
+
+            a_cap_axis = a_rot.rotateVec(base_normal);
+            a_cap_p1 = a_pos -
+                a_cap_axis * a_scaled_capsule.cylinderHeight * 0.5f;
+            a_cap_p2 = a_pos +
+                a_cap_axis * a_scaled_capsule.cylinderHeight * 0.5f;
+        }
+
+        CollisionPrimitive::Capsule b_scaled_capsule = b_prim->capsule;
+        Vector3 b_cap_axis, b_cap_p1, b_cap_p2;
+        { // Scale capsule properly
+            b_scaled_capsule.cylinderHeight = (b_scale.d2 * 2.f);
+            b_scaled_capsule.radius = b_scale.d0;
+            assert(b_scale.d0 == b_scale.d1);
+
+            b_cap_axis = b_rot.rotateVec(base_normal);
+            b_cap_p1 = b_pos -
+                b_cap_axis * b_scaled_capsule.cylinderHeight * 0.5f;
+            b_cap_p2 = b_pos +
+                b_cap_axis * b_scaled_capsule.cylinderHeight * 0.5f;
+        }
+
+        // Calculate shorting distance between the two segments.
+        auto [a_point, b_point] = findShortestConnection(
+                a_cap_p1, a_cap_p2,
+                b_cap_p1, b_cap_p2);
+
+        Vector3 diff = b_point - a_point;
+        float d2 = diff.length2();
+        float min_separation = a_scaled_capsule.radius + b_scaled_capsule.radius;
+
+        if (d2 > min_separation * min_separation) {
+            // No collision
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        } else {
+            // We have a collision
+            float d = sqrt(d2);
+
+            Vector3 contact_pt = a_point + a_scaled_capsule.radius *
+                diff / d;
+            float penetration = d - 
+                (a_scaled_capsule.radius + b_scaled_capsule.radius);
+
+            SphereContact contact {
+                .normal = -diff / d,
+                .pt = contact_pt,
+                .depth = -penetration
+            };
+
+            NarrowphaseResult result = {};
+            result.type = ContactType::Sphere;
+            result.sphere = contact;
+            return result;
+        }
+    } break;
+
     case NarrowphaseTest::CapsuleCapsule: {
         constexpr Vector3 base_normal = { 0, 0, 1 };
 

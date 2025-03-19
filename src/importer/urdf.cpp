@@ -1234,7 +1234,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             .mass = link.inertial.mass,
             .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
             // ... ?
-            .muS = 0.1f
+            .muS = 1.0f
         };
 
         bodyDescs.push_back(body_desc);
@@ -1324,7 +1324,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             .mass = link.inertial.mass,
             .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
             // ... ?
-            .muS = 0.1f
+            .muS = 1.0f
         };
 
         total_num_dofs += BodyOffsets::getDofTypeDim(body_desc.type);
@@ -1544,6 +1544,15 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                 obj_id = primitives.cubePhysicsIdx;
             } break;
 
+            case URDFGeometryType::Cylinder: {
+                scale = Vector3 {
+                    collision.geometry.cylinder.radius,
+                    collision.geometry.cylinder.radius,
+                    collision.geometry.cylinder.length / 2.f
+                };
+                obj_id = primitives.capsulePhysicsIdx;
+            } break;
+
             default: {
                 assert(false);
             } break;
@@ -1604,6 +1613,15 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             case URDFGeometryType::Box: {
                 scale = visual.geometry.box.dim;
                 obj_id = primitives.cubeRenderIdx;
+            } break;
+
+            case URDFGeometryType::Cylinder: {
+                scale = Vector3 {
+                    visual.geometry.cylinder.radius,
+                    visual.geometry.cylinder.radius,
+                    visual.geometry.cylinder.length / 2.f
+                };
+                obj_id = primitives.capsuleRenderIdx;
             } break;
 
             default: {
