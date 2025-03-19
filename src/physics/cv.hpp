@@ -84,7 +84,7 @@ void computePhi(DofType dof_type,
 void computePhiTrans(DofType dof_type,
                      BodyPhi &body_phi,
                      math::Vector3 origin,
-                     float (&S)[18]);
+                     float *S);
 void solveM(
         BodyGroupProperties prop,
         BodyGroupMemory mem, 

@@ -1721,11 +1721,31 @@ inline void computeInvMass(
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
+#ifdef MADRONA_GPU_MODE
+    if (threadIdx.x % 32 != 0) {
+        return;
+    }
+
+    uint32_t warp_id = threadIdx.x / 32;
+
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id;
+
+    float *A = (float *)smem_buf;
+    float *J = A + 36;
+    float *MinvJT = J + 6 * p.qvDim;
+
+    assert(sizeof(float) * (36 + 6 * p.qvDim + p.qvDim * 6) <
+            num_smem_bytes_per_warp);
+#else
     // For each body, find translational and rotational inverse weight
     //  by computing A = J M^{-1} J^T
     float A[36] = {}; // 6x6
     float J[6 * p.qvDim]; // col-major (shape 6 x numDofs)
     float MinvJT[p.qvDim * 6]; // col-major (shape numDofs x 6)
+#endif
 
     BodyOffsets *offsets = m.offsets(p);
     BodyTransform *transforms = m.bodyTransforms(p);

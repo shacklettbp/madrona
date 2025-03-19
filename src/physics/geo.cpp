@@ -135,7 +135,8 @@ float hullClosestPointToSegmentGJK(
         }
 
         float t = ap.dot(ab) / abLength2;
-        t = std::clamp(t, 0.0f, 1.0f);
+        // t = std::clamp(t, 0.0f, 1.0f);
+        t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
 
         Vector3 closestPoint = a + ab * t;
 
