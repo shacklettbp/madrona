@@ -754,11 +754,12 @@ void compositeRigidBody(
         return M[row + total_dofs * col];
     };
 
-    float *buf = mem.scratch(prop);
     for (int32_t i = 0; i < total_dofs; ++i) {
+
         // buf = I_i * S_i
-        InertiaTensor &I_body = spatialVectors[dof_to_body[i]].spatialInertia;
+        float buf[6];
         float *S_i = S + 6 * i;
+        InertiaTensor &I_body = spatialVectors[dof_to_body[i]].spatialInertia;
         I_body.multiply(S_i, buf);
 
         // M_{i,j} += S_j^T * I_i * S_i
