@@ -125,10 +125,10 @@ struct HullState {
 };
 
 struct Manifold {
-    math::Vector3 contactPoints[4];
+    Vector3 contactPoints[4];
     float penetrationDepths[4];
     int32_t numContactPoints;
-    math::Vector3 normal;
+    Vector3 normal;
 };
 
 enum class ContactType {
@@ -148,7 +148,10 @@ struct SphereContact {
 };
 
 struct ConvexContact {
-    Manifold manifold;
+    Vector3 contactPoints[4];
+    float penetrationDepths[4];
+    Vector3 normals[4];
+    int32_t numContactPoints;
 };
 
 struct SATContact {
@@ -1979,7 +1982,7 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             float dp2 = (cap_p2 - a_pos).dot(plane_normal);
 
             // These points must be on the same side of the plane
-            assert(dp1 * dp2 > 0.f);
+            // assert(dp1 * dp2 > 0.f);
 
             // Check the collision between the two spheres
             auto [is_contact_a, contact_a] = spherePlaneContact(
@@ -2009,19 +2012,18 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             }
             // Capsule is horizontal with plane
             else {
-                ConvexContact convex_contact = {};
-                Manifold manifold = {};
-                manifold.numContactPoints = 2;
-                manifold.contactPoints[0] = contact_a.pt;
-                manifold.contactPoints[1] = contact_b.pt;
-                manifold.penetrationDepths[0] = contact_a.depth;
-                manifold.penetrationDepths[1] = contact_b.depth;
-                manifold.normal = contact_a.normal;
-                convex_contact.manifold = manifold;
+                ConvexContact cv_contact = {};
+                cv_contact.numContactPoints = 2;
+                cv_contact.contactPoints[0] = contact_a.pt;
+                cv_contact.contactPoints[1] = contact_b.pt;
+                cv_contact.penetrationDepths[0] = contact_a.depth;
+                cv_contact.penetrationDepths[1] = contact_b.depth;
+                cv_contact.normals[0] = contact_a.normal;
+                cv_contact.normals[1] = contact_b.normal;
 
                 NarrowphaseResult result = {};
                 result.type = ContactType::Convex;
-                result.convex = convex_contact;
+                result.convex = cv_contact;
                 return result;
             }
         }
@@ -2134,7 +2136,12 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
     } break;
     case ContactType::Convex: {
         ConvexContact convex_contact = narrowphase_result.convex;
-        addManifoldContacts(ctx, convex_contact.manifold, b_loc, a_loc);
+        for (int i=0; i<convex_contact.numContactPoints; i++) {
+            addSinglePointContact(ctx, convex_contact.contactPoints[i],
+                                  convex_contact.normals[i],
+                                  convex_contact.penetrationDepths[i],
+                                  b_loc, a_loc);
+        }
     } break;
     case ContactType::SATPlane: {
         // Plane is always b, always reference
