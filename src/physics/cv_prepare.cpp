@@ -210,11 +210,13 @@ void forwardKinematics(Context &,
     //  This can also be handled in urdf loading though
     BodyInertial *all_inertials = m.inertials(p);
     for (CountT i = p.numBodies - 1; i >= 0; --i) {
+        BodyInertial &curr_inertia = all_inertials[i];
         BodyOffsets offsets = all_offsets[i];
         uint8_t parent = offsets.parent;
-        if (offsets.dofType == DofType::FixedBody && parent != 0xFF) {
+        if (curr_inertia.mass != 0 &&
+            offsets.dofType == DofType::FixedBody &&
+            parent != 0xFF) {
             BodyTransform &curr_transform = all_transforms[i];
-            BodyInertial &curr_inertia = all_inertials[i];
             BodyTransform &parent_transform = all_transforms[parent];
             BodyInertial &parent_inertia = all_inertials[parent];
             float combinedMass = parent_inertia.mass + curr_inertia.mass;
