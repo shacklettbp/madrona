@@ -182,7 +182,8 @@ struct CollisionPrimitive {
         Sphere = 1 << 0,
         Hull = 1 << 1,
         Plane = 1 << 2,
-        Capsule = 1 << 3
+        Capsule = 1 << 3,
+        Box = 1 << 4,
     };
 
     struct Sphere {
@@ -207,6 +208,7 @@ struct CollisionPrimitive {
     Type type;
     union {
         Sphere sphere;
+        Box box;
         Plane plane;
         Hull hull;
         Capsule capsule;

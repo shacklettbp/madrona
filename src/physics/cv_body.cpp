@@ -549,7 +549,7 @@ void attachLimit(
     l.bodyIdx = body_info.idx;
     l.hinge = hinge_limit;
 
-    m.q(p)[offsets[body_info.idx].posOffset] = (hinge_limit.lower + hinge_limit.upper) / 2.f;
+    // m.q(p)[offsets[body_info.idx].posOffset] = (hinge_limit.lower + hinge_limit.upper) / 2.f;
 }
 
 void attachLimit(

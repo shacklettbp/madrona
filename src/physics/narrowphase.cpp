@@ -96,14 +96,20 @@ using namespace geo;
 enum class NarrowphaseTest : uint32_t {
     SphereSphere = 0b1,
     HullHull = 0b10,
-    SphereHull = 0b11,
     PlanePlane = 0b100,
+    CapsuleCapsule = 0b1000,
+    BoxBox = 0b10000,
+
+    SphereHull = 0b11,
     SpherePlane = 0b101,
     SphereCapsule = 0b1001,
+    SphereBox = 0b10001,
     HullPlane = 0b110,
-    CapsuleCapsule = 0b1000,
     HullCapsule = 0b1010,
+    HullBox = 0b10010,
     PlaneCapsule = 0b1100,
+    PlaneBox = 0b10100,
+    CapsuleBox = 0b11000,
 };
 
 struct FaceQuery {
@@ -1569,8 +1575,8 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         penetration = a_radius + b_radius - dist;
 
         SphereContact contact {
-            .normal = normal,
-            .pt = a_pos + a_radius * normal,
+            .normal = -normal,
+            .pt = a_pos + (a_radius - 0.5f * penetration) * normal,
             .depth = penetration,
         };
 
@@ -1958,6 +1964,62 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             return result;
         }
     } break;
+    case NarrowphaseTest::PlaneBox: {
+        assert(b_prim->type == CollisionPrimitive::Type::Box);
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+        Vector3 plane_normal = a_rot.rotateVec(base_normal);
+        Vector3 halfExtents = b_scale * b_prim->box.dim * 0.5f;
+
+        ConvexContact cv_contact = {};
+        int32_t num_contacts = 0;
+        // Check contacts with corners
+        for (int32_t i = 0; i < 8; i++) {
+            Vector3 offset = halfExtents;
+            offset.x *= (i & 1) ? 1.f : -1.f;
+            offset.y *= (i & 2) ? 1.f : -1.f;
+            offset.z *= (i & 4) ? 1.f : -1.f;
+            Vector3 corner = b_pos + b_rot.rotateVec(offset);
+            float d = plane_normal.dot(corner - a_pos);
+            if (d > 0.f) {
+                continue;
+            }
+            cv_contact.contactPoints[num_contacts] = corner - d * plane_normal;
+            cv_contact.normals[num_contacts] = -plane_normal;
+            cv_contact.penetrationDepths[num_contacts] = -d;
+            num_contacts++;
+            // Max number of contacts is 4
+            if (num_contacts == 4) {
+                break;
+            }
+        }
+
+        if (num_contacts == 0) {
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        }
+
+        cv_contact.numContactPoints = num_contacts;
+        NarrowphaseResult result = {};
+        result.type = ContactType::Convex;
+        result.convex = cv_contact;
+        return result;
+    }
+    case NarrowphaseTest::BoxBox: {
+        NarrowphaseResult result;
+        result.type = ContactType::None;
+        return result;
+    }
+    case NarrowphaseTest::CapsuleBox: {
+        NarrowphaseResult result;
+        result.type = ContactType::None;
+        return result;
+    }
+    case NarrowphaseTest::SphereBox: {
+        NarrowphaseResult result;
+        result.type = ContactType::None;
+        return result;
+    }
     case NarrowphaseTest::PlaneCapsule: {
         assert(b_prim->type == CollisionPrimitive::Type::Capsule);
 

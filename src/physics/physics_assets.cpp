@@ -1066,6 +1066,21 @@ static inline MassProperties computeMassProperties(
                 Vector3::zero(),
                 Quat { 1, 0, 0, 0 },
             };
+        } else if (prim.type == CollisionPrimitive::Type::Box) {
+            float mass = 1.f;
+            Vector3 dim = prim.box.dim;
+
+            math::Diag3x3 inertia_tensor = {
+                mass * (dim.y * dim.y + dim.z * dim.z) / 12.f,
+                mass * (dim.x * dim.x + dim.z * dim.z) / 12.f,
+                mass * (dim.x * dim.x + dim.y * dim.y) / 12.f,
+            };
+
+            return MassProperties {
+                inertia_tensor,
+                Vector3::zero(),
+                Quat { 1, 0, 0, 0 },
+            };
         }
 
         // Hull primitive
@@ -1241,6 +1256,19 @@ static void setupCapsulePrimitive(const SourceCollisionPrimitive &src_prim,
     };
 }
 
+static void setupBoxPrimitive(const SourceCollisionPrimitive &src_prim,
+                              CollisionPrimitive *out_prim,
+                              AABB *out_aabb)
+{
+    out_prim->box = src_prim.box;
+    Vector3 dimHalf = src_prim.box.dim * 0.5f;
+
+    *out_aabb = AABB {
+        .pMin = { -dimHalf.x, -dimHalf.y, -dimHalf.z },
+        .pMax = { dimHalf.x, dimHalf.y, dimHalf.z },
+    };
+}
+
 static void setupPlanePrimitive(const SourceCollisionPrimitive &,
                                 CollisionPrimitive *out_prim,
                                 AABB *out_aabb)
@@ -1312,6 +1340,9 @@ static void setupRigidBodyAABBsAndPrimitives(
             } break;
             case Type::Capsule: {
                 setupCapsulePrimitive(src_prim, out_prim, &prim_aabb);
+            } break;
+            case Type::Box: {
+                setupBoxPrimitive(src_prim, out_prim, &prim_aabb);
             } break;
             }
 
