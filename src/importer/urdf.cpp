@@ -1546,8 +1546,8 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
             case URDFGeometryType::Cylinder: {
                 scale = Vector3 {
-                    collision.geometry.cylinder.radius,
-                    collision.geometry.cylinder.radius,
+                    collision.geometry.cylinder.radius / 2.f,
+                    collision.geometry.cylinder.radius / 2.f,
                     collision.geometry.cylinder.length / 2.f
                 };
                 obj_id = primitives.capsulePhysicsIdx;
@@ -1617,8 +1617,8 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
             case URDFGeometryType::Cylinder: {
                 scale = Vector3 {
-                    visual.geometry.cylinder.radius,
-                    visual.geometry.cylinder.radius,
+                    visual.geometry.cylinder.radius / 2.f,
+                    visual.geometry.cylinder.radius / 2.f,
                     visual.geometry.cylinder.length / 2.f
                 };
                 obj_id = primitives.capsuleRenderIdx;

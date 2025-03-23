@@ -204,7 +204,29 @@ void forwardKinematics(Context &,
         } break;
         }
     }
+
+    // We need to fix the COM pos for joint -> fixed body -> ...
+    //  the fixed body should contribute to the COM position of the joint.
+    //  This can also be handled in urdf loading though
+    BodyInertial *all_inertials = m.inertials(p);
+    for (CountT i = p.numBodies - 1; i >= 0; --i) {
+        BodyOffsets offsets = all_offsets[i];
+        uint8_t parent = offsets.parent;
+        if (offsets.dofType == DofType::FixedBody && parent != 0xFF) {
+            BodyTransform &curr_transform = all_transforms[i];
+            BodyInertial &curr_inertia = all_inertials[i];
+            BodyTransform &parent_transform = all_transforms[parent];
+            BodyInertial &parent_inertia = all_inertials[parent];
+            float combinedMass = parent_inertia.mass + curr_inertia.mass;
+            parent_transform.com = (parent_transform.com * parent_inertia.mass +
+                                    curr_transform.com * curr_inertia.mass) /
+                                    combinedMass;
+            parent_inertia.mass = combinedMass;
+            curr_inertia.mass = 0.f;
+        }
+    }
 }
+
 
 // Computes the [6 x nDof] Phi matrix which maps from generalized velocities
 // to Plücker coordinates
