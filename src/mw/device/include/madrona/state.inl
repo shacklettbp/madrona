@@ -487,6 +487,18 @@ ElementT * StateManager::memoryRangePointer(MemoryRange memory_range)
     return (ElementT *)element.tbl.columns[2] + slot.loc.row;
 }
 
+void * StateManager::memoryRangePointer(MemoryRange memory_range)
+{
+    const MemoryRangeElementStore::Slot &slot = 
+        mr_element_store_.slots[memory_range.id];
+    assert(slot.gen == memory_range.gen);
+
+    auto &element = *memory_range_elements_[slot.loc.archetype];
+
+    uint8_t *start = (uint8_t *)element.tbl.columns[2];
+    return (void *)(start + slot.loc.row * element.tbl.columnSizes[2]);
+}
+
 void * StateManager::getMemoryRangeColumn(
         uint32_t element_id, uint32_t col_idx)
 {
@@ -650,6 +662,11 @@ SingletonT * StateManager::exportSingleton()
 uint32_t StateManager::getNumCheckpoints() const
 {
     return num_checkpoints_;
+}
+
+inline uint32_t StateManager::getCheckpointElemSize()
+{
+    return checkpoint_element_num_bytes_;
 }
 
 }

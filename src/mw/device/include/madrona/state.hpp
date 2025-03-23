@@ -126,6 +126,8 @@ public:
     template <typename ElementT>
     ElementT * memoryRangePointer(MemoryRange memory_range);
 
+    inline void * memoryRangePointer(MemoryRange memory_range);
+
     void destroyEntityNow(Entity e);
 
     Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
@@ -264,6 +266,9 @@ public:
     void freeTables();
 
     inline uint32_t getNumCheckpoints() const;
+    static inline uint32_t getCheckpointElemSize();
+
+    void updateCheckpointReadback(uint32_t checkpoint_idx);
 
 private:
     template <typename SingletonT>

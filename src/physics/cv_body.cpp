@@ -1,4 +1,5 @@
 #include "cv.hpp"
+#include "cv_gpu.hpp"
 #include <madrona/cv_physics.hpp>
 
 namespace madrona::phys::cv {
@@ -762,9 +763,9 @@ BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, StringID string_id
 
 uint32_t getNumCheckpointBytes(Context &ctx, Entity body_grp)
 {
-    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
-    return BodyGroupMemory::checkpointNumBytes(p);
+    uint32_t num_bytes = BodyGroupMemory::checkpointNumBytes(p);
+    return num_bytes;
 }
 
 uint32_t saveBodyGroupCheckpoint(Context &ctx, Entity body_grp, void *ptr)
@@ -856,7 +857,9 @@ uint32_t saveBodyGroupCheckpoint(Context &ctx, Entity body_grp, void *ptr)
         write_ptr += sizeof(DofObjectProxies);
     }
 
-    return write_ptr - (uint8_t *)ptr;
+    uint32_t written_bytes = write_ptr - (uint8_t *)ptr;
+
+    return written_bytes;
 }
 
 std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
@@ -955,19 +958,19 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
     }
 
     { // Body offsets
-        uint32_t num_byte = sizeof(BodyOffsets) * p.numBodies;
+        uint32_t num_bytes = sizeof(BodyOffsets) * p.numBodies;
         memcpy(m.offsets(p), read_ptr, num_bytes);
         read_ptr += num_bytes;
     }
 
     { // Name hashes
-        uint32_t num_byte = sizeof(BodyNameHash) * p.numHashes;
+        uint32_t num_bytes = sizeof(BodyNameHash) * p.numHashes;
         memcpy(m.nameHashes(p), read_ptr, num_bytes);
         read_ptr += num_bytes;
     }
 
     { // Create the dof object entities
-        for (uint32_t i = 0; i < m.numBodies; ++i) {
+        for (uint32_t i = 0; i < p.numBodies; ++i) {
             Entity e = ctx.makeEntity<DofObjectArchetype>();
             m.entities(p)[i] = e;
 
@@ -989,12 +992,12 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
         BodyObjectData *obj_datas = m.objectData(p);
 
         for (uint32_t i = 0; i < p.numObjData; ++i) {
-            BodyObjectData obj_data = obj_datas[i];
+            BodyObjectData &obj_data = obj_datas[i];
 
             Entity body_e = m.entities(p)[obj_data.bodyIdx];
             DofObjectProxies proxies = ctx.get<DofObjectProxies>(body_e);
 
-            if (obj_data.type == BodyObjectData::TYpe::Collider) {
+            if (obj_data.type == BodyObjectData::Type::Collider) {
                 Entity col_obj = ctx.makeEntity<LinkCollider>();
 
                 ctx.get<DisabledColliders>(col_obj).numDisabled = 0;
@@ -1002,7 +1005,7 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
                 ctx.get<broadphase::LeafID>(col_obj) =
                     PhysicsSystem::registerEntity(ctx, col_obj, { (int32_t)obj_data.objectID });
                 ctx.get<ResponseType>(col_obj) = proxies.responseType;
-                ctx.get<ObjectID>(col_obj) = { (int32_t)desc.objectID };
+                ctx.get<ObjectID>(col_obj) = { (int32_t)obj_data.objectID };
 
                 ctx.get<Velocity>(col_obj) = {
                     Vector3::zero(),
@@ -1018,6 +1021,9 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
                     .objDataIdx = proxies.colliderOffset + obj_data.subIdx,
                     .type = LinkParentDofObject::Type::Collider,
                 };
+
+                obj_data.proxy = col_obj;
+                obj_data.optionalRender = Entity::none();
             } else {
                 Entity viz_obj = ctx.makeEntity<LinkVisual>();
 
@@ -1026,11 +1032,14 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
                 render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
 
                 ctx.get<LinkParentDofObject>(viz_obj) = {
-                    .bodyGroup = body_grp,
-                    .bodyIdx = body_grpinfo.idx,
+                    .bodyGroup = grp,
+                    .bodyIdx = obj_data.bodyIdx,
                     .objDataIdx = proxies.visualOffset + obj_data.subIdx,
                     .type = LinkParentDofObject::Type::Render,
                 };
+
+                obj_data.proxy = viz_obj;
+                obj_data.optionalRender = Entity::none();
             }
         }
     }

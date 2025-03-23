@@ -2103,22 +2103,6 @@ TaskGraphNodeID setupCVResetTasks(
         >>(deps);
 #endif
 
-    cur_node = builder.addToGraph<ParallelForNode<Context,
-         tasks::initHierarchies,
-            InitBodyGroup
-         >>({cur_node});
-
-    // Dumb that we have to run this twice in a frame but it's cheap
-    // as hell so we'll just do that for now.
-    cur_node =
-        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
-            Entity,
-            Position,
-            Rotation,
-            Scale,
-            LinkParentDofObject
-        >>({cur_node});
-
     cur_node = builder.addToGraph<
         ClearTmpNode<DestroyBodyGroupArchetype>>({cur_node});
 
@@ -2130,6 +2114,25 @@ TaskGraphNodeID setupCVResetTasks(
         CompactArchetypeNode<LinkCollider>>({cur_node});
     cur_node = builder.addToGraph<
         CompactArchetypeNode<LinkVisual>>({cur_node});
+
+    cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::initHierarchies,
+            InitBodyGroup
+         >>({cur_node});
+
+    cur_node = builder.addToGraph<
+        ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
+
+    // Dumb that we have to run this twice in a frame but it's cheap
+    // as hell so we'll just do that for now.
+    cur_node =
+        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Entity,
+            Position,
+            Rotation,
+            Scale,
+            LinkParentDofObject
+        >>({cur_node});
 
     return cur_node;
 }

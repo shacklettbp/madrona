@@ -428,6 +428,8 @@ struct GPUEngineState {
 #endif
 
     HeapArray<void *> exportedColumns;
+    HeapArray<void *> exportedCheckpoints;
+    uint32_t *checkpointSizes;
 
     FreeQueue *freeQueue;
 };
@@ -2041,7 +2043,12 @@ static GPUEngineState initEngineAndUserState(
     memcpy(exported_cols.data(), exported_readback,
            sizeof(void *) * (uint64_t)num_exported);
 
+    HeapArray<void *> exported_checkpoints(num_checkpoints);
+    memcpy(exported_checkpoints.data(), checkpoint_ptr_readback,
+           sizeof(void *) * (uint64_t)num_checkpoints);
+
     cu::deallocCPU(exported_readback);
+    cu::deallocCPU(checkpoint_ptr_readback);
 
     if (render_cfg.has_value()) { 
         auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
@@ -2096,6 +2103,8 @@ static GPUEngineState initEngineAndUserState(
         std::move(device_tracing),
 #endif
         std::move(exported_cols),
+        std::move(exported_checkpoints),
+        checkpoint_size_readback,
         fq
     };
 }
@@ -2897,6 +2906,16 @@ void MWCudaExecutor::runAsync(MWCudaLaunchGraph &launch_graph,
 void * MWCudaExecutor::getExported(CountT slot) const
 {
     return impl_->engineState.exportedColumns[slot];
+}
+
+void * MWCudaExecutor::getCheckpoint(CountT checkpoint_idx) const
+{
+    return impl_->engineState.exportedCheckpoints[checkpoint_idx];
+}
+
+uint32_t MWCudaExecutor::getCheckpointSize(CountT checkpoint_idx) const
+{
+    return impl_->engineState.checkpointSizes[checkpoint_idx];
 }
 
 }

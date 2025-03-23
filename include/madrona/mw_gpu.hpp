@@ -161,6 +161,12 @@ public:
     // ECSRegister::exportColumn. Note that this will be a GPU pointer.
     void * getExported(CountT slot) const;
 
+    // Get the base pointer of the checkpoint data at `checkpoint_idx`
+    void * getCheckpoint(CountT checkpoint_idx) const;
+
+    // Get number of bytes in the checkpoint.
+    uint32_t getCheckpointSize(CountT checkpoint_idx) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
