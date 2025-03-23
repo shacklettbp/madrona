@@ -1998,63 +1998,54 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         assert(b_scale.d0 == b_scale.d1);
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 plane_normal = a_rot.rotateVec(base_normal);
-
         Vector3 cap_axis = b_rot.rotateVec(base_normal);
         Vector3 cap_p1 = b_pos -
             cap_axis * scaled_capsule.cylinderHeight * 0.5f;
         Vector3 cap_p2 = b_pos +
             cap_axis * scaled_capsule.cylinderHeight * 0.5f;
 
-        { // Do plane / capsule collision test
-            float dp1 = (cap_p1 - a_pos).dot(plane_normal);
-            float dp2 = (cap_p2 - a_pos).dot(plane_normal);
+        // Do plane / capsule collision test
+        //  check the collision between the two spheres
+        auto [is_contact_a, contact_a] = spherePlaneContact(
+            cap_p1, a_pos, a_rot, scaled_capsule.radius);
+        auto [is_contact_b, contact_b] = spherePlaneContact(
+            cap_p2, a_pos, a_rot, scaled_capsule.radius);
+        // Negate since objects a and b are swapped
+        contact_a.normal *= -1.f;
+        contact_b.normal *= -1.f;
 
-            // These points must be on the same side of the plane
-            // assert(dp1 * dp2 > 0.f);
+        if (!is_contact_a && !is_contact_b) {
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        }
+        else if (is_contact_a && !is_contact_b) {
+            NarrowphaseResult result = {};
+            result.type = ContactType::Sphere;
+            result.sphere = contact_a;
+            return result;
+        }
+        else if (!is_contact_a && is_contact_b) {
+            NarrowphaseResult result = {};
+            result.type = ContactType::Sphere;
+            result.sphere = contact_b;
+            return result;
+        }
+        // Capsule is horizontal with plane
+        else {
+            ConvexContact cv_contact = {};
+            cv_contact.numContactPoints = 2;
+            cv_contact.contactPoints[0] = contact_a.pt;
+            cv_contact.contactPoints[1] = contact_b.pt;
+            cv_contact.penetrationDepths[0] = contact_a.depth;
+            cv_contact.penetrationDepths[1] = contact_b.depth;
+            cv_contact.normals[0] = contact_a.normal;
+            cv_contact.normals[1] = contact_b.normal;
 
-            // Check the collision between the two spheres
-            auto [is_contact_a, contact_a] = spherePlaneContact(
-                cap_p1, a_pos, a_rot, scaled_capsule.radius);
-            auto [is_contact_b, contact_b] = spherePlaneContact(
-                cap_p2, a_pos, a_rot, scaled_capsule.radius);
-            // Negate since objs a and b are swapped
-            contact_a.normal *= -1.f;
-            contact_b.normal *= -1.f;
-
-            if (!is_contact_a && !is_contact_b) {
-                NarrowphaseResult result;
-                result.type = ContactType::None;
-                return result;
-            }
-            else if (is_contact_a && !is_contact_b) {
-                NarrowphaseResult result = {};
-                result.type = ContactType::Sphere;
-                result.sphere = contact_a;
-                return result;
-            }
-            else if (!is_contact_a && is_contact_b) {
-                NarrowphaseResult result = {};
-                result.type = ContactType::Sphere;
-                result.sphere = contact_b;
-                return result;
-            }
-            // Capsule is horizontal with plane
-            else {
-                ConvexContact cv_contact = {};
-                cv_contact.numContactPoints = 2;
-                cv_contact.contactPoints[0] = contact_a.pt;
-                cv_contact.contactPoints[1] = contact_b.pt;
-                cv_contact.penetrationDepths[0] = contact_a.depth;
-                cv_contact.penetrationDepths[1] = contact_b.depth;
-                cv_contact.normals[0] = contact_a.normal;
-                cv_contact.normals[1] = contact_b.normal;
-
-                NarrowphaseResult result = {};
-                result.type = ContactType::Convex;
-                result.convex = cv_contact;
-                return result;
-            }
+            NarrowphaseResult result = {};
+            result.type = ContactType::Convex;
+            result.convex = cv_contact;
+            return result;
         }
     } break;
     case NarrowphaseTest::SpherePlane: {
