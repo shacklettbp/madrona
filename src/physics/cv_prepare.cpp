@@ -204,29 +204,6 @@ void forwardKinematics(Context &,
         } break;
         }
     }
-
-    // We need to fix the COM pos for joint -> fixed body -> ...
-    //  the fixed body should contribute to the COM position of the joint.
-    //  This can also be handled in urdf loading though
-    BodyInertial *all_inertials = m.inertials(p);
-    for (CountT i = p.numBodies - 1; i >= 0; --i) {
-        BodyInertial &curr_inertia = all_inertials[i];
-        BodyOffsets offsets = all_offsets[i];
-        uint8_t parent = offsets.parent;
-        if (curr_inertia.mass != 0 &&
-            offsets.dofType == DofType::FixedBody &&
-            parent != 0xFF) {
-            BodyTransform &curr_transform = all_transforms[i];
-            BodyTransform &parent_transform = all_transforms[parent];
-            BodyInertial &parent_inertia = all_inertials[parent];
-            float combinedMass = parent_inertia.mass + curr_inertia.mass;
-            parent_transform.com = (parent_transform.com * parent_inertia.mass +
-                                    curr_transform.com * curr_inertia.mass) /
-                                    combinedMass;
-            parent_inertia.mass = combinedMass;
-            curr_inertia.mass = 0.f;
-        }
-    }
 }
 
 
@@ -389,7 +366,7 @@ void computeSpatialInertiasAndPhi(Context &ctx,
     // --------- Compute spatial inertias -------------
     BodyInertial inertial = mem.inertials(prop)[obj_grp.idx];
     BodyTransform transform = mem.bodyTransforms(prop)[obj_grp.idx];
-    Diag3x3 inertia = inertial.inertia * prop.globalScale * prop.globalScale;
+    Diag3x3 inertia = inertial.inertia;
     float mass = inertial.mass;
 
     // We need to find inertia tensor in world space orientation
@@ -1434,6 +1411,38 @@ inline void computeExpandedParent(Context &ctx,
     }
 }
 
+// We need to:
+// 1. Adjust inertias and masses with the global scale
+// 2. Fix the masses for joint -> fixed body -> ...
+//  The fixed body should contribute to the total mass of the joint.
+//  This can also be handled in urdf loading though
+inline void adjustMasses(BodyGroupMemory &m,
+                         BodyGroupProperties &p) {
+    BodyOffsets *all_offsets = m.offsets(p);
+    BodyInertial *all_inertials = m.inertials(p);
+
+    // First, adjust the inertias and masses with the global scale
+    float mass_scale = p.globalScale * p.globalScale * p.globalScale;
+    float inertia_scale = p.globalScale * p.globalScale;
+    for (CountT i = 0; i < p.numBodies; ++i) {
+        BodyInertial &inertia = all_inertials[i];
+        inertia.mass *= mass_scale;
+        inertia.inertia *= mass_scale * inertia_scale;
+    }
+
+    // Then propagate the mass of fixed bodies to their parents
+    for (CountT i = p.numBodies - 1; i >= 0; --i) {
+        BodyOffsets offsets = all_offsets[i];
+        uint8_t parent = offsets.parent;
+        if (offsets.dofType == DofType::FixedBody && parent != 0xFF) {
+            BodyInertial &curr_inertia = all_inertials[i];
+            BodyInertial &parent_inertia = all_inertials[parent];
+            parent_inertia.mass = parent_inertia.mass + curr_inertia.mass;
+            curr_inertia.mass = 0.f;
+        }
+    }
+}
+
 void initHierarchies(Context &ctx,
                      InitBodyGroup body_grp)
 {
@@ -1441,6 +1450,7 @@ void initHierarchies(Context &ctx,
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
     computeExpandedParent(ctx, m, p);
+    adjustMasses(m, p);
     forwardKinematics(ctx, m, p);
 
     if (p.qvDim > 0) {
