@@ -1016,10 +1016,7 @@ inline void processContacts(Context &ctx,
         }
     }
 
-    float mu_ref = mem_ref.mus(prop_ref)[ref_body_idx];
-    float mu_alt = mem_alt.mus(prop_alt)[alt_body_idx];
-
-    // Create a coordinate system for the contact
+    // Create a coordinate frame for the contact
     Vector3 n = contact.normal.normalize();
     Vector3 t{};
 
@@ -1035,6 +1032,8 @@ inline void processContacts(Context &ctx,
     tmp_state.C[2] = s;
 
     // Get friction coefficient
+    float mu_ref = mem_ref.mus(prop_ref)[ref_body_idx];
+    float mu_alt = mem_alt.mus(prop_alt)[alt_body_idx];
     float mu = fminf(mu_ref, mu_alt);
     tmp_state.mu = mu;
 }
