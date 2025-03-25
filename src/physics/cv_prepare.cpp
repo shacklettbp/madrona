@@ -171,13 +171,14 @@ void forwardKinematics(Context &,
                         hier.relPositionParent);
 
             // Phi only depends on the hinge point and parent rotation
+            Quat composedRot = curr_transform->composedRot;
             curr_phi->phi[0] = anchor_pos[0];
             curr_phi->phi[1] = anchor_pos[1];
             curr_phi->phi[2] = anchor_pos[2];
-            curr_phi->phi[3] = parent_transform.composedRot.w;
-            curr_phi->phi[4] = parent_transform.composedRot.x;
-            curr_phi->phi[5] = parent_transform.composedRot.y;
-            curr_phi->phi[6] = parent_transform.composedRot.z;
+            curr_phi->phi[3] = composedRot.w;
+            curr_phi->phi[4] = composedRot.x;
+            curr_phi->phi[5] = composedRot.y;
+            curr_phi->phi[6] = composedRot.z;
         } break;
 
         case DofType::FixedBody: {
@@ -252,20 +253,37 @@ void computePhi(
         S[5] = 0.f;
     } else if (dof_type == DofType::Hinge) {
         // S = [r \cross hinge; hinge]
-        Vector3 hinge = {body_phi.phi[0], body_phi.phi[1], body_phi.phi[2]};
+        Vector3 hinge_axis = {body_phi.phi[0], body_phi.phi[1], body_phi.phi[2]};
         Vector3 anchorPos = {body_phi.phi[3], body_phi.phi[4], body_phi.phi[5]};
         Vector3 offset = origin - anchorPos;
 
-        Vector3 r_cross_hinge = hinge.cross(offset);
+        Vector3 r_cross_hinge = hinge_axis.cross(offset);
         S[0] = r_cross_hinge.x;
         S[1] = r_cross_hinge.y;
         S[2] = r_cross_hinge.z;
-        S[3] = hinge.x;
-        S[4] = hinge.y;
-        S[5] = hinge.z;
+        S[3] = hinge_axis.x;
+        S[4] = hinge_axis.y;
+        S[5] = hinge_axis.z;
     } else if (dof_type == DofType::Ball) {
-        // TODO: revisit me
-        assert(false);
+        // S = [r^xR
+        //      R    ]
+        Vector3 anchor_pos = { body_phi.phi[0], body_phi.phi[1], body_phi.phi[2] };
+        Vector3 offset = origin - anchor_pos;
+        Mat3x3 rot = Mat3x3::fromQuat(Quat {
+            body_phi.phi[3],
+            body_phi.phi[4],
+            body_phi.phi[5],
+            body_phi.phi[6]
+        });
+        Mat3x3 rx_rot = Mat3x3::skewSym(offset) * rot;
+        for (int col = 0; col < 3; ++col) {
+            S[col * 6 + 0] = rx_rot[col][0];
+            S[col * 6 + 1] = rx_rot[col][1];
+            S[col * 6 + 2] = rx_rot[col][2];
+            S[col * 6 + 3] = rot[col][0];
+            S[col * 6 + 4] = rot[col][1];
+            S[col * 6 + 5] = rot[col][2];
+        }
     } else {
         // MADRONA_UNREACHABLE();
     }
@@ -308,17 +326,31 @@ void computePhiTrans(DofType dof_type,
         S[2] = body_phi.phi[2];
     }
     else if (dof_type == DofType::Hinge) {
-        Vector3 hinge = { body_phi.phi[0], body_phi.phi[1], body_phi.phi[2] };
-        Vector3 anchorPos = { body_phi.phi[3], body_phi.phi[4], body_phi.phi[5] };
+        Vector3 hinge_axis = {body_phi.phi[0], body_phi.phi[1], body_phi.phi[2]};
+        Vector3 anchorPos = {body_phi.phi[3], body_phi.phi[4], body_phi.phi[5]};
         Vector3 offset = origin - anchorPos;
-        Vector3 r_cross_hinge = hinge.cross(offset);
+        Vector3 r_cross_hinge = hinge_axis.cross(offset);
         S[0] = r_cross_hinge.x;
         S[1] = r_cross_hinge.y;
         S[2] = r_cross_hinge.z;
     }
     else if (dof_type == DofType::Ball) {
-        // TODO: revisit me
-        assert(false);
+        // S_trans = [r^xR]
+        Vector3 anchor_pos = { body_phi.phi[0], body_phi.phi[1], body_phi.phi[2] };
+        Vector3 offset = origin - anchor_pos;
+        Mat3x3 rot = Mat3x3::fromQuat(Quat {
+            body_phi.phi[3],
+            body_phi.phi[4],
+            body_phi.phi[5],
+            body_phi.phi[6]
+        });
+        Mat3x3 rx_rot = Mat3x3::skewSym(offset) * rot;
+
+        for (int col = 0; col < 3; ++col) {
+            S[col * 3 + 0] = rx_rot[col][0];
+            S[col * 3 + 1] = rx_rot[col][1];
+            S[col * 3 + 2] = rx_rot[col][2];
+        }
     }
     else {
         // MADRONA_UNREACHABLE();
@@ -338,8 +370,12 @@ void computeGroupCOM(Context &ctx,
     uint32_t num_bodies = prop.numBodies;
     BodyInertial *inertials = mem.inertials(prop);
     BodyTransform* transforms = mem.bodyTransforms(prop);
+    uint32_t* is_static = mem.isStatic(prop);
+
 
     for (uint32_t i = 0; i < num_bodies; ++i) {
+        if (is_static[i]) continue; // Ignore static bodies
+
         BodyInertial body_inertia = inertials[i];
         BodyTransform body_transform = transforms[i];
         // If infinite mass (likely ground plane)
@@ -766,11 +802,9 @@ void compositeRigidBody(
 
     // ----------------- Compute Free Acceleration -----------------
     float *bias = mem.biasVector(prop);
-
     for (CountT i = 0; i < prop.qvDim; ++i) {
         bias[i] = -bias[i];
     }
-
     // This overwrites bias with the acceleration
     solveM(prop, mem, bias);
 }
@@ -786,6 +820,7 @@ inline void recursiveNewtonEuler(
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     BodyOffsets* offsets = mem.offsets(prop);
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
+    uint32_t* is_static = mem.isStatic(prop);
     float* qvs = mem.qv(prop);
 
     MADRONA_GPU_SINGLE_THREAD {
@@ -812,10 +847,12 @@ inline void recursiveNewtonEuler(
                 // v_0 = 0, a_0 = -g (fictitious upward acceleration)
                 sv.sVel = {Vector3::zero(), Vector3::zero()};
                 sv.sAcc = {-physics_state.g, Vector3::zero()};
+                sv.sForce = {Vector3::zero(), Vector3::zero()};
             } else {
                 BodySpatialVectors &p_sv = spatialVectors[body_offset.parent];
                 sv.sVel = p_sv.sVel;
                 sv.sAcc = p_sv.sAcc;
+                sv.sForce = {Vector3::zero(), Vector3::zero()};
             }
 
             // Update velocity, compute S_dot, update acceleration
@@ -858,7 +895,30 @@ inline void recursiveNewtonEuler(
                     break;
                 }
                 case DofType::Ball: {
-                    assert(false); // TODO!
+                    assert(body_offset.parent != 0xFF);
+                    // Each column of S_dot = v [spatial cross] S_col
+                    for (uint32_t j = 0; j < 3; ++j) {
+                        SpatialVector S_col = SpatialVector::fromVec(S + 6 * j);
+                        SpatialVector tmp = sv.sVel.crossMotion(S_col);
+                        // Copy to S_dot
+                        for (uint32_t k = 0; k < 6; ++k) {
+                            S_dot_i(k, j) = tmp[k];
+                        }
+                    }
+
+                    // Update velocity: S_i * \dot{q}_i (rotational part)
+                    for (uint32_t j = 0; j < 6; ++j) {
+                        for (uint32_t k = 0; k < 3; ++k) {
+                            sv.sVel[j] += S_i(j, k) * qv[k];
+                        }
+                    }
+
+                    // Update acceleration: \dot{S}_i * \dot{q}_i + S_i * \ddot{q}_i
+                    for (uint32_t j = 0; j < 6; ++j) {
+                        for (uint32_t k = 0; k < 3; ++k) {
+                            sv.sAcc[j] += S_dot_i(j, k) * qv[k];
+                        }
+                    }
                     break;
                 }
                 case DofType::FixedBody: {
@@ -890,10 +950,11 @@ inline void recursiveNewtonEuler(
 
         // Backward pass to accumulate
         for (CountT i = prop.numBodies-1; i >= 0; --i) {
-            if (offsets[i].parent != 0xFF) {
+            uint8_t parent = offsets[i].parent;
+            if (parent != 0xFF) {
                 BodySpatialVectors& spatial_vector = spatialVectors[i];
-                BodySpatialVectors& parent_spatial_vector = spatialVectors[offsets[i].parent];
-                parent_spatial_vector.sForce += spatial_vector.sForce;
+                BodySpatialVectors& p_spatial_vector = spatialVectors[parent];
+                p_spatial_vector.sForce += spatial_vector.sForce;
             }
         }
 
@@ -942,7 +1003,8 @@ inline void processContacts(Context &ctx,
     }
 
     // Filter out parent-child contacts and contacts between the same body
-    if(ref_grp == alt_grp) {
+    //  Keep static-dynamic contacts
+    if(ref_grp == alt_grp && (!ref_static && !alt_static)) {
         BodyOffsets *offsets = mem_ref.offsets(prop_ref);
         BodyOffsets offset_ref = offsets[ref_body_idx];
         BodyOffsets offset_alt = offsets[alt_body_idx];
@@ -1023,9 +1085,9 @@ inline void exportCPUSolverState(
         BodyGroupProperties &p = all_properties[i];
 
         float *local_mass = m.massMatrix(p);
+        float *freeAcceleration = m.biasVector(p);
 
         for (CountT row = 0; row < p.qvDim; ++row) {
-            float *freeAcceleration = m.biasVector(p);
             full_free_acc[row + processed_dofs] = freeAcceleration[row];
 
             for (CountT col = 0; col < p.qvDim; ++col) {
@@ -1919,11 +1981,26 @@ inline void computeInvMass(
     }
 }
 
+inline Quat integrateQuaternion(Quat curr_rot,
+                                Vector3 axis,
+                                float h) {
+    float norm = axis.length();
+    float angle = h * norm;
+    if (norm < 1e-12) {
+        axis = {1.f, 0.f, 0.f};
+    } else {
+        axis /= norm;
+    }
+    Quat rot = Quat::angleAxis(angle, axis).normalize();
+    Quat new_rot = curr_rot * rot;
+    new_rot = new_rot.normalize();
+    return new_rot;
+}
+
 inline void integrationStep(Context &ctx,
                             DofObjectGroup grp_info)
 {
     float h = ctx.singleton<PhysicsSystemState>().h;
-
     if (!ctx.singleton<CVSolveData>().enablePhysics) {
         return;
     }
@@ -1948,16 +2025,8 @@ inline void integrationStep(Context &ctx,
 
         // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
         Vector3 axis = Vector3{qv[3], qv[4], qv[5]};
-        float norm = axis.length();
-        float angle = h * norm;
-        if (norm < 1e-12) {
-            axis = {1.f, 0.f, 0.f};
-        } else {
-            axis /= norm;
-        }
-        Quat rot = Quat::angleAxis(angle, axis).normalize();
         Quat curr_rot = Quat { q[3], q[4], q[5], q[6] }.normalize();
-        Quat new_rot = curr_rot * rot;
+        Quat new_rot = integrateQuaternion(curr_rot, axis, h);
 
         q[3] = new_rot.w;
         q[4] = new_rot.x;
@@ -1982,26 +2051,9 @@ inline void integrationStep(Context &ctx,
         }
 
         // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
-        Vector3 omega = { qv[0], qv[1], qv[2] };
-        Quat rot_quat = { q[0], q[1], q[2], q[3] };
-        Quat new_rot = { rot_quat.w, rot_quat.x, rot_quat.y, rot_quat.z };
-        new_rot.w += 0.5f * h * (-rot_quat.x * omega.x -
-                                 rot_quat.y * omega.y -
-                                 rot_quat.z * omega.z);
-
-        new_rot.x += 0.5f * h * (rot_quat.w * omega.x +
-                                 rot_quat.z * omega.y -
-                                 rot_quat.y * omega.z);
-
-        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x +
-                                 rot_quat.w * omega.y +
-                                 rot_quat.x * omega.z);
-
-        new_rot.z += 0.5f * h * (rot_quat.y * omega.x -
-                                 rot_quat.x * omega.y +
-                                 rot_quat.w * omega.z);
-
-        new_rot = new_rot.normalize();
+        Vector3 axis = Vector3{qv[0], qv[1], qv[2]};
+        Quat curr_rot = Quat { q[0], q[1], q[2], q[3] }.normalize();
+        Quat new_rot = integrateQuaternion(curr_rot, axis, h);
 
         q[0] = new_rot.w;
         q[1] = new_rot.x;

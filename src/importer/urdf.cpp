@@ -199,6 +199,7 @@ enum class URDFJointType {
     Prismatic, // Sliding joint with limits
     Floating,
     Planar,
+    Spherical,
     Fixed,
     Invalid,
 };
@@ -208,6 +209,10 @@ static DofType urdfToDofType(URDFJointType type)
     switch (type) {
     case URDFJointType::Revolute: {
         return DofType::Hinge;
+    };
+
+    case URDFJointType::Spherical: {
+        return DofType::Ball;
     };
 
     case URDFJointType::Continuous: {
@@ -223,7 +228,7 @@ static DofType urdfToDofType(URDFJointType type)
     };
 
     case URDFJointType::Planar: {
-        return DofType::Ball;
+        assert(false);
     };
 
     case URDFJointType::Fixed: {
@@ -456,6 +461,9 @@ static void parseGeometry(URDFGeometry &geom, tinyxml2::XMLElement *g)
         geom.type = URDFGeometryType::Box;
         parseBox(geom.box, shape);
     } else if (type_name == "cylinder") {
+        geom.type = URDFGeometryType::Cylinder;
+        parseCylinder(geom.cylinder, shape);
+    } else if (type_name == "capsule") {
         geom.type = URDFGeometryType::Cylinder;
         parseCylinder(geom.cylinder, shape);
     } else if (type_name == "mesh") {
@@ -923,6 +931,8 @@ static void parseJoint(
         joint.type = URDFJointType::Prismatic;
     else if (type_str == "fixed")
         joint.type = URDFJointType::Fixed;
+    else if (type_str == "spherical")
+        joint.type = URDFJointType::Spherical;
     else
         massert(false, "Joint doesn't have a known type");
 
@@ -1323,6 +1333,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             .numLimits = num_limits,
             .mass = link.inertial.mass,
             .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
+            .initialRot = Quat::id(), // for ball joints
             // ... ?
             .muS = 1.0f
         };
@@ -1546,8 +1557,8 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
             case URDFGeometryType::Cylinder: {
                 scale = Vector3 {
-                    collision.geometry.cylinder.radius / 2.f,
-                    collision.geometry.cylinder.radius / 2.f,
+                    collision.geometry.cylinder.radius,
+                    collision.geometry.cylinder.radius,
                     collision.geometry.cylinder.length / 2.f
                 };
                 obj_id = primitives.capsulePhysicsIdx;
@@ -1617,8 +1628,8 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
             case URDFGeometryType::Cylinder: {
                 scale = Vector3 {
-                    visual.geometry.cylinder.radius / 2.f,
-                    visual.geometry.cylinder.radius / 2.f,
+                    visual.geometry.cylinder.radius,
+                    visual.geometry.cylinder.radius,
                     visual.geometry.cylinder.length / 2.f
                 };
                 obj_id = primitives.capsuleRenderIdx;
