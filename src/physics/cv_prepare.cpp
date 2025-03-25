@@ -364,32 +364,55 @@ void computeGroupCOM(Context &ctx,
 {
     (void)ctx;
 
-    Vector3 hierarchy_com = Vector3::zero();
-    float total_mass = 0.f;
-
     uint32_t num_bodies = prop.numBodies;
     BodyInertial *inertials = mem.inertials(prop);
     BodyTransform* transforms = mem.bodyTransforms(prop);
+    BodyOffsets* offsets = mem.offsets(prop);
     uint32_t* is_static = mem.isStatic(prop);
 
-
+    Vector3 hierarchy_com = Vector3::zero();
+    float total_mass = 0.f;
+    // Pass over all bodies
     for (uint32_t i = 0; i < num_bodies; ++i) {
         if (is_static[i]) continue; // Ignore static bodies
-
-        BodyInertial body_inertia = inertials[i];
-        BodyTransform body_transform = transforms[i];
+        BodyInertial &body_inertia = inertials[i];
+        BodyTransform &body_transform = transforms[i];
         // If infinite mass (likely ground plane)
         if (1.f / body_inertia.mass == 0.f) {
             assert(num_bodies == 1);
             prop.comPos = body_transform.com;
             return;
         }
-
         hierarchy_com += body_inertia.mass * body_transform.com;
         total_mass += body_inertia.mass;
     }
-
     prop.comPos = hierarchy_com / total_mass;
+
+    printf("total mass: %f\n", total_mass);
+    printf("com: %f %f %f\n", prop.comPos[0], prop.comPos[1], prop.comPos[2]);
+
+    // Fixed bodies should propagate all their information to their parent
+    for (CountT i = num_bodies - 1; i >= 0; --i) {
+        BodyOffsets &body_offset = offsets[i];
+        uint8_t parent = body_offset.parentWithDof;
+        if (body_offset.dofType == DofType::FixedBody && parent != 0xFF) {
+            BodyInertial &curr_inertia = inertials[i];
+            BodyInertial &parent_inertia = inertials[parent];
+            BodyTransform &curr_transform = transforms[i];
+            BodyTransform &parent_transform = transforms[parent];
+            // Combine the masses, compute the COM of the combined mass
+            float combined_mass = curr_inertia.mass + parent_inertia.mass;
+            Vector3 adjusted_com = curr_inertia.mass * curr_transform.com +
+                                   parent_inertia.mass * parent_transform.com;
+            adjusted_com /= combined_mass;
+            // Add all mass to parents, set COM to the combined COM
+            curr_inertia.mass = 0.f;
+            parent_inertia.mass = combined_mass;
+            curr_transform.com = adjusted_com;
+            parent_transform.com = adjusted_com;
+        }
+    }
+
 }
 
 void computeSpatialInertiasAndPhi(Context &ctx,
@@ -1472,35 +1495,16 @@ inline void computeExpandedParent(Context &ctx,
     }
 }
 
-// We need to:
-// 1. Adjust inertias and masses with the global scale
-// 2. Fix the masses for joint -> fixed body -> ...
-//  The fixed body should contribute to the total mass of the joint.
-//  This can also be handled in urdf loading though
-inline void adjustMasses(BodyGroupMemory &m,
-                         BodyGroupProperties &p) {
-    BodyOffsets *all_offsets = m.offsets(p);
+// Reset masses to original values, adjust with global scale
+inline void resetMasses(BodyGroupMemory &m,
+                        BodyGroupProperties &p) {
     BodyInertial *all_inertials = m.inertials(p);
-
-    // First, adjust the inertias and masses with the global scale
     float mass_scale = p.globalScale * p.globalScale * p.globalScale;
     float inertia_scale = p.globalScale * p.globalScale;
     for (CountT i = 0; i < p.numBodies; ++i) {
         BodyInertial &inertia = all_inertials[i];
-        inertia.mass *= mass_scale;
-        inertia.inertia *= mass_scale * inertia_scale;
-    }
-
-    // Then propagate the mass of fixed bodies to their parents
-    for (CountT i = p.numBodies - 1; i >= 0; --i) {
-        BodyOffsets offsets = all_offsets[i];
-        uint8_t parent = offsets.parent;
-        if (offsets.dofType == DofType::FixedBody && parent != 0xFF) {
-            BodyInertial &curr_inertia = all_inertials[i];
-            BodyInertial &parent_inertia = all_inertials[parent];
-            parent_inertia.mass = parent_inertia.mass + curr_inertia.mass;
-            curr_inertia.mass = 0.f;
-        }
+        inertia.mass = inertia.originalMass * mass_scale;
+        inertia.inertia = inertia.originalInertia * inertia_scale;
     }
 }
 
@@ -1511,7 +1515,7 @@ void initHierarchies(Context &ctx,
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
     computeExpandedParent(ctx, m, p);
-    adjustMasses(m, p);
+    resetMasses(m, p);
     forwardKinematics(ctx, m, p);
 
     if (p.qvDim > 0) {
@@ -1906,6 +1910,12 @@ inline void computeInvMass(
         float b = inertial.approxInvMassRot =
             (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
 
+        printf("--------------------\n");
+        // printf("num dofs %d\n", offsets[i_body].numDofs);
+        printf("com %f %f %f\n", transform.com.x, transform.com.y, transform.com.z);
+        printf("mass %f \n", inertial.mass);
+        // printf("parent %d\n", offsets[i_body].parent);
+        // printf("parentWithDof %d\n", offsets[i_body].parentWithDof);
         printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
     }
 

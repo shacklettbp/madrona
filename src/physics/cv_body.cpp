@@ -221,7 +221,9 @@ static void initBodyGroupMemory(
             // Fill in inertia
             inertials[i] = BodyInertial {
                 .mass = bd.mass,
-                .inertia = bd.inertia
+                .inertia = bd.inertia,
+                .originalMass = bd.mass,
+                .originalInertia = bd.inertia,
             };
 
             assert((uint8_t *)(inertials + i) < max_ptr);

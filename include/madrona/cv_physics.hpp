@@ -84,6 +84,10 @@ struct BodyInertial {
     float mass;
     math::Diag3x3 inertia;
 
+    // Original mass and inertia
+    float originalMass;
+    math::Diag3x3 originalInertia;
+
     // Estimated inverse weight for the body
     float approxInvMassTrans;
     float approxInvMassRot;
