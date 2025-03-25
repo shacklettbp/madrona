@@ -1258,7 +1258,6 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             // ... ?
             .muS = 1.0f
         };
-        printf("root num visuals: %d\n", link.totalNumVisualGeoms());
 
         bodyDescs.push_back(body_desc);
         cfg.numBodies++;
@@ -1350,8 +1349,6 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             // ... ?
             .muS = 1.0f
         };
-        printf("not root num visuals: %d\n", link.totalNumVisualGeoms());
-        printf("not root num colliders: %d\n", link.collisionArray.size());
 
         total_num_dofs += BodyOffsets::getDofTypeDim(body_desc.type);
 
