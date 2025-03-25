@@ -388,9 +388,6 @@ void computeGroupCOM(Context &ctx,
     }
     prop.comPos = hierarchy_com / total_mass;
 
-    printf("total mass: %f\n", total_mass);
-    printf("com: %f %f %f\n", prop.comPos[0], prop.comPos[1], prop.comPos[2]);
-
     // Fixed bodies should propagate all their information to their parent
     for (CountT i = num_bodies - 1; i >= 0; --i) {
         BodyOffsets &body_offset = offsets[i];
@@ -408,11 +405,11 @@ void computeGroupCOM(Context &ctx,
             // Add all mass to parents, set COM to the combined COM
             curr_inertia.mass = 0.f;
             parent_inertia.mass = combined_mass;
-            curr_transform.com = adjusted_com;
             parent_transform.com = adjusted_com;
+            // Note: we don't adjust child COM since the inertia tensor isn't
+            //   added here
         }
     }
-
 }
 
 void computeSpatialInertiasAndPhi(Context &ctx,
@@ -1854,12 +1851,17 @@ inline void computeInvMass(
     // Compute the inverse weight for each body
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
         BodyInertial &inertial = inertials[i_body];
+        BodyOffsets &offset = offsets[i_body];
         if(is_static[i_body]) {
             inertial.approxInvMassTrans = 0.f;
             inertial.approxInvMassRot = 0.f;
             continue;
         }
+        // Use (adjusted) parent COM if the body is fixed
         BodyTransform transform = transforms[i_body];
+        Vector3 com = (offset.dofType == DofType::FixedBody &&
+                       offset.parentWithDof != 0xFF) ?
+            transforms[offset.parentWithDof].com : transform.com;
 
         // Compute J
         memset(J, 0.f, 6 * p.qvDim * sizeof(float));
@@ -1867,7 +1869,7 @@ inline void computeInvMass(
                 m,
                 p,
                 (uint8_t)i_body,
-                transform.com,
+                com,
                 J, 0, 0, 6);
 
         // Helper
@@ -1910,12 +1912,8 @@ inline void computeInvMass(
         float b = inertial.approxInvMassRot =
             (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
 
-        printf("--------------------\n");
-        // printf("num dofs %d\n", offsets[i_body].numDofs);
-        printf("com %f %f %f\n", transform.com.x, transform.com.y, transform.com.z);
-        printf("mass %f \n", inertial.mass);
-        // printf("parent %d\n", offsets[i_body].parent);
-        // printf("parentWithDof %d\n", offsets[i_body].parentWithDof);
+        // printf("--------------------\n");
+        // printf("mass %f \n", inertial.mass);
         printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
     }
 
