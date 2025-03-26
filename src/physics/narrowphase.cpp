@@ -1835,9 +1835,6 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
     } break;
 
     case NarrowphaseTest::SphereCapsule: {
-        NarrowphaseResult result;
-            // result.type = ContactType::None;
-            // return result;
         assert(a_scale.d0 == a_scale.d1 && a_scale.d0 == a_scale.d2);
         float sphere_radius = a_scale.d0 * a_prim->sphere.radius;
 
@@ -1857,6 +1854,7 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         // NarrowphaseResult result;
         auto [is_contact, contact] = sphereSphereContact(
             a_pos, closest_pt, sphere_radius, cap_radius);
+        NarrowphaseResult result;
         if (is_contact) {
             result.type = ContactType::Sphere;
             result.sphere = contact;
@@ -1953,7 +1951,7 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             if (d > 0.f) {
                 continue;
             }
-            cv_contact.contactPoints[num_contacts] = corner - d * plane_normal;
+            cv_contact.contactPoints[num_contacts] = corner - (0.5f * d) * plane_normal;
             cv_contact.normals[num_contacts] = -plane_normal;
             cv_contact.penetrationDepths[num_contacts] = -d;
             num_contacts++;

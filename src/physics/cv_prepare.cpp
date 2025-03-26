@@ -1912,7 +1912,7 @@ inline void computeInvMass(
         float b = inertial.approxInvMassRot =
             (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
 
-        printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
+        printf("(body %d) mass = %f; inv trans = %f; inv rot %f\n", i_body, inertial.mass, a, b);
     }
 
     // For each DOF, find the inverse weight
