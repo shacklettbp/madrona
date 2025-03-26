@@ -387,29 +387,6 @@ void computeGroupCOM(Context &ctx,
         total_mass += body_inertia.mass;
     }
     prop.comPos = hierarchy_com / total_mass;
-
-    // Fixed bodies should propagate all their information to their parent
-    for (CountT i = num_bodies - 1; i >= 0; --i) {
-        BodyOffsets &body_offset = offsets[i];
-        uint8_t parent = body_offset.parentWithDof;
-        if (body_offset.dofType == DofType::FixedBody && parent != 0xFF) {
-            BodyInertial &curr_inertia = inertials[i];
-            BodyInertial &parent_inertia = inertials[parent];
-            BodyTransform &curr_transform = transforms[i];
-            BodyTransform &parent_transform = transforms[parent];
-            // Combine the masses, compute the COM of the combined mass
-            float combined_mass = curr_inertia.mass + parent_inertia.mass;
-            Vector3 adjusted_com = curr_inertia.mass * curr_transform.com +
-                                   parent_inertia.mass * parent_transform.com;
-            adjusted_com /= combined_mass;
-            // Add all mass to parents, set COM to the combined COM
-            curr_inertia.mass = 0.f;
-            parent_inertia.mass = combined_mass;
-            parent_transform.com = adjusted_com;
-            // Note: we don't adjust child COM since the inertia tensor isn't
-            //   added here
-        }
-    }
 }
 
 void computeSpatialInertiasAndPhi(Context &ctx,
@@ -452,7 +429,6 @@ void computeSpatialInertiasAndPhi(Context &ctx,
 
     // --------- Compute phi  -------------
     // Compute the full matrix/linear operator Phi with body group COM as origin
-
     BodyOffsets offset = mem.offsets(prop)[obj_grp.idx];
 
     DofType dof_type = offset.dofType;
@@ -746,10 +722,10 @@ void compositeRigidBody(
 
     // ----------------- Combine Spatial Inertias -----------------
     uint32_t num_bodies = prop.numBodies;
-    for (CountT i = num_bodies-1; i > 0; --i) {
+    for (CountT i = num_bodies-1; i >= 0; --i) {
         InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
-        uint32_t parent_idx = offsets[i].parent;  // (don't include fixed bodies)
-        assert(parent_idx < 0xFF);
+        uint32_t parent_idx = offsets[i].parent;
+        if (parent_idx == 0xFF) continue;
 
         InertiaTensor& spatial_inertia_parent =
             spatialVectors[parent_idx].spatialInertia;
@@ -840,7 +816,6 @@ inline void recursiveNewtonEuler(
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     BodyOffsets* offsets = mem.offsets(prop);
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
-    uint32_t* is_static = mem.isStatic(prop);
     float* qvs = mem.qv(prop);
 
     MADRONA_GPU_SINGLE_THREAD {
@@ -1848,6 +1823,25 @@ inline void computeInvMass(
     BodyInertial *inertials = m.inertials(p);
     uint32_t *is_static = m.isStatic(p);
 
+    // Compute the COM of the combined subtree mass of fixed bodies
+    for (CountT i = p.numBodies - 1; i >= 0; --i) {
+        BodyOffsets &body_offset = offsets[i];
+        BodyTransform &curr_transform = transforms[i];
+        uint8_t parent = body_offset.parentWithDof;
+        if (body_offset.dofType == DofType::FixedBody && parent != 0xFF) {
+            BodyInertial &curr_inertia = inertials[i];
+            BodyInertial &parent_inertia = inertials[parent];
+            BodyTransform &parent_transform = transforms[parent];
+            // Compute the COM of the combined mass
+            Vector3 adjusted_com = curr_inertia.mass * curr_transform.com +
+                                   parent_inertia.mass * parent_transform.com;
+            adjusted_com /= (curr_inertia.mass + parent_inertia.mass);
+            parent_transform.tmp = adjusted_com;
+        } else {
+           curr_transform.tmp = curr_transform.com;
+        }
+    }
+
     // Compute the inverse weight for each body
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
         BodyInertial &inertial = inertials[i_body];
@@ -1861,7 +1855,7 @@ inline void computeInvMass(
         BodyTransform transform = transforms[i_body];
         Vector3 com = (offset.dofType == DofType::FixedBody &&
                        offset.parentWithDof != 0xFF) ?
-            transforms[offset.parentWithDof].com : transform.com;
+            transforms[offset.parentWithDof].tmp : transform.com;
 
         // Compute J
         memset(J, 0.f, 6 * p.qvDim * sizeof(float));
@@ -1912,8 +1906,9 @@ inline void computeInvMass(
         float b = inertial.approxInvMassRot =
             (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
 
-        // printf("--------------------\n");
-        // printf("mass %f \n", inertial.mass);
+        printf("--------------------\n");
+        printf("mass %f \n", inertial.mass);
+        printf("com %f %f %f\n", transform.com.x, transform.com.y, transform.com.z);
         printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
     }
 

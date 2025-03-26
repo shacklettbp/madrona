@@ -119,6 +119,7 @@ struct BodyObjectData {
 
 struct BodyTransform {
     math::Vector3 com;
+    math::Vector3 tmp;  // used for temporary COM of sub fixed-bodies
     math::Quat composedRot;
 };
 
