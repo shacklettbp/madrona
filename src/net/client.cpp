@@ -100,7 +100,7 @@ void CheckpointClient::update()
             };
 
             if (impl_->trajectories.find(traj_id) == impl_->trajectories.end()) {
-                impl_->trajectories.emplace(Trajectory { "", {} });
+                impl_->trajectories.emplace(std::make_pair(traj_id, Trajectory { "", {} }));
             }
 
             impl_->trajectories[traj_id].snapshots.push_back(snapshot);

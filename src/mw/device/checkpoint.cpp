@@ -122,7 +122,6 @@ void * getCheckpointPtr(Context &ctx,
 
 extern "C" void queryCheckpointInfo(uint32_t num_queries, void *readback)
 {
-#if 0
     using namespace madrona;
     using namespace madrona::CheckpointSystem;
 
@@ -132,24 +131,28 @@ extern "C" void queryCheckpointInfo(uint32_t num_queries, void *readback)
 
     uint32_t *readback_u32 = (uint32_t *)readback;
 
+    struct TrajInfo {
+        uint32_t worldID;
+        uint32_t numSteps;
+        uint32_t offset;
+    };
+
     uint32_t total_num_ckpts = *readback_u32;
     uint32_t *traj_avails = readback_u32 + 1;
-    std::pair<uint32_t, uint32_t> *req_world_ids = 
-        (std::pair<uint32_t, uint32_t> *)(readback_u32 + num_queries);
+    TrajInfo *traj_infos = 
+        (TrajInfo *)(readback_u32 + num_queries);
+    uint32_t *ckpt_sizes = (uint32_t *)(req_world_ids + num_queries);
+    void **ckpt_ptrs = (void **)(ckpt_sizes + total_num_ckpts);
 
+
+
+    // All data for this specific thread
+    uint32_t *curr_traj_avails = traj_avails + tid;
+    TrajInfo *curr_traj_info = traj_infos + tid;
+    uint32_t *curr_ckpt_sizes = ckpt_sizes + curr_traj_info->offset;
+    void **curr_ckpt_ptrs = ckpt_ptrs + curr_traj_info->offset;
     
 
-
-
-    uint32_t *traj_avail = readback_u32 + tid;
-    uint32_t *req_world_id = readback_u32 + num_queries + tid * 2;
-    uint32_t *req_num_steps = req_world_id + 1;
-    uint32_t *ckpt_size = readback_u32 + num_queries + num_queries * 2 + tid;
-    void **ckpt_ptr = (void **)(
-            readback_u32 + 
-            num_queries + 
-            num_queries * 2 + 
-            num_queries) + tid;
 
     // First check if there are enough checkpoints.
     StateManager *state_mgr = mwGPU::getStateManager();
@@ -157,12 +160,28 @@ extern "C" void queryCheckpointInfo(uint32_t num_queries, void *readback)
 
     // Checkpoint *ckpts = ctx.singleton<WorldCheckpoint>().ptr();
     Checkpoint *ckpts = state_mgr->getSingleton<WorldCheckpoint>(
-            *req_world_id).ptr();
+            curr_traj_info->worldID).ptr();
     uint32_t most_recent_write = state_mgr->getSingleton<WorldMostRecentWrite>(
-            *req_world_id);
+            curr_traj_info->worlDID);
 
-    for (uint32_t i = 0; i < num_checkpoints; ++i) {
-        
+    *curr_traj_avails = 1;
+
+    for (uint32_t i = 0; i < curr_traj_info->numSteps; ++i) {
+        uint32_t ckpt_idx = (num_checkpoints + most_recent_write - i) %
+            num_checkpoints;
+
+        if (ckpts[ckpt_idx].data == MemoryRange::none()) {
+            // This trajectory isn't yet available
+            *curr_traj_avails = 0;
+            break;
+        } else {
+            void *ptr = state_mgr->memoryRangePointer(
+                    ckpts[ckpt_idx].data);
+            uint32_t num_bytes = ckpts[ckpt_idx].numBytes;
+
+            // We are going from last to first
+            curr_ckpt_sizes[curr_traj_info->numSteps - 1 - i] = num_bytes;
+            curr_ckpt_ptrs[curr_traj_info->numSteps - 1 - i] = ptr;
+        }
     }
-#endif
 }

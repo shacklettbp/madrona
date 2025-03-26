@@ -1,28 +1,14 @@
 #include <queue>
 #include <madrona/crash.hpp>
 #include <madrona/net/net.hpp>
+
+#ifdef MADRONA_CUDA_SUPPORT
 #include <madrona/cuda_utils.hpp>
+#endif
 
 #include "comm.hpp"
 
 namespace madrona::net {
-
-struct CheckpointServer {
-    struct Config {
-        uint32_t maxClients;
-        uint16_t bindPort;
-    };
-
-    CheckpointServer(const Config &cfg);
-    ~CheckpointServer();
-
-    void update();
-
-private:
-    struct Impl;
-
-    std::unique_ptr<Impl> impl_;
-};
 
 struct PendingRequest {
     enum class RequestType {
@@ -56,10 +42,14 @@ struct CheckpointServer::Impl {
 
     Impl(const Config &cfg);
 
-    void update();
+    void update(
+        void (*query_ckpt_fn)(void *fn_data, uint32_t num_requests, void *params),
+        void *fn_data);
 
     void acceptConnections();
-    void handleRequests();
+    void handleRequests(
+        void (*query_ckpt_fn)(void *fn_data, uint32_t num_requests, void *params),
+        void *fn_data);
 };
 
 CheckpointServer::Impl::Impl(const Config &cfg)
@@ -87,7 +77,9 @@ void CheckpointServer::Impl::acceptConnections()
     }
 }
 
-void CheckpointServer::Impl::handleRequests()
+void CheckpointServer::Impl::handleRequests(
+    void (*query_ckpt_fn)(void *fn_data, uint32_t num_requests, void *params),
+    void *fn_data)
 {
     // These are requests which are currently processing.
     // We need to do some work on the GPU to get some of the information
@@ -142,34 +134,71 @@ void CheckpointServer::Impl::handleRequests()
             total_num_ckpts += processing_requests[i].trajRequest.numSteps;
         }
 
+        struct TrajInfo {
+            uint32_t worldID;
+            uint32_t numSteps;
+            uint32_t offset;
+        };
+
         // Prepare to request information from the GPU
         size_t readback_bytes = 
             sizeof(uint32_t) +
             // GPU will write 0 or 1 to these uint32_t saying whether
             // there is enough data to send to the client.
             sizeof(uint32_t) * processing_requests.size() +
-            // GPU will read from here to see what world / num steps
+            // GPU will read from here to see what world / num steps / prefix sum
             // requested is.
-            sizeof(uint32_t) * 2 * processing_requests.size() +
+            sizeof(TrajInfo) * processing_requests.size() +
             // Sizes of the checkpoint data.
             sizeof(uint32_t) * total_num_ckpts +
             // Pointers to the requested checkpoint data.
             sizeof(void *) * total_num_ckpts;
 
+#ifdef MADRONA_CUDA_SUPPORT
         uint32_t *readback_ptr = (uint32_t *)cu::allocReadback(readback_bytes);
+#else
+        uint32_t *readback_ptr = (uint32_t *)malloc(1);
+        FATAL("Cannot run checkpoint server on non CUDA machine\n");
+#endif
         readback_ptr[0] = total_num_ckpts;
+
+        uint32_t *traj_avails = readback_ptr + 1;
+        TrajInfo *traj_infos = (TrajInfo *)(
+                traj_avails + processing_requests.size());
+        uint32_t *ckpt_sizes = (uint32_t *)(
+                traj_infos + processing_requests.size());
+        void **ckpt_ptrs = (void **)(ckpt_sizes + total_num_ckpts);
+
+        // Calculate prefix sum.
+        uint32_t offset = 0;
+        for (uint32_t i = 0; i < processing_requests.size(); ++i) {
+            traj_infos[i] = {
+                .worldID = processing_requests[i].trajRequest.worldID,
+                .numSteps = processing_requests[i].trajRequest.numSteps,
+                .offset = offset,
+            };
+
+            offset += processing_requests[i].trajRequest.numSteps;
+        }
+
+        // This should fill in everything in readback_ptr
+        query_ckpt_fn(fn_data, processing_requests.size(), readback_ptr);
     }
 }
 
-void CheckpointServer::Impl::update()
+void CheckpointServer::Impl::update(
+    void (*query_ckpt_fn)(void *fn_data, uint32_t num_requests, void *params),
+    void *fn_data)
 {
     acceptConnections();
-    handleRequests();
+    handleRequests(query_ckpt_fn, fn_data);
 }
 
-void CheckpointServer::update()
+void CheckpointServer::updateImpl(
+    void (*query_ckpt_fn)(void *fn_data, uint32_t num_requests, void *params),
+    void *fn_data)
 {
-    impl_->update();
+    impl_->update(query_ckpt_fn, fn_data);
 }
 
 }

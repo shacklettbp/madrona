@@ -110,4 +110,32 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+struct CheckpointServer {
+    struct Config {
+        uint32_t maxClients;
+        uint16_t bindPort;
+    };
+
+    CheckpointServer(const Config &cfg);
+    ~CheckpointServer();
+
+    template <typename FnT>
+    inline void update(FnT &&fn)
+    {
+        updateImpl([](void *fn_data, uint32_t num_requests, void *params) {
+            auto *fn_ptr = (FnT *)fn_data;
+            (*fn_ptr)(num_requests, params);
+        }, (void *)&fn);
+    }
+
+private:
+    struct Impl;
+
+    void updateImpl(
+        void (*query_ckpt_fn)(void *fn_data, uint32_t num_requests, void *params),
+        void *fn_data);
+
+    std::unique_ptr<Impl> impl_;
+};
+
 }
