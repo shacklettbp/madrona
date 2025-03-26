@@ -1,6 +1,8 @@
 add_subdirectory(common)
 add_subdirectory(core)
 
+add_subdirectory(net)
+
 add_subdirectory(importer)
 add_subdirectory(physics)
 

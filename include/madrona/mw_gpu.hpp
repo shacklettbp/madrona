@@ -167,6 +167,9 @@ public:
     // Get number of bytes in the checkpoint.
     uint32_t getCheckpointSize(CountT checkpoint_idx) const;
 
+    // Queries information about which checkpoints are available.
+    void queryCheckpointInfo(uint32_t num_queries, void *readback);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

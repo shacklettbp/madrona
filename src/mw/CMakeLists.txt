@@ -28,6 +28,7 @@ target_link_libraries(madrona_mw_gpu
         madrona_hdrs madrona_cuda
     PRIVATE
         madrona_mw_core madrona_json
+        madrona_net
         CUDA::nvrtc CUDA::cuda_driver
         ${CUDA_NVJITLINK_LIBRARY}
 )

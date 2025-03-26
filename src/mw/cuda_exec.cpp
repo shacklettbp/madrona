@@ -394,6 +394,7 @@ struct GPUKernels {
     CUfunction queueUserRun;
     CUfunction initBVHParams;
     CUfunction destroyECS;
+    CUfunction queryCheckpointInfo;
 };
 
 struct BVHKernelCache {
@@ -458,6 +459,7 @@ struct MWCudaExecutor::Impl {
     bool enableRaycasting;
     BVHKernels bvhKernels;
     CUfunction destroyKernel;
+    CUfunction queryCheckpointInfo;
 
     uint32_t numWorlds;
     uint32_t renderOutputResolution;
@@ -1607,6 +1609,10 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
                                "initBVHParams"));
     REQ_CU(cuModuleGetFunction(&gpu_kernels.destroyECS, gpu_kernels.mod,
                                "freeECSTables"));
+#if 0
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.queryCheckpointInfo, gpu_kernels.mod,
+                              "queryCheckpointInfo"));
+#endif
 
     return gpu_kernels;
 }
@@ -2514,6 +2520,7 @@ MWCudaExecutor::MWCudaExecutor(
         render_cfg.has_value(),
         bvh_kernels,
         gpu_kernels.destroyECS,
+        gpu_kernels.queryCheckpointInfo,
         state_cfg.numWorlds,
         render_cfg.has_value() ? render_cfg->renderResolution : 0,
         (uint32_t)shared_mem_per_sm,
@@ -2917,5 +2924,24 @@ uint32_t MWCudaExecutor::getCheckpointSize(CountT checkpoint_idx) const
 {
     return impl_->engineState.checkpointSizes[checkpoint_idx];
 }
+
+void MWCudaExecutor::queryCheckpointInfo(
+        uint32_t num_queries, void *readback)
+{
+    auto strm = impl_->cuStream;
+
+    auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
+                               uint32_t num_threads,
+                               HeapArray<void *> &args) {
+        REQ_CU(cuLaunchKernel(f, num_blocks, 1, 1, num_threads, 1, 1,
+                              0, strm, nullptr, args.data()));
+    };
+
+    uint32_t num_blocks = (num_queries + 255) / 256;
+    auto args = makeKernelArgBuffer(num_queries, readback);
+    launchKernel(impl_->queryCheckpointInfo, num_blocks, 256, args);
+    REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
+}
+
 
 }

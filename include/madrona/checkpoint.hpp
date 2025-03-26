@@ -12,6 +12,10 @@ struct Checkpoint {
     uint32_t numBytes;
 };
 
+struct WorldMostRecentWrite {
+    uint32_t mostRecentCkpt;
+};
+
 struct WorldCheckpoint : VarComponent<Checkpoint> {};
 
 namespace CheckpointSystem {

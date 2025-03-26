@@ -10,6 +10,8 @@ void registerTypes(ECSRegistry &registry)
 
     registry.registerSingleton<WorldCheckpoint>(
         sizeof(Checkpoint) * num_checkpoints);
+
+    registry.registerSingleton<WorldMostRecentWrite>();
 }
 
 void init(Context &ctx)
@@ -70,8 +72,6 @@ TaskGraphNodeID setupTasks(
                 builder, {cur_node}, i, true);
     }
 
-    // cur_node = builder.addToGraph<ReadbackNode>({cur_node});
-
     return cur_node;
 }
 
@@ -99,6 +99,8 @@ Checkpoint requestCheckpoint(Context &ctx,
         ckpt.numBytes = num_bytes;
     }
 
+    ctx.singleton<WorldMostRecentWrite>().mostRecentCkpt = checkpoint_idx;
+
     return ckpt;
 }
 
@@ -116,4 +118,51 @@ void * getCheckpointPtr(Context &ctx,
     return state_mgr->memoryRangePointer(ckpt.data);
 }
 
+}
+
+extern "C" void queryCheckpointInfo(uint32_t num_queries, void *readback)
+{
+#if 0
+    using namespace madrona;
+    using namespace madrona::CheckpointSystem;
+
+    uint32_t tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid >= num_queries)
+        return;
+
+    uint32_t *readback_u32 = (uint32_t *)readback;
+
+    uint32_t total_num_ckpts = *readback_u32;
+    uint32_t *traj_avails = readback_u32 + 1;
+    std::pair<uint32_t, uint32_t> *req_world_ids = 
+        (std::pair<uint32_t, uint32_t> *)(readback_u32 + num_queries);
+
+    
+
+
+
+    uint32_t *traj_avail = readback_u32 + tid;
+    uint32_t *req_world_id = readback_u32 + num_queries + tid * 2;
+    uint32_t *req_num_steps = req_world_id + 1;
+    uint32_t *ckpt_size = readback_u32 + num_queries + num_queries * 2 + tid;
+    void **ckpt_ptr = (void **)(
+            readback_u32 + 
+            num_queries + 
+            num_queries * 2 + 
+            num_queries) + tid;
+
+    // First check if there are enough checkpoints.
+    StateManager *state_mgr = mwGPU::getStateManager();
+    uint32_t num_checkpoints = state_mgr->getNumCheckpoints();
+
+    // Checkpoint *ckpts = ctx.singleton<WorldCheckpoint>().ptr();
+    Checkpoint *ckpts = state_mgr->getSingleton<WorldCheckpoint>(
+            *req_world_id).ptr();
+    uint32_t most_recent_write = state_mgr->getSingleton<WorldMostRecentWrite>(
+            *req_world_id);
+
+    for (uint32_t i = 0; i < num_checkpoints; ++i) {
+        
+    }
+#endif
 }
