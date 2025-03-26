@@ -119,7 +119,8 @@ struct BodyObjectData {
 
 struct BodyTransform {
     math::Vector3 com;
-    math::Vector3 tmp;  // used for temporary COM of sub fixed-bodies
+    math::Vector3 fixedSubtreeCOM;  // (temporary) COM of sub fixed-bodies
+    bool isRootOfFixedSubtree;
     math::Quat composedRot;
 };
 

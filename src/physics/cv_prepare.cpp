@@ -1832,13 +1832,15 @@ inline void computeInvMass(
             BodyInertial &curr_inertia = inertials[i];
             BodyInertial &parent_inertia = inertials[parent];
             BodyTransform &parent_transform = transforms[parent];
+            BodyOffsets &parent_offset = offsets[parent];
             // Compute the COM of the combined mass
             Vector3 adjusted_com = curr_inertia.mass * curr_transform.com +
                                    parent_inertia.mass * parent_transform.com;
             adjusted_com /= (curr_inertia.mass + parent_inertia.mass);
-            parent_transform.tmp = adjusted_com;
-        } else {
-           curr_transform.tmp = curr_transform.com;
+            parent_transform.fixedSubtreeCOM = adjusted_com;
+            if (parent_offset.dofType != DofType::FixedBody) {
+                parent_transform.isRootOfFixedSubtree = true;
+            }
         }
     }
 
@@ -1853,9 +1855,13 @@ inline void computeInvMass(
         }
         // Use (adjusted) parent COM if the body is fixed
         BodyTransform transform = transforms[i_body];
-        Vector3 com = (offset.dofType == DofType::FixedBody &&
-                       offset.parentWithDof != 0xFF) ?
-            transforms[offset.parentWithDof].tmp : transform.com;
+        Vector3 com = (offset.dofType == DofType::FixedBody
+            && offset.parentWithDof != 0xFF) ?
+            transforms[offset.parentWithDof].fixedSubtreeCOM: transform.com;
+        if (transform.isRootOfFixedSubtree) {
+            com = transform.fixedSubtreeCOM;
+        }
+
 
         // Compute J
         memset(J, 0.f, 6 * p.qvDim * sizeof(float));
@@ -1906,9 +1912,6 @@ inline void computeInvMass(
         float b = inertial.approxInvMassRot =
             (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
 
-        printf("--------------------\n");
-        printf("mass %f \n", inertial.mass);
-        printf("com %f %f %f\n", transform.com.x, transform.com.y, transform.com.z);
         printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
     }
 
