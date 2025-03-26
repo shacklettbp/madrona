@@ -95,6 +95,7 @@ struct CheckpointClient {
     };
 
     CheckpointClient(const Config &cfg);
+    CheckpointClient(CheckpointClient &&);
     ~CheckpointClient();
 
     void requestTrajectory(uint32_t world_id, uint32_t num_steps);
@@ -117,6 +118,7 @@ struct CheckpointServer {
     };
 
     CheckpointServer(const Config &cfg);
+    CheckpointServer(CheckpointServer &&);
     ~CheckpointServer();
 
     template <typename FnT>

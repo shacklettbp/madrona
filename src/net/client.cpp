@@ -27,9 +27,9 @@ CheckpointClient::CheckpointClient(const Config &cfg)
 {
 }
 
-CheckpointClient::~CheckpointClient()
-{
-}
+CheckpointClient::CheckpointClient(CheckpointClient &&) = default;
+
+CheckpointClient::~CheckpointClient() = default;
 
 CheckpointClient::Impl::Impl(const Config &cfg)
     : sock(Socket::make(Socket::Type::Stream)),

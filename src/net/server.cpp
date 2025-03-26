@@ -53,9 +53,13 @@ struct CheckpointServer::Impl {
 };
 
 CheckpointServer::Impl::Impl(const Config &cfg)
+    : acceptSock(Socket::make(Socket::Type::Stream))
 {
     // We will be using non-blocking sockets for now
     acceptSock.setBlockingMode(false);
+
+    acceptSock.bindToPort({ cfg.bindPort });
+    acceptSock.setToListening(cfg.maxClients);
 }
 
 void CheckpointServer::Impl::acceptConnections()
@@ -199,6 +203,14 @@ void CheckpointServer::updateImpl(
     void *fn_data)
 {
     impl_->update(query_ckpt_fn, fn_data);
+}
+
+CheckpointServer::CheckpointServer(CheckpointServer &&) = default;
+CheckpointServer::~CheckpointServer() = default;
+
+CheckpointServer::CheckpointServer(const Config &cfg)
+    : impl_(new Impl(cfg))
+{
 }
 
 }
