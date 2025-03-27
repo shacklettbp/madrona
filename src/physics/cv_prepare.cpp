@@ -1433,26 +1433,7 @@ inline void computeExpandedParent(Context &ctx,
     uint8_t *max_ptr = (uint8_t *)m.qVectorsPtr +
                        BodyGroupMemory::qVectorsNumBytes(p);
 
-    // Initialize expanded parent array
-    for(int32_t i = 0; i < (int32_t)p.qvDim; ++i) {
-        expandedParent[i] = i - 1;
-    }
-    // Create a mapping from body index to start of block
-    int32_t *map = (int32_t *)ctx.tmpAlloc(sizeof(int32_t) * p.numBodies);
-    map[0] = 0;
-    // First sweep
-    for(int32_t i = 0; i < p.numBodies; ++i) {
-        uint32_t n_i = offsets[i].numDofs;
-        map[i] = map[i - 1] + (int32_t) n_i;
-    }
-    // Finish expanded parent array
-    for(int32_t i = 1; i < p.numBodies; ++i) {
-        int32_t parent_idx = offsets[i].parent;
-        expandedParent[map[i]] = map[parent_idx] - 1;
-        ASSERT_PTR_ACCESS(expandedParent, (map[i]), max_ptr);
-    }
-
-    // Also compute DOF to body index mapping
+    // Compute DOF -> body index mapping
     int32_t *dof_to_body = m.dofToBody(p);
     uint32_t num_processed_dofs = 0;
     for (uint32_t i = 0; i < p.numBodies; ++i) {
@@ -1481,6 +1462,35 @@ inline void computeExpandedParent(Context &ctx,
         // Body is static if it is fixed and parent is static
         is_static[i] = (current_offset.dofType == DofType::FixedBody &&
                        is_static[parent_idx]) ? 1 : 0;
+    }
+
+    // --- Expanded Parent ---
+    // Helper to match definition of lambda in Featherstone book
+    // (1-based index and uses 0 for no parent)
+    auto lambda = [&](int32_t i) -> uint8_t {
+        uint8_t parent = offsets[i - 1].parentWithDof;
+        return (parent == 0xFF) ? 0 : parent + 1;
+    };
+    // Initialize expanded parent array (0 to n-1)
+    for(int32_t i = 0; i < (int32_t)p.qvDim; ++i) {
+        expandedParent[i] = i;
+    }
+    // Create a mapping from body index to start of block
+    int32_t *map = (int32_t *)ctx.tmpAlloc(sizeof(int32_t) * (p.numBodies + 1));
+    map[0] = 0;
+    // First sweep
+    for(int32_t i = 1; i <= p.numBodies; ++i) {
+        int32_t n_i = offsets[i - 1].numDofs;
+        map[i] = map[i - 1] + n_i;
+    }
+    // Finish expanded parent array
+    for(int32_t i = 1; i <= p.numBodies; ++i) {
+        expandedParent[map[i - 1]] = map[lambda(i)];
+        ASSERT_PTR_ACCESS(expandedParent, (map[i - 1]), max_ptr);
+    }
+    // 0-index
+    for(int32_t i = 0; i < p.qvDim; ++i) {
+        expandedParent[i] -= 1;
     }
 
     // Finally, compute the id of the body which acts as the "root" of this body
@@ -1853,6 +1863,7 @@ inline void computeInvMass(
     // Hacky, but we need to handle the fixed bodies (consider them as one body)
     //   and compute the COM of the fixed subtree
     for (CountT i = p.numBodies - 1; i > 0; --i) {
+        if (is_static[i]) { continue; }
         BodyOffsets &body_offset = offsets[i];
         if (body_offset.dofType != DofType::FixedBody) { continue; }
 
