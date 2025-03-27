@@ -119,8 +119,15 @@ struct BodyObjectData {
 
 struct BodyTransform {
     math::Vector3 com;
-    math::Vector3 fixedSubtreeCOM;  // (temporary) COM of sub fixed-bodies
+
+    // Mass and COM of the subtree rooted at this body
+    float subtreeMass;
+    math::Vector3 subtreeCOM;
+
+    // (temporary) COM of sub fixed-bodies (if there are fixed body children)
+    math::Vector3 fixedSubtreeCOM;
     bool isRootOfFixedSubtree;
+
     math::Quat composedRot;
 };
 
@@ -142,7 +149,6 @@ struct BodyGroupProperties {
     uint32_t numEq;
     uint32_t numObjData;
 
-    math::Vector3 comPos;
     // Sum of diagonals of mass matrix
     float inertiaSum;
 
@@ -259,6 +265,7 @@ struct BodyGroupMemory {
     inline int32_t * expandedParent(BodyGroupProperties);
     inline int32_t * dofToBody(BodyGroupProperties);
     inline uint32_t * isStatic(BodyGroupProperties);
+    inline uint32_t * bodyRoot(BodyGroupProperties);
     inline BodyObjectData * objectData(BodyGroupProperties);
     inline BodyHierarchy * hierarchies(BodyGroupProperties);
     inline Entity * entities(BodyGroupProperties);

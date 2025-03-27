@@ -89,6 +89,7 @@ void forwardKinematics(Context &,
             Vector3 rotated_hinge_axis =
                 parent_transform.composedRot.rotateVec(
                         hier.parentToChildRot.rotateVec(hier.axis));
+            rotated_hinge_axis = rotated_hinge_axis.normalize();
 
             // Calculate the composed rotation applied to the child entity.
             curr_transform->composedRot = parent_transform.composedRot *
@@ -370,23 +371,38 @@ void computeGroupCOM(Context &ctx,
     BodyOffsets* offsets = mem.offsets(prop);
     uint32_t* is_static = mem.isStatic(prop);
 
-    Vector3 hierarchy_com = Vector3::zero();
-    float total_mass = 0.f;
-    // Pass over all bodies
-    for (uint32_t i = 0; i < num_bodies; ++i) {
+    // Backward pass from children to root
+    for (int32_t i = (int32_t) num_bodies - 1; i >= 0; --i) {
         if (is_static[i]) continue; // Ignore static bodies
         BodyInertial &body_inertia = inertials[i];
         BodyTransform &body_transform = transforms[i];
         // If infinite mass (likely ground plane)
         if (1.f / body_inertia.mass == 0.f) {
             assert(num_bodies == 1);
-            prop.comPos = body_transform.com;
             return;
         }
-        hierarchy_com += body_inertia.mass * body_transform.com;
-        total_mass += body_inertia.mass;
+
+        // Add local info
+        body_transform.subtreeCOM += body_inertia.mass * body_transform.com;
+        body_transform.subtreeMass += body_inertia.mass;
+
+        // Propagate the mass and COM up the hierarchy
+        uint8_t parent = offsets[i].parent;
+        if (i != 0) {
+            assert(parent != 0xFF);
+            BodyTransform &p_transform = transforms[parent];
+            p_transform.subtreeCOM += body_transform.subtreeCOM;
+            p_transform.subtreeMass += body_transform.subtreeMass;
+        }
+
+        // Because we did a backward traversal, we can compute our subtree COM
+        if (body_transform.subtreeMass < 1e-15f) {
+            body_transform.subtreeCOM = body_transform.com;
+        } else {
+            body_transform.subtreeCOM =
+                body_transform.subtreeCOM / body_transform.subtreeMass;
+        }
     }
-    prop.comPos = hierarchy_com / total_mass;
 }
 
 void computeSpatialInertiasAndPhi(Context &ctx,
@@ -394,7 +410,12 @@ void computeSpatialInertiasAndPhi(Context &ctx,
 {
     BodyGroupProperties &prop = ctx.get<BodyGroupProperties>(obj_grp.bodyGroup);
     BodyGroupMemory &mem = ctx.get<BodyGroupMemory>(obj_grp.bodyGroup);
-    Vector3 body_grp_com_pos = prop.comPos;
+    // Skip if this is a static body
+    if (mem.isStatic(prop)[obj_grp.idx]) return;
+
+    // Compute the COM of the tree at the body's root
+    uint32_t root = mem.bodyRoot(prop)[obj_grp.idx];
+    Vector3 root_tree_com = mem.bodyTransforms(prop)[root].subtreeCOM;
 
     // --------- Compute spatial inertias -------------
     BodyInertial inertial = mem.inertials(prop)[obj_grp.idx];
@@ -409,7 +430,7 @@ void computeSpatialInertiasAndPhi(Context &ctx,
 
     // Compute the 3x3 skew-symmetric matrix (r^x)
     // (where r is from Plücker origin to COM)
-    Vector3 adjustedCom = transform.com - body_grp_com_pos;
+    Vector3 adjustedCom = transform.com - root_tree_com;
     Mat3x3 sym_mat = Mat3x3::skewSym(adjustedCom);
     // (I_world - m r^x r^x)
     Mat3x3 inertia_mat = i_world_frame - (mass * sym_mat * sym_mat);
@@ -428,11 +449,10 @@ void computeSpatialInertiasAndPhi(Context &ctx,
     spatialInertia.mCom = mass * adjustedCom;
 
     // --------- Compute phi  -------------
-    // Compute the full matrix/linear operator Phi with body group COM as origin
+    // Compute the full matrix/linear operator Phi wrst body root COM
     BodyOffsets offset = mem.offsets(prop)[obj_grp.idx];
 
     DofType dof_type = offset.dofType;
-    Vector3 com_pos = prop.comPos;
     BodyPhi* phis = mem.bodyPhi(prop);
 
     uint32_t velOffset = offset.velOffset;
@@ -444,7 +464,7 @@ void computeSpatialInertiasAndPhi(Context &ctx,
 
     if (dof_type != DofType::None && dof_type != DofType::FixedBody) {
         ASSERT_PTR_ACCESS(S, 0, max_ptr);
-        computePhi(dof_type, phis[obj_grp.idx], com_pos, S);
+        computePhi(dof_type, phis[obj_grp.idx], root_tree_com, S);
     }
 }
 
@@ -719,10 +739,12 @@ void compositeRigidBody(
 {
     BodyOffsets *offsets = mem.offsets(prop);
     BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
+    uint32_t *is_static = mem.isStatic(prop);
 
     // ----------------- Combine Spatial Inertias -----------------
     uint32_t num_bodies = prop.numBodies;
     for (CountT i = num_bodies-1; i >= 0; --i) {
+        if (is_static[i]) continue; // Ignore static bodies
         InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
         uint32_t parent_idx = offsets[i].parent;
         if (parent_idx == 0xFF) continue;
@@ -816,6 +838,7 @@ inline void recursiveNewtonEuler(
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     BodyOffsets* offsets = mem.offsets(prop);
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
+    uint32_t* is_static = mem.isStatic(prop);
     float* qvs = mem.qv(prop);
 
     MADRONA_GPU_SINGLE_THREAD {
@@ -824,6 +847,8 @@ inline void recursiveNewtonEuler(
         //  2. Accelerations: a_i = a_{parent} + \dot{S}_i * \dot{q_i} + S_i * \ddot{q_i}
         //  3. Forces: f_i = I_i a_i + v_i [spatial star cross] I_i v_i
         for (uint32_t i_body = 0; i_body < prop.numBodies; ++i_body) {
+            if (is_static[i_body]) continue; // Ignore static bodies
+
             BodyOffsets body_offset = offsets[i_body];
             DofType dof_type = body_offset.dofType;
             BodySpatialVectors& sv = spatialVectors[i_body];
@@ -838,7 +863,7 @@ inline void recursiveNewtonEuler(
             auto S_dot_i = [&](uint32_t row, uint32_t col) -> float& { return S_dot[row + 6 * col]; };
 
             // Initialization: gather parent spatial velocity and acceleration
-            if (body_offset.parent == 0xFF || dof_type == DofType::FreeBody) {
+            if (body_offset.parentWithDof == 0xFF || dof_type == DofType::FreeBody) {
                 // v_0 = 0, a_0 = -g (fictitious upward acceleration)
                 sv.sVel = {Vector3::zero(), Vector3::zero()};
                 sv.sAcc = {-physics_state.g, Vector3::zero()};
@@ -1403,54 +1428,28 @@ inline void computeExpandedParent(Context &ctx,
 {
     BodyOffsets *offsets = m.offsets(p);
     uint32_t* is_static = m.isStatic(p);
+    uint32_t* body_root = m.bodyRoot(p);
     int32_t *expandedParent = m.expandedParent(p);
     uint8_t *max_ptr = (uint8_t *)m.qVectorsPtr +
                        BodyGroupMemory::qVectorsNumBytes(p);
 
-    // First, get the index of the first parent with a DOF for each body
-    for(int32_t i = 1; i < p.numBodies; ++i) {
-        BodyOffsets &current_offset = offsets[i];
-        uint8_t parent_idx = offsets[i].parent;
-        assert(parent_idx != 0xFF); // Can't have a root body
-        current_offset.parentWithDof = parent_idx;
-        // If it turns out that the parent is a fixed body, keep going up
-        BodyOffsets parent_offset = offsets[parent_idx];
-        if(parent_offset.numDofs == 0) {
-            current_offset.parentWithDof = parent_offset.parentWithDof;
-        }
-    }
-
-
-    // Initialize n-N_B elements
-    expandedParent[0] = -1;
-    for(int32_t i = 1; i < (int32_t)p.qvDim; ++i) {
+    // Initialize expanded parent array
+    for(int32_t i = 0; i < (int32_t)p.qvDim; ++i) {
         expandedParent[i] = i - 1;
     }
     // Create a mapping from body index to start of block
     int32_t *map = (int32_t *)ctx.tmpAlloc(sizeof(int32_t) * p.numBodies);
-
+    map[0] = 0;
     // First sweep
     for(int32_t i = 0; i < p.numBodies; ++i) {
         uint32_t n_i = offsets[i].numDofs;
-        if (i == 0) {
-            map[i] = -1 + (int32_t) n_i;
-        } else {
-            map[i] = map[i - 1] + (int32_t) n_i;
-        }
-
-        // Whether this body is fixed and root (or fixed and parent is fixed root)
-        if(map[i] == -1 && offsets[i].dofType == DofType::FixedBody) {
-            is_static[i] = 1;
-        } else {
-            is_static[i] = 0;
-        }
+        map[i] = map[i - 1] + (int32_t) n_i;
     }
-
     // Finish expanded parent array
     for(int32_t i = 1; i < p.numBodies; ++i) {
         int32_t parent_idx = offsets[i].parent;
-        expandedParent[map[i - 1] + 1] = map[parent_idx];
-        ASSERT_PTR_ACCESS(expandedParent, (map[i - 1] + 1), max_ptr);
+        expandedParent[map[i]] = map[parent_idx] - 1;
+        ASSERT_PTR_ACCESS(expandedParent, (map[i]), max_ptr);
     }
 
     // Also compute DOF to body index mapping
@@ -1464,6 +1463,34 @@ inline void computeExpandedParent(Context &ctx,
             dof_to_body[num_processed_dofs + j] = i;
         }
         num_processed_dofs += num_dofs;
+    }
+
+    // Compute the index of the first parent with a DOF for each body
+    //  and whether each body is static
+    is_static[0] = (offsets[0].dofType == DofType::FixedBody) ? 1 : 0;
+    for(int32_t i = 1; i < p.numBodies; ++i) {
+        BodyOffsets &current_offset = offsets[i];
+        uint8_t parent_idx = offsets[i].parent;
+        assert(parent_idx != 0xFF); // Can't have a root body
+        current_offset.parentWithDof = parent_idx;
+        // If it turns out that the parent is a fixed body, keep going up
+        BodyOffsets parent_offset = offsets[parent_idx];
+        if(parent_offset.numDofs == 0) {
+            current_offset.parentWithDof = parent_offset.parentWithDof;
+        }
+        // Body is static if it is fixed and parent is static
+        is_static[i] = (current_offset.dofType == DofType::FixedBody &&
+                       is_static[parent_idx]) ? 1 : 0;
+    }
+
+    // Finally, compute the id of the body which acts as the "root" of this body
+    for(int32_t i = 0; i < p.numBodies; ++i) {
+        uint8_t parent_with_dof = offsets[i].parentWithDof;
+        if (parent_with_dof == 0xFF) {
+            body_root[i] = i; // own root
+        } else {
+            body_root[i] = body_root[parent_with_dof];
+        }
     }
 }
 
@@ -1823,24 +1850,29 @@ inline void computeInvMass(
     BodyInertial *inertials = m.inertials(p);
     uint32_t *is_static = m.isStatic(p);
 
-    // Compute the COM of the combined subtree mass of fixed bodies
-    for (CountT i = p.numBodies - 1; i >= 0; --i) {
+    // Hacky, but we need to handle the fixed bodies (consider them as one body)
+    //   and compute the COM of the fixed subtree
+    for (CountT i = p.numBodies - 1; i > 0; --i) {
         BodyOffsets &body_offset = offsets[i];
-        BodyTransform &curr_transform = transforms[i];
+        if (body_offset.dofType != DofType::FixedBody) { continue; }
+
         uint8_t parent = body_offset.parentWithDof;
-        if (body_offset.dofType == DofType::FixedBody && parent != 0xFF) {
-            BodyInertial &curr_inertia = inertials[i];
-            BodyInertial &parent_inertia = inertials[parent];
-            BodyTransform &parent_transform = transforms[parent];
-            BodyOffsets &parent_offset = offsets[parent];
-            // Compute the COM of the combined mass
-            Vector3 adjusted_com = curr_inertia.mass * curr_transform.com +
-                                   parent_inertia.mass * parent_transform.com;
-            adjusted_com /= (curr_inertia.mass + parent_inertia.mass);
-            parent_transform.fixedSubtreeCOM = adjusted_com;
-            if (parent_offset.dofType != DofType::FixedBody) {
-                parent_transform.isRootOfFixedSubtree = true;
-            }
+        assert (parent != 0xFF);
+
+        // Compute the COM of the combined mass
+        BodyTransform &curr_transform = transforms[i];
+        BodyInertial &curr_inertia = inertials[i];
+        BodyInertial &parent_inertia = inertials[parent];
+        BodyTransform &parent_transform = transforms[parent];
+        BodyOffsets &parent_offset = offsets[parent];
+        Vector3 adjusted_com = curr_inertia.mass * curr_transform.com +
+                               parent_inertia.mass * parent_transform.com;
+        adjusted_com /= (curr_inertia.mass + parent_inertia.mass);
+        parent_transform.fixedSubtreeCOM = adjusted_com;
+
+        // Mark parent as root of fixed subtree
+        if (parent_offset.dofType != DofType::FixedBody) {
+            parent_transform.isRootOfFixedSubtree = true;
         }
     }
 
@@ -1853,15 +1885,14 @@ inline void computeInvMass(
             inertial.approxInvMassRot = 0.f;
             continue;
         }
-        // Use (adjusted) parent COM if the body is fixed
+        // Use (adjusted) parent COM if the body is fixed (or contains fixed children)
         BodyTransform transform = transforms[i_body];
-        Vector3 com = (offset.dofType == DofType::FixedBody
-            && offset.parentWithDof != 0xFF) ?
-            transforms[offset.parentWithDof].fixedSubtreeCOM: transform.com;
+        Vector3 com = transform.com;
         if (transform.isRootOfFixedSubtree) {
             com = transform.fixedSubtreeCOM;
+        } else if (offset.dofType == DofType::FixedBody) {
+            com = transforms[offset.parentWithDof].fixedSubtreeCOM;
         }
-
 
         // Compute J
         memset(J, 0.f, 6 * p.qvDim * sizeof(float));

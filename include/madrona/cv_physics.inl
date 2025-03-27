@@ -41,7 +41,8 @@ BodyInertial * BodyGroupMemory::inertials(BodyGroupProperties p) { return (BodyI
 int32_t * BodyGroupMemory::expandedParent(BodyGroupProperties p) { return (int32_t *)(inertials(p) + p.numBodies); }
 int32_t * BodyGroupMemory::dofToBody(BodyGroupProperties p) { return (int32_t *)(expandedParent(p) + p.qvDim); }
 uint32_t * BodyGroupMemory::isStatic(BodyGroupProperties p) { return (uint32_t *)(dofToBody(p) + p.qvDim); }
-BodyObjectData * BodyGroupMemory::objectData(BodyGroupProperties p) { return (BodyObjectData *)(isStatic(p) + p.numBodies); }
+uint32_t * BodyGroupMemory::bodyRoot(BodyGroupProperties p) { return (uint32_t *)(isStatic(p) + p.numBodies); }
+BodyObjectData * BodyGroupMemory::objectData(BodyGroupProperties p) { return (BodyObjectData *)(bodyRoot(p) + p.numBodies); }
 BodyHierarchy * BodyGroupMemory::hierarchies(BodyGroupProperties p) { return (BodyHierarchy *)(objectData(p) + p.numObjData); }
 Entity * BodyGroupMemory::entities(BodyGroupProperties p) { return (Entity *)(hierarchies(p) + p.numBodies); }
 BodyOffsets * BodyGroupMemory::offsets(BodyGroupProperties p) { return (BodyOffsets *)(entities(p) + p.numBodies); }
@@ -71,7 +72,8 @@ inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
            p.numBodies * sizeof(BodyInertial) +     // inertias
            p.qvDim * sizeof(int32_t) +              // expanded parent
            p.qvDim * sizeof(int32_t) +              // dof to body index
-           p.numBodies * sizeof(uint32_t) +         // fixed root status
+           p.numBodies * sizeof(uint32_t) +         // is static
+           p.numBodies * sizeof(uint32_t) +         // root body id
            p.numObjData * sizeof(BodyObjectData) +  // body object data
            p.numBodies * sizeof(BodyHierarchy) +    // body hierarchy
            p.numBodies * sizeof(Entity) +           // Entity list
