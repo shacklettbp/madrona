@@ -450,7 +450,7 @@ static inline void joinBodiesGeneral(
     offsets[child_info.idx].parent = (uint8_t)parent_info.idx;
 
     hiers[child_info.idx] = BodyHierarchy {
-        .axis = axis,
+        .axis = axis.normalize(),
         .relPositionParent = rel_position_parent,
         .relPositionLocal = rel_position_child,
         .parentToChildRot = rel_parent_rotation,
