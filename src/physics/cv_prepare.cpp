@@ -371,6 +371,13 @@ void computeGroupCOM(Context &ctx,
     BodyOffsets* offsets = mem.offsets(prop);
     uint32_t* is_static = mem.isStatic(prop);
 
+    // Reset the subtree mass and COM
+    for (int32_t i = 0; i < num_bodies; i++) {
+        BodyTransform &body_transform = transforms[i];
+        body_transform.subtreeCOM = Vector3::zero();
+        body_transform.subtreeMass = 0.f;
+    }
+
     // Backward pass from children to root
     for (int32_t i = (int32_t) num_bodies - 1; i >= 0; --i) {
         if (is_static[i]) continue; // Ignore static bodies
@@ -842,6 +849,14 @@ inline void recursiveNewtonEuler(
     float* qvs = mem.qv(prop);
 
     MADRONA_GPU_SINGLE_THREAD {
+        // Reset the spatial vectors
+        for (uint32_t i_body = 0; i_body < prop.numBodies; ++i_body) {
+            BodySpatialVectors& sv = spatialVectors[i_body];
+            sv.sVel = {Vector3::zero(), Vector3::zero()};
+            sv.sAcc = {Vector3::zero(), Vector3::zero()};
+            sv.sForce = {Vector3::zero(), Vector3::zero()};
+        }
+
         // Forward pass. Find in Plücker coordinates:
         //  1. Velocities: v_i = v_{parent} + S_i * \dot{q_i}
         //  2. Accelerations: a_i = a_{parent} + \dot{S}_i * \dot{q_i} + S_i * \ddot{q_i}
@@ -1431,8 +1446,6 @@ inline void computeExpandedParent(Context &ctx,
     uint32_t* is_static = m.isStatic(p);
     uint32_t* body_root = m.bodyRoot(p);
     int32_t *expandedParent = m.expandedParent(p);
-    uint8_t *max_ptr = (uint8_t *)m.qVectorsPtr +
-                       BodyGroupMemory::qVectorsNumBytes(p);
 
     // Compute DOF -> body index mapping
     int32_t *dof_to_body = m.dofToBody(p);
@@ -1476,6 +1489,7 @@ inline void computeExpandedParent(Context &ctx,
     for(int32_t i = 0; i < (int32_t)p.qvDim; ++i) {
         expandedParent[i] = i;
     }
+
     // Create a mapping from body index to start of block
     int32_t *map = (int32_t *)ctx.tmpAlloc(sizeof(int32_t) * (p.numBodies + 1));
     map[0] = 0;
@@ -1484,10 +1498,11 @@ inline void computeExpandedParent(Context &ctx,
         int32_t n_i = offsets[i - 1].numDofs;
         map[i] = map[i - 1] + n_i;
     }
+
     // Finish expanded parent array
     for(int32_t i = 1; i <= p.numBodies; ++i) {
+        if (map[i - 1] >= p.qvDim) { continue; }
         expandedParent[map[i - 1]] = map[lambda(i)];
-        ASSERT_PTR_ACCESS(expandedParent, (map[i - 1]), max_ptr);
     }
     // 0-index
     for(int32_t i = 0; i < p.qvDim; ++i) {

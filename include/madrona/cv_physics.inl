@@ -89,7 +89,8 @@ inline uint32_t BodyGroupMemory::tmpNumBytes(BodyGroupProperties p)
            p.qvDim * sizeof(float) +                    // bias vector
            p.qvDim * p.qvDim * sizeof(float) +          // mass matrix
            p.qvDim * p.qvDim * sizeof(float) +          // LTDL mass matrix
-           p.qvDim * 2 * 6 * sizeof(float) +            // PhiFull
+           p.qvDim * 6 * sizeof(float) +                // PhiFull
+           p.qvDim * 6 * sizeof(float) +                // PhiDot
            36 * sizeof(float);
 }
 
