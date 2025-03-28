@@ -1595,7 +1595,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             cfg.numColliders++;
         }
 
-        // TODO: proper visual counter
+        uint32_t visual_offset = 0;
         for (uint32_t v = 0; v < link.visualArray.size(); ++v) {
             URDFVisual &visual = link.visualArray[v];
 
@@ -1656,7 +1656,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                     .rotation = visual.origin.rotation,
                     .scale = Diag3x3::uniform(scale.x),
                     .linkIdx = l,
-                    .subIndex = v + 1,
+                    .subIndex = visual_offset,
                 };
                 visualDescs.push_back(viz_desc);
                 cfg.numVisuals++;
@@ -1667,11 +1667,11 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                     .rotation = visual.origin.rotation,
                     .scale = Diag3x3::uniform(scale.x),
                     .linkIdx = l,
-                    .subIndex = v + 2,
+                    .subIndex = visual_offset + 1,
                 };
                 visualDescs.push_back(viz_desc2);
                 cfg.numVisuals++;
-
+                visual_offset += 2;
             } break;
 
             default: {
@@ -1685,8 +1685,9 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                 .rotation = visual.origin.rotation,
                 .scale = Diag3x3::fromVec(scale),
                 .linkIdx = l,
-                .subIndex = v
+                .subIndex = visual_offset
             };
+            visual_offset += 1;
 
             visualDescs.push_back(viz_desc);
             cfg.numVisuals++;

@@ -951,11 +951,12 @@ inline void recursiveNewtonEuler(
                     SpatialVector S_col = SpatialVector::fromVec(S);
                     // S_dot = v [spatial cross] S
                     SpatialVector tmp = sv.sVel.crossMotion(S_col);
-                    // Update velocity and acceleration (don't need to update S_dot)
+                    // Update velocity and acceleration
                     MADRONA_UNROLL
                     for (int j = 0; j < 6; ++j) {
                         sv.sVel[j] += S[j] * q_dot;
-                        sv.sAcc[j] += tmp[j] * q_dot;
+                        S_dot[j] = tmp[j];
+                        sv.sAcc[j] += S_dot[j] * q_dot;
                         // sv.sAcc[j] += S[j] * q_ddot;
                     }
                     break;
@@ -1862,48 +1863,44 @@ inline void computeInvMass(
 
     // Hacky, but we need to handle the fixed bodies (consider them as one body)
     //   and compute the COM of the fixed subtree
-    for (CountT i = p.numBodies - 1; i > 0; --i) {
-        if (is_static[i]) { continue; }
+    for (int32_t i = (int32_t) p.numBodies - 1; i >= 0; --i) {
+        if (is_static[i]) continue; // Ignore static bodies
+        BodyInertial &body_inertia = inertials[i];
+        BodyTransform &body_transform = transforms[i];
         BodyOffsets &body_offset = offsets[i];
-        if (body_offset.dofType != DofType::FixedBody) { continue; }
 
-        uint8_t parent = body_offset.parentWithDof;
-        assert (parent != 0xFF);
+        // Add local info
+        body_transform.fixedSubtreeCOM += body_inertia.mass * body_transform.com;
+        body_transform.fixedSubtreeMass += body_inertia.mass;
 
-        // Compute the COM of the combined mass
-        BodyTransform &curr_transform = transforms[i];
-        BodyInertial &curr_inertia = inertials[i];
-        BodyInertial &parent_inertia = inertials[parent];
-        BodyTransform &parent_transform = transforms[parent];
-        BodyOffsets &parent_offset = offsets[parent];
-        Vector3 adjusted_com = curr_inertia.mass * curr_transform.com +
-                               parent_inertia.mass * parent_transform.com;
-        adjusted_com /= (curr_inertia.mass + parent_inertia.mass);
-        parent_transform.fixedSubtreeCOM = adjusted_com;
+        // Propagate the mass and COM up the hierarchy
+        uint8_t parent = body_offset.parent;
+        if (i != 0 && body_offset.dofType == DofType::FixedBody) {
+            assert(parent != 0xFF);
+            BodyTransform &p_transform = transforms[parent];
+            p_transform.fixedSubtreeCOM += body_transform.fixedSubtreeCOM;
+            p_transform.fixedSubtreeMass += body_transform.fixedSubtreeMass;
+        }
 
-        // Mark parent as root of fixed subtree
-        if (parent_offset.dofType != DofType::FixedBody) {
-            parent_transform.isRootOfFixedSubtree = true;
+        // Because we did a backward traversal, we can compute our subtree COM
+        if (body_transform.fixedSubtreeMass < 1e-15f) {
+            body_transform.fixedSubtreeCOM = body_transform.com;
+        } else {
+            body_transform.fixedSubtreeCOM =
+                body_transform.fixedSubtreeCOM / body_transform.fixedSubtreeMass;
         }
     }
 
     // Compute the inverse weight for each body
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
         BodyInertial &inertial = inertials[i_body];
-        BodyOffsets &offset = offsets[i_body];
         if(is_static[i_body]) {
             inertial.approxInvMassTrans = 0.f;
             inertial.approxInvMassRot = 0.f;
             continue;
         }
         // Use (adjusted) parent COM if the body is fixed (or contains fixed children)
-        BodyTransform transform = transforms[i_body];
-        Vector3 com = transform.com;
-        if (transform.isRootOfFixedSubtree) {
-            com = transform.fixedSubtreeCOM;
-        } else if (offset.dofType == DofType::FixedBody) {
-            com = transforms[offset.parentWithDof].fixedSubtreeCOM;
-        }
+        Vector3 com = transforms[i_body].fixedSubtreeCOM;
 
         // Compute J
         memset(J, 0.f, 6 * p.qvDim * sizeof(float));

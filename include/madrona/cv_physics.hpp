@@ -125,8 +125,8 @@ struct BodyTransform {
     math::Vector3 subtreeCOM;
 
     // (temporary) COM of sub fixed-bodies (if there are fixed body children)
+    float fixedSubtreeMass;
     math::Vector3 fixedSubtreeCOM;
-    bool isRootOfFixedSubtree;
 
     math::Quat composedRot;
 };
