@@ -1039,11 +1039,20 @@ inline void processContacts(Context &ctx,
     }
 
     // Filter out parent-child contacts and contacts between the same body
-    //  Keep static-dynamic contacts
-    if(ref_grp == alt_grp && (!ref_static && !alt_static)) {
+    //  but keep static-dynamic contacts
+    if(ref_grp == alt_grp) {
         BodyOffsets *offsets = mem_ref.offsets(prop_ref);
         BodyOffsets offset_ref = offsets[ref_body_idx];
         BodyOffsets offset_alt = offsets[alt_body_idx];
+        // If the body has no DOFs, we should check the parent that does
+        if (BodyOffsets::getDofTypeDim(offset_ref.dofType) == 0) {
+            ref_body_idx = offset_ref.parentWithDof;
+            offset_ref = offsets[ref_body_idx];
+        }
+        if (BodyOffsets::getDofTypeDim(offset_alt.dofType) == 0) {
+            alt_body_idx = offset_alt.parentWithDof;
+            offset_alt = offsets[alt_body_idx];
+        }
         if(offset_ref.parentWithDof == alt_body_idx ||
             offset_alt.parentWithDof == ref_body_idx ||
             offset_ref.parentWithDof == offset_alt.parentWithDof) {
@@ -2138,6 +2147,10 @@ inline void convertPostSolve(
 
     BodyTransform transforms = m.bodyTransforms(p)[link.bodyIdx];
     BodyObjectData obj_data = m.objectData(p)[link.objDataIdx];
+
+    // if(link.bodyIdx != 15 && link.bodyIdx != 0 && link.type==LinkParentDofObject::Type::Render) {
+    //     return;
+    // }
 
     scale = obj_data.scale * p.globalScale;
     position = transforms.com + p.globalScale *
