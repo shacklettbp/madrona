@@ -70,6 +70,8 @@ void CheckpointServer::Impl::acceptConnections()
             return;
         }
 
+        sock.setBlockingMode(false);
+
         // We have a new client
         Client cl = {
             .sock = sock,
@@ -78,6 +80,8 @@ void CheckpointServer::Impl::acceptConnections()
         };
 
         clients.push_back(cl);
+        
+        printf("New client just connected!\n");
     }
 }
 
@@ -139,37 +143,37 @@ void CheckpointServer::Impl::handleRequests(
         }
 
         struct TrajInfo {
-            uint32_t worldID;
-            uint32_t numSteps;
-            uint32_t offset;
+            uint64_t worldID;
+            uint64_t numSteps;
+            uint64_t offset;
         };
 
         // Prepare to request information from the GPU
         size_t readback_bytes = 
-            sizeof(uint32_t) +
+            sizeof(uint64_t) +
             // GPU will write 0 or 1 to these uint32_t saying whether
             // there is enough data to send to the client.
-            sizeof(uint32_t) * processing_requests.size() +
+            sizeof(uint64_t) * processing_requests.size() +
             // GPU will read from here to see what world / num steps / prefix sum
             // requested is.
             sizeof(TrajInfo) * processing_requests.size() +
             // Sizes of the checkpoint data.
-            sizeof(uint32_t) * total_num_ckpts +
+            sizeof(uint64_t) * total_num_ckpts +
             // Pointers to the requested checkpoint data.
             sizeof(void *) * total_num_ckpts;
 
 #ifdef MADRONA_CUDA_SUPPORT
-        uint32_t *readback_ptr = (uint32_t *)cu::allocReadback(readback_bytes);
+        uint64_t *readback_ptr = (uint64_t *)cu::allocReadback(readback_bytes);
 #else
-        uint32_t *readback_ptr = (uint32_t *)malloc(1);
+        uint64_t *readback_ptr = (uint64_t *)malloc(1);
         FATAL("Cannot run checkpoint server on non CUDA machine\n");
 #endif
         readback_ptr[0] = total_num_ckpts;
 
-        uint32_t *traj_avails = readback_ptr + 1;
+        uint64_t *traj_avails = readback_ptr + 1;
         TrajInfo *traj_infos = (TrajInfo *)(
                 traj_avails + processing_requests.size());
-        uint32_t *ckpt_sizes = (uint32_t *)(
+        uint64_t *ckpt_sizes = (uint64_t *)(
                 traj_infos + processing_requests.size());
         void **ckpt_ptrs = (void **)(ckpt_sizes + total_num_ckpts);
 
@@ -187,6 +191,14 @@ void CheckpointServer::Impl::handleRequests(
 
         // This should fill in everything in readback_ptr
         query_ckpt_fn(fn_data, processing_requests.size(), readback_ptr);
+
+        for (uint32_t i = 0; i < processing_requests.size(); ++i) {
+            if (traj_avails[i] == 1) {
+                printf("Trajectory available\n");
+            } else {
+                printf("Trajectory not available\n");
+            }
+        }
     }
 }
 
@@ -194,8 +206,8 @@ void CheckpointServer::Impl::update(
     void (*query_ckpt_fn)(void *fn_data, uint32_t num_requests, void *params),
     void *fn_data)
 {
-    acceptConnections();
     handleRequests(query_ckpt_fn, fn_data);
+    acceptConnections();
 }
 
 void CheckpointServer::updateImpl(
@@ -211,6 +223,11 @@ CheckpointServer::~CheckpointServer() = default;
 CheckpointServer::CheckpointServer(const Config &cfg)
     : impl_(new Impl(cfg))
 {
+}
+
+uint32_t CheckpointServer::getNumClients()
+{
+    return impl_->clients.size();
 }
 
 }

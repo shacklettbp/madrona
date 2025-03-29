@@ -120,7 +120,7 @@ void * getCheckpointPtr(Context &ctx,
 
 }
 
-extern "C" void queryCheckpointInfo(uint32_t num_queries, void *readback)
+extern "C" __global__ void queryCheckpointInfo(uint32_t num_queries, void *readback)
 {
     using namespace madrona;
     using namespace madrona::CheckpointSystem;
@@ -129,30 +129,30 @@ extern "C" void queryCheckpointInfo(uint32_t num_queries, void *readback)
     if (tid >= num_queries)
         return;
 
-    uint32_t *readback_u32 = (uint32_t *)readback;
+    printf("Thread made it past return!\n");
+
+    uint64_t *readback_u64 = (uint64_t *)readback;
 
     struct TrajInfo {
-        uint32_t worldID;
-        uint32_t numSteps;
-        uint32_t offset;
+        uint64_t worldID;
+        uint64_t numSteps;
+        uint64_t offset;
     };
 
-    uint32_t total_num_ckpts = *readback_u32;
-    uint32_t *traj_avails = readback_u32 + 1;
+    uint64_t total_num_ckpts = *readback_u64;
+    uint64_t *traj_avails = readback_u64 + 1;
     TrajInfo *traj_infos = 
-        (TrajInfo *)(readback_u32 + num_queries);
-    uint32_t *ckpt_sizes = (uint32_t *)(req_world_ids + num_queries);
+        (TrajInfo *)(traj_avails + num_queries);
+    uint64_t *ckpt_sizes = (uint64_t *)(traj_infos + num_queries);
     void **ckpt_ptrs = (void **)(ckpt_sizes + total_num_ckpts);
 
 
 
     // All data for this specific thread
-    uint32_t *curr_traj_avails = traj_avails + tid;
+    uint64_t *curr_traj_avails = traj_avails + tid;
     TrajInfo *curr_traj_info = traj_infos + tid;
-    uint32_t *curr_ckpt_sizes = ckpt_sizes + curr_traj_info->offset;
+    uint64_t *curr_ckpt_sizes = ckpt_sizes + curr_traj_info->offset;
     void **curr_ckpt_ptrs = ckpt_ptrs + curr_traj_info->offset;
-    
-
 
     // First check if there are enough checkpoints.
     StateManager *state_mgr = mwGPU::getStateManager();
@@ -160,9 +160,9 @@ extern "C" void queryCheckpointInfo(uint32_t num_queries, void *readback)
 
     // Checkpoint *ckpts = ctx.singleton<WorldCheckpoint>().ptr();
     Checkpoint *ckpts = state_mgr->getSingleton<WorldCheckpoint>(
-            curr_traj_info->worldID).ptr();
+        WorldID { curr_traj_info->worldID }).ptr();
     uint32_t most_recent_write = state_mgr->getSingleton<WorldMostRecentWrite>(
-            curr_traj_info->worlDID);
+        WorldID { curr_traj_info->worldID }).mostRecentCkpt;
 
     *curr_traj_avails = 1;
 

@@ -130,6 +130,8 @@ struct CheckpointServer {
         }, (void *)&fn);
     }
 
+    uint32_t getNumClients();
+
 private:
     struct Impl;
 

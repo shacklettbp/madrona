@@ -465,6 +465,8 @@ struct MWCudaExecutor::Impl {
     uint32_t renderOutputResolution;
     uint32_t sharedMemPerSM;
 
+    uint32_t numCheckpoints;
+
     std::vector<TimingGroup> timingGroups;
 };
 
@@ -1609,10 +1611,8 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
                                "initBVHParams"));
     REQ_CU(cuModuleGetFunction(&gpu_kernels.destroyECS, gpu_kernels.mod,
                                "freeECSTables"));
-#if 0
     REQ_CU(cuModuleGetFunction(&gpu_kernels.queryCheckpointInfo, gpu_kernels.mod,
                               "queryCheckpointInfo"));
-#endif
 
     return gpu_kernels;
 }
@@ -2524,6 +2524,7 @@ MWCudaExecutor::MWCudaExecutor(
         state_cfg.numWorlds,
         render_cfg.has_value() ? render_cfg->renderResolution : 0,
         (uint32_t)shared_mem_per_sm,
+        state_cfg.numCheckpoints,
         {}
     });
 
@@ -2941,6 +2942,11 @@ void MWCudaExecutor::queryCheckpointInfo(
     auto args = makeKernelArgBuffer(num_queries, readback);
     launchKernel(impl_->queryCheckpointInfo, num_blocks, 256, args);
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
+}
+
+uint32_t MWCudaExecutor::getNumCheckpoints() const
+{
+    return impl_->numCheckpoints;
 }
 
 

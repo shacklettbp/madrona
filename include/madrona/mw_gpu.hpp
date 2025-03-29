@@ -170,6 +170,8 @@ public:
     // Queries information about which checkpoints are available.
     void queryCheckpointInfo(uint32_t num_queries, void *readback);
 
+    uint32_t getNumCheckpoints() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

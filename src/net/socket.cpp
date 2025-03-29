@@ -62,7 +62,7 @@ uint16_t Socket::bindToPort(Address addr)
 {
     sockaddr_in addr_struct = {};
     addr_struct.sin_family = AF_INET;
-    addr_struct.sin_port = addr.port;
+    addr_struct.sin_port = htons(addr.port);
     addr_struct.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(hdl, (sockaddr *)&addr_struct, sizeof(addr_struct)) < 0) {
