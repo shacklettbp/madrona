@@ -78,6 +78,10 @@ struct DataSerial {
                     cudaMemcpyDeviceToHost));
         offset += num_bytes;
     }
+#else
+    inline void writeFromGPU(void *gpu_ptr, uint32_t num_bytes)
+    {
+    }
 #endif
 };
 

@@ -50,6 +50,7 @@ void CheckpointClient::connect(const char *ipv4, uint16_t port)
 
     // We will be using non-blocking sockets for now
     impl_->sock.setBlockingMode(false);
+    impl_->sock.setRecvBufferSize(1024 * 1024);
 }
 
 void CheckpointClient::requestTrajectory(
@@ -92,8 +93,19 @@ void CheckpointClient::update()
                     &packet_size, sizeof(packet_size)) == sizeof(packet_size));
 
             void *data = malloc(packet_size);
-            assert(impl_->sock.receive(
-                    data, packet_size) == packet_size);
+            uint32_t read_bytes = 0;
+
+            while (read_bytes < packet_size) {
+                int32_t main_recv_bytes = impl_->sock.receive(
+                        (void *)((uint8_t *)data + read_bytes), packet_size);
+
+                if (main_recv_bytes < 0) {
+                    continue;
+                }
+
+                read_bytes += (uint32_t)main_recv_bytes;
+                printf("Received %u bytes\n", main_recv_bytes);
+            }
 
             DataSerial ds = {
                 .ptr = (uint8_t *)data,

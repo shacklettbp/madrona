@@ -1418,15 +1418,11 @@ void initHierarchies(Context &ctx,
 
     computeExpandedParent(ctx, m, p);
     forwardKinematics(ctx, m, p);
-
-    printf("Init hierarchies\n");
 }
 
 void destroyHierarchies(Context &ctx,
                         DestroyBodyGroup &body_grp)
 {
-    printf("Destroy hierarchies\n");
-
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
