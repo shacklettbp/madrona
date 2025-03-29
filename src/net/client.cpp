@@ -19,11 +19,11 @@ struct CheckpointClient::Impl {
     std::mutex mu;
     std::thread recvThread;
 
-    Impl(const Config &cfg);
+    Impl();
 };
 
-CheckpointClient::CheckpointClient(const Config &cfg)
-    : impl_(new Impl(cfg))
+CheckpointClient::CheckpointClient()
+    : impl_(new Impl())
 {
 }
 
@@ -31,18 +31,25 @@ CheckpointClient::CheckpointClient(CheckpointClient &&) = default;
 
 CheckpointClient::~CheckpointClient() = default;
 
-CheckpointClient::Impl::Impl(const Config &cfg)
+CheckpointClient::Impl::Impl()
     : sock(Socket::make(Socket::Type::Stream)),
       trajectories(64),
-      recvBuf((uint8_t *)malloc(1024 * 64))
+      recvBuf((uint8_t *)malloc(1024 * 1024))
 {
-    if (!sock.connectTo(cfg.ipv4, cfg.port)) {
+}
+
+void CheckpointClient::connect(const char *ipv4, uint16_t port)
+{
+    if (!impl_->sock.connectTo(ipv4, port)) {
         FATAL("Failed to connect to server %s, port %d\n",
-                cfg.ipv4, (uint32_t)cfg.port);
+                ipv4, (uint32_t)port);
+    } else {
+        printf("Successfully connected to %s:%u\n",
+                ipv4, (uint32_t)port);
     }
 
     // We will be using non-blocking sockets for now
-    sock.setBlockingMode(false);
+    impl_->sock.setBlockingMode(false);
 }
 
 void CheckpointClient::requestTrajectory(
@@ -100,7 +107,9 @@ void CheckpointClient::update()
             };
 
             if (impl_->trajectories.find(traj_id) == impl_->trajectories.end()) {
-                impl_->trajectories.emplace(std::make_pair(traj_id, Trajectory { "", {} }));
+                std::string traj_name = "traj_" + std::to_string(traj_id);
+                impl_->trajectories.emplace(std::make_pair(traj_id, 
+                            Trajectory { traj_name, {} }));
             }
 
             impl_->trajectories[traj_id].snapshots.push_back(snapshot);
@@ -112,6 +121,16 @@ void CheckpointClient::update()
         }
     }
 
+}
+
+std::vector<Trajectory> CheckpointClient::getTrajectories()
+{
+    std::vector<Trajectory> trajs;
+    for (auto [id, traj] : impl_->trajectories) {
+        trajs.push_back(traj);
+    }
+
+    return trajs;
 }
 
 }

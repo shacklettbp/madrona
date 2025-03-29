@@ -86,17 +86,47 @@ struct TrajectorySnapshot {
 struct Trajectory {
     std::string name;
     std::vector<TrajectorySnapshot> snapshots;
+
+    inline uint32_t getNumCheckpoints()
+    {
+        uint32_t total = 0;
+        for (uint32_t i = 0; i < snapshots.size(); ++i) {
+            total += snapshots[i].getNumCheckpoints();
+        }
+        return total;
+    }
+
+    inline std::pair<uint32_t, void *> getStepData(uint32_t step)
+    {
+        uint32_t total_ckpts = 0;
+        for (uint32_t i = 0; i < snapshots.size(); ++i) {
+            uint32_t prev = total_ckpts;
+
+            total_ckpts += snapshots[i].getNumCheckpoints();
+            
+            if (step < total_ckpts) {
+                uint32_t step_offset = step - prev;
+
+                uint32_t data_offset = snapshots[i].getOffsets()[step_offset];
+                uint32_t data_size = snapshots[i].getSizes()[step_offset];
+                void *data = (void *)(
+                        (uint8_t *)snapshots[i].getCheckpointDataBase() +
+                        data_offset);
+
+                return { data_size, data };
+            }
+        }
+
+        return { 0, nullptr };
+    }
 };
 
 struct CheckpointClient {
-    struct Config {
-        const char *ipv4;
-        uint16_t port;
-    };
-
-    CheckpointClient(const Config &cfg);
+    CheckpointClient();
     CheckpointClient(CheckpointClient &&);
     ~CheckpointClient();
+
+    void connect(const char *ipv4, uint16_t port);
 
     void requestTrajectory(uint32_t world_id, uint32_t num_steps);
 
@@ -104,6 +134,8 @@ struct CheckpointClient {
     void requestCustom(const char *filter);
 
     void update();
+
+    std::vector<Trajectory> getTrajectories();
 
 private:
     struct Impl;
