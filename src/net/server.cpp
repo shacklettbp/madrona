@@ -8,6 +8,8 @@
 
 #include "comm.hpp"
 
+#include <chrono>
+
 namespace madrona::net {
 
 struct PendingRequest {
@@ -17,6 +19,7 @@ struct PendingRequest {
     };
 
     RequestType type;
+    uint32_t clientID;
 
     union {
         struct {
@@ -40,6 +43,8 @@ struct CheckpointServer::Impl {
     Socket acceptSock;
     std::vector<Client> clients;
 
+    uint32_t trajectoryCount;
+
     Impl(const Config &cfg);
 
     void update(
@@ -53,7 +58,8 @@ struct CheckpointServer::Impl {
 };
 
 CheckpointServer::Impl::Impl(const Config &cfg)
-    : acceptSock(Socket::make(Socket::Type::Stream))
+    : acceptSock(Socket::make(Socket::Type::Stream)),
+      trajectoryCount(0)
 {
     // We will be using non-blocking sockets for now
     acceptSock.setBlockingMode(false);
@@ -114,6 +120,7 @@ void CheckpointServer::Impl::handleRequests(
 
                 PendingRequest req = {
                     .type = PendingRequest::RequestType::TrajectoryRequest,
+                    .clientID = i,
                 };
 
                 req.trajRequest = {
@@ -194,9 +201,64 @@ void CheckpointServer::Impl::handleRequests(
 
         for (uint32_t i = 0; i < processing_requests.size(); ++i) {
             if (traj_avails[i] == 1) {
-                printf("Trajectory available\n");
-            } else {
-                printf("Trajectory not available\n");
+                // Package the trajectory and send it to the client
+                uint64_t *traj_ckpt_sizes = ckpt_sizes + traj_infos[i].offset;
+                void **traj_ckpt_ptrs = ckpt_ptrs + traj_infos[i].offset;
+
+                // This first uint32_t is for the trajectory ID
+                uint64_t data_size = sizeof(TrajectoryID) +
+                                     sizeof(uint32_t) + // number of ckpts
+                                     sizeof(uint32_t) * traj_infos[i].numSteps +
+                                     sizeof(uint32_t) * traj_infos[i].numSteps;
+                for (uint32_t c = 0; c < traj_infos[i].numSteps; ++c) {
+                    data_size += traj_ckpt_sizes[c];
+                }
+
+                uint8_t *packet_data = (uint8_t *)malloc(
+                        sizeof(PacketType) + sizeof(uint32_t) + data_size);
+
+                DataSerial ds = {
+                    .ptr = packet_data,
+                    .size = (uint32_t)(sizeof(PacketType) + // Packet type
+                                       sizeof(uint32_t) +   // Packet size
+                                       data_size),
+                    .offset = 0,
+                };
+
+                ds.write(PacketType::TrajectoryPackage);
+                ds.write((uint32_t)data_size);
+
+                printf("Sending packet with size %u\n", (uint32_t)data_size);
+
+                TrajectoryID traj_id = ((uint16_t)trajectoryCount << 16) |
+                                        (uint16_t)traj_infos[i].worldID;
+
+                // Start of actual data
+                ds.write(traj_id); // Trajectory ID
+                ds.write((uint32_t)traj_infos[i].numSteps); // Number of checkpoints
+
+                // Write the checkpoints offsets
+                uint64_t traj_offset = 0;
+                for (uint32_t c = 0; c < traj_infos[i].numSteps; ++c) {
+                    ds.write((uint32_t)traj_offset);
+                    traj_offset += traj_ckpt_sizes[c];
+                }
+
+                // Write the checkpoint sizes
+                for (uint32_t c = 0; c < traj_infos[i].numSteps; ++c) {
+                    ds.write((uint32_t)traj_ckpt_sizes[c]);
+                }
+
+                // Now, write all the checkpoint data
+                for (uint32_t c = 0; c < traj_infos[i].numSteps; ++c) {
+                    uint64_t num_bytes = traj_ckpt_sizes[c];
+                    void *gpu_ptr = traj_ckpt_ptrs[c];
+                    ds.writeFromGPU(gpu_ptr, (uint32_t)num_bytes);
+                }
+
+                // Send to client
+                Client &cl = clients[processing_requests[i].clientID];
+                cl.sock.send((const char *)ds.ptr, ds.size);
             }
         }
     }

@@ -79,6 +79,8 @@ void CheckpointClient::update()
             return;
         }
 
+        printf("Received a packet!\n");
+
         switch (type) {
         case PacketType::ServerShutdown: {
             // TODO: Handle
@@ -87,7 +89,7 @@ void CheckpointClient::update()
         case PacketType::TrajectoryPackage: {
             uint32_t packet_size;
             assert(impl_->sock.receive(
-                    &packet_size, sizeof(packet_size)) == sizeof(type));
+                    &packet_size, sizeof(packet_size)) == sizeof(packet_size));
 
             void *data = malloc(packet_size);
             assert(impl_->sock.receive(
@@ -101,6 +103,9 @@ void CheckpointClient::update()
 
             // The trajectory ID contains the world ID in it.
             TrajectoryID traj_id = ds.read<uint32_t>();
+
+            printf("Received trajectory with ID %u, packet size %u\n", 
+                    traj_id, packet_size);
 
             TrajectorySnapshot snapshot = {
                 .ckptData = data,

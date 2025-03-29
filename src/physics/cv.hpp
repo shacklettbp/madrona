@@ -53,7 +53,8 @@ TaskGraphNodeID setupSolveTasks(TaskGraphBuilder &builder,
                                 TaskGraphNodeID prepare);
 
 TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
-                               TaskGraphNodeID solve);
+                               TaskGraphNodeID solve,
+                               bool replay_mode = false);
 
 namespace tasks {
 void initHierarchies(Context &ctx,

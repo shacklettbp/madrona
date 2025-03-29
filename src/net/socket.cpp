@@ -66,6 +66,7 @@ uint16_t Socket::bindToPort(Address addr)
     addr_struct.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(hdl, (sockaddr *)&addr_struct, sizeof(addr_struct)) < 0) {
+        printf("Failed to bind to port %u\n", (uint32_t)addr.port);
         return 0xFFFF;
     } else {
         return ntohs(addr.port);
@@ -124,6 +125,8 @@ uint32_t Socket::receiveImpl(char *buf, uint32_t buf_size)
 
 bool Socket::send(const char *buf, uint32_t buf_size)
 {
+    printf("Sending something\n");
+
     int32_t send_ret = ::send(hdl, buf, buf_size, MSG_NOSIGNAL);
 
     if (send_ret < 0) {

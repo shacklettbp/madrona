@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <cassert>
 
+#ifdef MADRONA_CUDA_SUPPORT
+#include <madrona/cuda_utils.hpp>
+#endif
+
 namespace madrona::net {
 
 enum class PacketType : uint8_t {
@@ -19,6 +23,9 @@ enum class PacketType : uint8_t {
 
     // Client sends this
     CustomRequest,
+
+    // Ping to make sure clients are still alive
+    Ping,
 };
 
 struct DataSerial {
@@ -29,7 +36,7 @@ struct DataSerial {
     template <typename T>
     inline void write(T data)
     {
-        assert(offset < size);
+        assert(offset + sizeof(data) <= size);
         memcpy(ptr + offset, &data, sizeof(T));
         offset += sizeof(T);
     }
@@ -37,7 +44,7 @@ struct DataSerial {
     template <typename T>
     inline void write(T *data, uint32_t count)
     {
-        assert(offset < size);
+        assert(offset + sizeof(data) * count <= size);
         memcpy(ptr + offset, data, sizeof(T) * count);
         offset += sizeof(T) * count;
     }
@@ -59,6 +66,19 @@ struct DataSerial {
         memcpy(dst, ptr + offset, sizeof(T) * count);
         offset += sizeof(T) * count;
     }
+
+#ifdef MADRONA_CUDA_SUPPORT
+    inline void writeFromGPU(void *gpu_ptr, uint32_t num_bytes)
+    {
+        assert(offset + num_bytes <= size);
+        REQ_CUDA(cudaMemcpy(
+                    (void *)(ptr + offset), 
+                    gpu_ptr,
+                    num_bytes,
+                    cudaMemcpyDeviceToHost));
+        offset += num_bytes;
+    }
+#endif
 };
 
 }

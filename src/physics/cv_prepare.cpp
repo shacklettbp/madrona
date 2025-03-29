@@ -1419,14 +1419,14 @@ void initHierarchies(Context &ctx,
     computeExpandedParent(ctx, m, p);
     forwardKinematics(ctx, m, p);
 
-    if (p.qvDim > 0) {
-        printInfo(m, p, "initHierarchies");
-    }
+    printf("Init hierarchies\n");
 }
 
 void destroyHierarchies(Context &ctx,
                         DestroyBodyGroup &body_grp)
 {
+    printf("Destroy hierarchies\n");
+
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
@@ -2160,12 +2160,17 @@ TaskGraphNodeID setupCVInitTasks(
 }
 
 TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
-                               TaskGraphNodeID solve)
+                               TaskGraphNodeID solve,
+                               bool replay)
 {
-    auto cur_node = builder.addToGraph<ParallelForNode<Context,
-         tasks::integrationStep,
-            DofObjectGroup
-        >>({solve});
+    TaskGraphNodeID cur_node;
+
+    if (!replay) {
+        cur_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::integrationStep,
+                DofObjectGroup
+            >>({solve});
+    }
 
     cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::forwardKinematics,
