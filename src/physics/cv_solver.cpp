@@ -2260,6 +2260,37 @@ void solveCPU(Context &ctx,
     // No constraints, done
     if (num_constraints == 0) { copyResult(ctx, cv_sing.freeAcc); }
 
+    // Call the solver
+    if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
+        cv_sing.cvxSolve->totalNumDofs = cv_sing.totalNumDofs;
+        cv_sing.cvxSolve->numContactPts = cv_sing.numContactPts;
+        cv_sing.cvxSolve->h = cv_sing.h;
+        cv_sing.cvxSolve->mass = cv_sing.mass;
+        cv_sing.cvxSolve->free_acc = cv_sing.freeAcc;
+        cv_sing.cvxSolve->vel = cv_sing.vel;
+        cv_sing.cvxSolve->J_c = cv_sing.J_c;
+        cv_sing.cvxSolve->J_e = cv_sing.J_e;
+        cv_sing.cvxSolve->numEqualityRows = cv_sing.numRowsJe;
+        cv_sing.cvxSolve->mu = cv_sing.mu;
+        cv_sing.cvxSolve->penetrations = cv_sing.penetrations;
+        cv_sing.cvxSolve->eqResiduals = cv_sing.eqResiduals;
+        cv_sing.cvxSolve->diagApprox_c = cv_sing.diagApprox_c;
+        cv_sing.cvxSolve->diagApprox_e = cv_sing.diagApprox_e;
+
+        cv_sing.cvxSolve->callSolve.store_release(1);
+        while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
+        cv_sing.cvxSolve->callSolve.store_relaxed(0);
+        float *res = cv_sing.cvxSolve->resPtr;
+        if (res) {
+            copyResult(ctx, res);
+        }
+        return;
+    }
+
+    if (!ctx.singleton<CVSolveData>().enablePhysics) {
+        return;
+    }
+
     // Memory for reference acceleration, impedance, and residuals
     //  todo: make this contiguous
     float *acc_ref_c = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
@@ -2301,38 +2332,10 @@ void solveCPU(Context &ctx,
     constexpr float ls_tol = 0.01f;
     uint32_t max_iter = 100;
     uint32_t ls_iters = 50;
-    if (!ctx.singleton<CVSolveData>().enablePhysics) {
-        max_iter = 0;
-    }
+
     nonlinearCG(ctx, a_solve, acc_ref_c, acc_ref_e, D_c, D_e,
         tol, ls_tol, max_iter, ls_iters, cv_sing);
     copyResult(ctx, a_solve);
-
-    // Call the solver
-    if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
-        cv_sing.cvxSolve->totalNumDofs = cv_sing.totalNumDofs;
-        cv_sing.cvxSolve->numContactPts = cv_sing.numContactPts;
-        cv_sing.cvxSolve->h = cv_sing.h;
-        cv_sing.cvxSolve->mass = cv_sing.mass;
-        cv_sing.cvxSolve->free_acc = cv_sing.freeAcc;
-        cv_sing.cvxSolve->vel = cv_sing.vel;
-        cv_sing.cvxSolve->J_c = cv_sing.J_c;
-        cv_sing.cvxSolve->J_e = cv_sing.J_e;
-        cv_sing.cvxSolve->numEqualityRows = cv_sing.numRowsJe;
-        cv_sing.cvxSolve->mu = cv_sing.mu;
-        cv_sing.cvxSolve->penetrations = cv_sing.penetrations;
-        cv_sing.cvxSolve->eqResiduals = cv_sing.eqResiduals;
-        cv_sing.cvxSolve->diagApprox_c = cv_sing.diagApprox_c;
-        cv_sing.cvxSolve->diagApprox_e = cv_sing.diagApprox_e;
-
-        cv_sing.cvxSolve->callSolve.store_release(1);
-        while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
-        cv_sing.cvxSolve->callSolve.store_relaxed(0);
-        float *res = cv_sing.cvxSolve->resPtr;
-        if (res) {
-            copyResult(ctx, res);
-        }
-    }
 }
 #endif
 }

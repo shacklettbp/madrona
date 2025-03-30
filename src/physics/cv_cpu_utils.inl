@@ -10,13 +10,16 @@ void matVecMul(float *res,
                uint32_t num_rows,
                uint32_t num_cols)
 {
-    for (uint32_t i = 0; i < num_rows; i++) {
+    uint32_t nr = !transposed ? num_rows : num_cols;
+    uint32_t nc = !transposed ? num_cols : num_rows;
+
+    for (uint32_t i = 0; i < nr; i++) {
         if (reset) { res[i] = 0.f; }
-        for (uint32_t j = 0; j < num_cols; j++) {
-            if (transposed) {
-                res[i] += mat[j * num_rows + i] * vec[j];
+        for (uint32_t j = 0; j < nc; j++) {
+            if (!transposed) {
+                res[i] += mat[i + j * num_rows] * vec[j];
             } else {
-                res[i] += mat[i * num_cols + j] * vec[j];
+                res[i] += mat[j + i * num_rows] * vec[j];
             }
         }
     }

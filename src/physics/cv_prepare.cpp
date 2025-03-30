@@ -542,7 +542,6 @@ void mulM(
     CountT total_dofs = prop.qvDim;
 
     int32_t *expandedParent = mem.expandedParent(prop);
-
     float *massMatrix = mem.massMatrix(prop);
 
     auto M = [&](int32_t row, int32_t col) -> float& {

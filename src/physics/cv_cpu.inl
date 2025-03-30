@@ -29,7 +29,7 @@ inline void computeAccRef(float *a_ref_res,
     float b = 2.f / (d_max * time_const);
 
     // a_ref first gets -b * (J @ v)
-    cpu_utils::matVecMul<true, true>(a_ref_res, J, v, num_rows_j, num_cols_j);
+    cpu_utils::matVecMul<false, true>(a_ref_res, J, v, num_rows_j, num_cols_j);
     cpu_utils::vecScale(a_ref_res, -b, num_rows_j);
 
     // Then compute -k * imp * r
@@ -162,7 +162,9 @@ inline void fullMSolveMul(Context &ctx,
         if (solve) {
             tasks::solveM(p, m, x_ptr);
         } else {
-            tasks::mulM(p, m, x_ptr, x_ptr);
+            float y[p.qvDim];
+            tasks::mulM(p, m, x_ptr, y);
+            memcpy(x_ptr, y, p.qvDim * sizeof(float));
         }
         processed_dofs += p.qvDim;
     }
@@ -198,19 +200,19 @@ inline float obj(float *grad_out,
     uint32_t nc = cv_sing.numRowsJc;
     float jar_c[nc]; // Jx - a_ref
     float grad_c[nc];
-    matVecMul<true, true>(jar_c, cv_sing.J_c, x, cv_sing.numRowsJc, cv_sing.numColsJc);
+    matVecMul<false, true>(jar_c, cv_sing.J_c, x, cv_sing.numRowsJc, cv_sing.numColsJc);
     sclAdd(jar_c, a_ref_c, -1.f, nc);
     cost += s_c(grad_c, jar_c, D_c, cv_sing.mu, nc);
-    matVecMul<false, false>(grad_out, cv_sing.J_c, grad_c, cv_sing.numRowsJc, cv_sing.numColsJc);
+    matVecMul<true, false>(grad_out, cv_sing.J_c, grad_c, cv_sing.numRowsJc, cv_sing.numColsJc);
 
     // Equation constraints
     uint32_t ne = cv_sing.numRowsJe;
     float jar_e[ne];
     float grad_e[ne];
-    matVecMul<true, true>(jar_e, cv_sing.J_e, x, cv_sing.numRowsJe, cv_sing.numColsJe);
+    matVecMul<false, true>(jar_e, cv_sing.J_e, x, cv_sing.numRowsJe, cv_sing.numColsJe);
     sclAdd(jar_e, a_ref_e, -1.f, ne);
     cost += s_e(grad_e, jar_e, D_e, ne);
-    matVecMul<false, false>(grad_out, cv_sing.J_e, grad_e, cv_sing.numRowsJe, cv_sing.numColsJe);
+    matVecMul<true, false>(grad_out, cv_sing.J_e, grad_e, cv_sing.numRowsJe, cv_sing.numColsJe);
 
     return cost;
 }
@@ -314,15 +316,15 @@ float exactLineSearch(float *xk, float *pk, float *D_c, float *D_e,
     // 2. Cone constraints
     float Jx_aref_c[nc];
     float Jp_c[nc];
-    matVecMul<true, true>(Jx_aref_c, cv_sing.J_c, xk, cv_sing.numRowsJc, cv_sing.numColsJc);
-    matVecMul<true, true>(Jp_c, cv_sing.J_c, pk, cv_sing.numRowsJc, cv_sing.numColsJc);
+    matVecMul<false, true>(Jx_aref_c, cv_sing.J_c, xk, cv_sing.numRowsJc, cv_sing.numColsJc);
+    matVecMul<false, true>(Jp_c, cv_sing.J_c, pk, cv_sing.numRowsJc, cv_sing.numColsJc);
     sclAdd(Jx_aref_c, a_ref_c, -1.f, nc);
 
     // 3. Equality constraints
     float Jx_aref_e[ne];
     float Jp_e[ne];
-    matVecMul<true, true>(Jx_aref_e, cv_sing.J_e, xk, cv_sing.numRowsJe, cv_sing.numColsJe);
-    matVecMul<true, true>(Jp_e, cv_sing.J_e, pk, cv_sing.numRowsJe, cv_sing.numColsJe);
+    matVecMul<false, true>(Jx_aref_e, cv_sing.J_e, xk, cv_sing.numRowsJe, cv_sing.numColsJe);
+    matVecMul<false, true>(Jp_e, cv_sing.J_e, pk, cv_sing.numRowsJe, cv_sing.numColsJe);
     sclAdd(Jx_aref_e, a_ref_e, -1.f, ne);
 
     auto phi = [&](float a) {
@@ -411,6 +413,7 @@ float exactLineSearch(float *xk, float *pk, float *D_c, float *D_e,
 
     float alpha = 0.f;
     Evals evals = phi(alpha);
+
     float alpha1 = alpha - evals.grad / evals.hess; // Newton step
     Evals evals_1 = phi(alpha1);
     if (evals.fun < evals_1.fun) {
