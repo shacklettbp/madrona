@@ -139,6 +139,7 @@ inline void nonlinearCG(Context &ctx,
 
         cpu_utils::vecScale(p, beta, nv);
     }
+    printf("CG Iterations %d\n", i);
     memcpy(res, x, nv_bytes);
 }
 
@@ -290,6 +291,19 @@ float exactLineSearch(float *xk, float *pk, float *D_c, float *D_e,
         float grad;
         float hess;
     };
+
+    struct ContactStore {
+        float quad0;
+        float quad1;
+        float quad2;
+        float U0;
+        float V0;
+        float UU;
+        float UV;
+        float VV;
+        float Dm;
+    };
+
     // Search vector too small
     if (norm(pk, nv) < 1e-15f) return 0.f;
 
@@ -320,6 +334,51 @@ float exactLineSearch(float *xk, float *pk, float *D_c, float *D_e,
     matVecMul<false, true>(Jp_c, cv_sing.J_c, pk, cv_sing.numRowsJc, cv_sing.numColsJc);
     sclAdd(Jx_aref_c, a_ref_c, -1.f, nc);
 
+    // For each contact, store some information to avoid re-computation
+    ContactStore cs[nc / 3];
+    for (uint32_t i = 0; i < nc / 3; i++) {
+        // Components of J @ x - a_ref, J @ p
+        float Jx_N = Jx_aref_c[3 * i];
+        float Jx_T1 = Jx_aref_c[3 * i + 1];
+        float Jx_T2 = Jx_aref_c[3 * i + 2];
+        float Jp_N = Jp_c[3 * i];
+        float Jp_T1 = Jp_c[3 * i + 1];
+        float Jp_T2 = Jp_c[3 * i + 2];
+        // Friction. Map to dual cone space
+        float mu = cv_sing.mu[3 * i];
+        float mu1 = cv_sing.mu[3 * i + 1];
+        float mu2 = cv_sing.mu[3 * i + 2];
+        // Weights
+        float Dn = D_c[3 * i];
+        float D1 = D_c[3 * i + 1];
+        float D2 = D_c[3 * i + 2];
+        float mid_weight = Dn / (mu * mu * (1 + mu * mu));
+
+        cs[i].quad0 = 0.5f * (Dn * Jx_N * Jx_N +
+                              D1 * Jx_T1 * Jx_T1 +
+                              D2 * Jx_T2 * Jx_T2);
+        cs[i].quad1 = (Dn * Jx_N * Jp_N +
+                       D1 * Jx_T1 * Jp_T1 +
+                       D2 * Jx_T2 * Jp_T2);
+        cs[i].quad2 = 0.5f * (Dn * Jp_N * Jp_N +
+                              D1 * Jp_T1 * Jp_T1 +
+                              D2 * Jp_T2 * Jp_T2);
+        // Map to dual cone space
+        Jx_N *= mu;
+        Jx_T1 *= mu1;
+        Jx_T2 *= mu2;
+        Jp_N *= mu;
+        Jp_T1 *= mu1;
+        Jp_T2 *= mu2;
+
+        cs[i].U0 = Jx_N;
+        cs[i].V0 = Jp_N;
+        cs[i].UU = Jx_T1 * Jx_T1 + Jx_T2 * Jx_T2;
+        cs[i].UV = Jx_T1 * Jp_T1 + Jx_T2 * Jp_T2;
+        cs[i].VV = Jp_T1 * Jp_T1 + Jp_T2 * Jp_T2;
+        cs[i].Dm = mid_weight;
+    }
+
     // 3. Equality constraints
     float Jx_aref_e[ne];
     float Jp_e[ne];
@@ -335,66 +394,30 @@ float exactLineSearch(float *xk, float *pk, float *D_c, float *D_e,
 
         // Then process cones
         for (uint32_t i = 0; i < nc / 3; i++) {
-            // Components of J @ x - a_ref, J @ p
-            float Jx_N = Jx_aref_c[3 * i];
-            float Jx_T1 = Jx_aref_c[3 * i + 1];
-            float Jx_T2 = Jx_aref_c[3 * i + 2];
-            float Jp_N = Jp_c[3 * i];
-            float Jp_T1 = Jp_c[3 * i + 1];
-            float Jp_T2 = Jp_c[3 * i + 2];
-            // Friction and weights
+            ContactStore c = cs[i];
             float mu = cv_sing.mu[3 * i];
-            float mu1 = cv_sing.mu[3 * i + 1];
-            float mu2 = cv_sing.mu[3 * i + 2];
-            float Dn = D_c[3 * i];
-            float D1 = D_c[3 * i + 1];
-            float D2 = D_c[3 * i + 2];
-            float mid_weight = 1.f / (mu * mu * (1 + mu * mu));
-
-
-            // J @ (x + alpha * p) - a_ref = (J @ x - a_ref) + alpha * J @ p
-            float Jacc_N = Jx_N + a * Jp_N;
-            float Jacc_T1 = Jx_T1 + a * Jp_T1;
-            float Jacc_T2 = Jx_T2 + a * Jp_T2;
-
-            // Map to dual cone space
-            float N_search = Jacc_N * mu;
-            float T1_search = Jacc_T1 * mu1;
-            float T2_search = Jacc_T2 * mu2;
-            float T_search = sqrtf(T1_search * T1_search + T2_search * T2_search);
+            float N = c.U0 + a * c.V0;
+            float T_sqr = c.UU + a * (2 * c.UV + a * c.VV);
+            float T = sqrtf(T_sqr);
 
             // Top zone
-            if (N_search >= mu * T_search || (T_search <= 0 && N_search >= 0)) {
+            if (N >= mu * T || (T <= 0 && N >= 0)) {
                 continue;
             }
             // Bottom zone
-            else if (mu * N_search + T_search <= 0 || (T_search <= 0 && N_search < 0)) {
-                fun += 0.5f * (Dn * Jacc_N * Jacc_N +
-                               D1 * Jacc_T1 * Jacc_T1 +
-                               D2 * Jacc_T2 * Jacc_T2);
-                float p_sq = Dn * Jp_N * Jp_N +
-                             D1 * Jp_T1 * Jp_T1 +
-                             D2 * Jp_T2 * Jp_T2;
-                grad += Dn * Jp_N * Jx_N +
-                        D1 * Jp_T1 * Jx_T1 +
-                        D2 * Jp_T2 * Jx_T2 +
-                        a * p_sq;
-                hess += p_sq;
+            else if (mu * N + T <= 0 || (T <= 0 && N < 0)) {
+                fun += a * a * c.quad2 + a * c.quad1 + c.quad0;
+                grad += 2 * a * c.quad2 + c.quad1;
+                hess += 2 * c.quad2;
             }
             // Middle zone
             else {
-                float tmp1 = N_search - mu * T_search;
-                float tmp2 = Jp_T2 * Jx_T1 - Jp_T1 * Jx_T2;
-                float dN_da = Jp_N * mu;
-                float dT_da = (mu1 * mu1 * Jp_T1 * Jacc_T1 +
-                               mu2 * mu2 * Jp_T2 * Jacc_T2) / T_search;
-                float d2Tp_da2 = mu1 * mu1 * mu2 * mu2 * (tmp2 * tmp2)
-                                    / (T_search * T_search * T_search);
-                float d_tmp = dN_da - mu * dT_da;
-
-                fun += 0.5f * Dn * mid_weight * tmp1 * tmp1;
-                grad += Dn * mid_weight * tmp1 * d_tmp;
-                hess += Dn * mid_weight * (d_tmp * d_tmp - tmp1 * mu * d2Tp_da2);
+                float N1 = c.V0;
+                float T1 = (c.UV + a * c.VV) / T;
+                float T2 = c.VV / T - (c.UV + a * c.VV) * T1 / (T*T);
+                fun += 0.5f*c.Dm*(N-mu*T)*(N-mu*T);
+                grad += c.Dm*(N-mu*T)*(N1-mu*T1);
+                hess += c.Dm*((N1-mu*T1)*(N1-mu*T1) + (N-mu*T)*(-mu*T2));
             }
         }
 
