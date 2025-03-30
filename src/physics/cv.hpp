@@ -75,8 +75,9 @@ void computeGroupCOM(Context &ctx,
 void computeSpatialInertiasAndPhi(Context &ctx,
                                   DofObjectGroup obj_grp);
 void compositeRigidBody(Context &ctx,
-                        BodyGroupProperties p,
-                        BodyGroupMemory m);
+                        BodyGroupProperties &p,
+                        BodyGroupMemory &m);
+
 void computePhi(DofType dof_type,
                 BodyPhi& body_phi,
                 math::Vector3 origin,
@@ -85,6 +86,10 @@ void computePhiTrans(DofType dof_type,
                      BodyPhi &body_phi,
                      math::Vector3 origin,
                      float *S);
+
+void mulM(BodyGroupProperties prop,
+        BodyGroupMemory mem,
+        float *x, float *y);
 void solveM(
         BodyGroupProperties prop,
         BodyGroupMemory mem, 

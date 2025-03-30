@@ -1,5 +1,6 @@
 #include "cv.hpp"
 #include "cv_gpu.hpp"
+#include "cv_cpu.hpp"
 #include "physics_impl.hpp"
 
 #define dbg_warp_printf(...) if (dbg) { warp_printf(__VA_ARGS__); }
@@ -2217,12 +2218,95 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
 #endif
 
 #ifndef MADRONA_GPU_MODE
+void copyResult(Context &ctx,
+             const float *res)
+{
+    uint32_t world_id = ctx.worldID().idx;
+    StateManager *state_mgr = getStateManager(ctx);
+    BodyGroupMemory *all_memories = state_mgr->getWorldComponents<
+        BodyGroupArchetype, BodyGroupMemory>(world_id);
+    BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
+        BodyGroupArchetype, BodyGroupProperties>(world_id);
+
+    CountT num_grps = state_mgr->numRows<BodyGroupArchetype>(world_id);
+
+    // Update the body accelerations
+    uint32_t processed_dofs = 0;
+    for (CountT i = 0; i < num_grps; ++i) {
+        BodyGroupMemory &m = all_memories[i];
+        BodyGroupProperties &p = all_properties[i];
+
+        for (CountT j = 0; j < all_properties[i].numBodies; j++) {
+            BodyOffsets offsets = m.offsets(p)[j];
+            float *dqv = m.dqv(p) + offsets.velOffset;
+
+            for (CountT k = 0; k < BodyOffsets::getDofTypeDim(offsets.dofType); k++) {
+                dqv[k] = res[processed_dofs];
+                processed_dofs++;
+            }
+        }
+    }
+}
+
 void solveCPU(Context &ctx,
               CVSolveData &cv_sing)
 {
-    uint32_t world_id = ctx.worldID().idx;
 
-    StateManager *state_mgr = getStateManager(ctx);
+    using namespace cpu_solver;
+    uint32_t dim_c = cv_sing.numRowsJc;
+    uint32_t dim_e = cv_sing.numRowsJe;
+    uint32_t num_constraints = dim_c + dim_e;
+
+    // No constraints, done
+    if (num_constraints == 0) { copyResult(ctx, cv_sing.freeAcc); }
+
+    // Memory for reference acceleration, impedance, and residuals
+    //  todo: make this contiguous
+    float *acc_ref_c = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
+    float *acc_ref_e = (float *)ctx.tmpAlloc(sizeof(float) * dim_e);
+    float *R_c = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
+    float *R_e = (float *)ctx.tmpAlloc(sizeof(float) * dim_e);
+    float *D_c = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
+    float *D_e = (float *)ctx.tmpAlloc(sizeof(float) * dim_e);
+    float *r_con = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
+    float *a_solve = (float *)ctx.tmpAlloc(sizeof(float) * cv_sing.totalNumDofs);
+
+    // Set residuals for contact constraints
+    memset(r_con, 0, sizeof(float) * dim_c);
+    for (uint32_t i = 0; i < cv_sing.numContactPts; i++) {
+        r_con[i * 3] = -cv_sing.penetrations[i];
+    }
+
+    // Compute reference accelerations
+    computeAccRef(acc_ref_c, R_c, cv_sing.vel, cv_sing.J_c,
+                  cv_sing.numRowsJc, cv_sing.numColsJc, r_con,
+                  cv_sing.diagApprox_c, cv_sing.h);
+    computeAccRef(acc_ref_e, R_e, cv_sing.vel, cv_sing.J_e,
+                  cv_sing.numRowsJe, cv_sing.numColsJe, cv_sing.eqResiduals,
+                  cv_sing.diagApprox_e, cv_sing.h);
+
+    adjustContactRegularization(R_c, cv_sing.mu, cv_sing.muDim);
+
+    // Constraint mass
+    for (uint32_t i = 0; i < dim_c; i++) {
+        D_c[i] = 1 / R_c[i];
+    }
+    for (uint32_t i = 0; i < dim_e; i++) {
+        D_e[i] = 1 / R_e[i];
+        // Todo: filter out unused constraints
+        if (R_e[i] < 1e-12f) { D_e[i] = 0.f; }
+    }
+
+    constexpr float tol = 1e-8f;
+    constexpr float ls_tol = 0.01f;
+    uint32_t max_iter = 100;
+    uint32_t ls_iters = 50;
+    if (!ctx.singleton<CVSolveData>().enablePhysics) {
+        max_iter = 0;
+    }
+    nonlinearCG(ctx, a_solve, acc_ref_c, acc_ref_e, D_c, D_e,
+        tol, ls_tol, max_iter, ls_iters, cv_sing);
+    copyResult(ctx, a_solve);
 
     // Call the solver
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
@@ -2244,33 +2328,9 @@ void solveCPU(Context &ctx,
         cv_sing.cvxSolve->callSolve.store_release(1);
         while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
         cv_sing.cvxSolve->callSolve.store_relaxed(0);
-
         float *res = cv_sing.cvxSolve->resPtr;
-
         if (res) {
-            BodyGroupMemory *all_memories = state_mgr->getWorldComponents<
-                BodyGroupArchetype, BodyGroupMemory>(world_id);
-            BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
-                BodyGroupArchetype, BodyGroupProperties>(world_id);
-
-            CountT num_grps = state_mgr->numRows<BodyGroupArchetype>(world_id);
-
-            // Update the body accelerations
-            uint32_t processed_dofs = 0;
-            for (CountT i = 0; i < num_grps; ++i) {
-                BodyGroupMemory &m = all_memories[i];
-                BodyGroupProperties &p = all_properties[i];
-
-                for (CountT j = 0; j < all_properties[i].numBodies; j++) {
-                    BodyOffsets offsets = m.offsets(p)[j];
-                    float *dqv = m.dqv(p) + offsets.velOffset;
-
-                    for (CountT k = 0; k < BodyOffsets::getDofTypeDim(offsets.dofType); k++) {
-                        dqv[k] = res[processed_dofs];
-                        processed_dofs++;
-                    }
-                }
-            }
+            copyResult(ctx, res);
         }
     }
 }

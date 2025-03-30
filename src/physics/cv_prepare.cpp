@@ -534,7 +534,7 @@ inline float * computeContactJacobian(BodyGroupProperties &p,
 }
 
 // y = Mx. Based on Table 6.5 in Featherstone
-inline void mulM(
+void mulM(
         BodyGroupProperties prop,
         BodyGroupMemory mem,
         float *x, float *y)
@@ -741,8 +741,8 @@ void compositeRigidBody(
 // CRB: Compute the Mass Matrix of the body group (n_dofs x n_dofs)
 void compositeRigidBody(
         Context &,
-        BodyGroupProperties prop,
-        BodyGroupMemory mem)
+        BodyGroupProperties &prop,
+        BodyGroupMemory &mem)
 {
     BodyOffsets *offsets = mem.offsets(prop);
     BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
@@ -839,8 +839,8 @@ void compositeRigidBody(
 // Recursive Newton Euler algorithm: Compute bias forces and gravity
 inline void recursiveNewtonEuler(
         Context &ctx,
-        BodyGroupProperties prop,
-        BodyGroupMemory mem)
+        BodyGroupProperties &prop,
+        BodyGroupMemory &mem)
 {
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     BodyOffsets* offsets = mem.offsets(prop);
@@ -1124,9 +1124,12 @@ inline void exportCPUSolverState(
 
     uint32_t processed_dofs = 0;
 
+    cv_sing.totalMass = 0; // sum of diagonals
     for (CountT i = 0; i < num_grps; ++i) {
         BodyGroupMemory &m = all_memories[i];
         BodyGroupProperties &p = all_properties[i];
+
+        cv_sing.totalMass += p.inertiaSum;
 
         float *local_mass = m.massMatrix(p);
         float *freeAcceleration = m.biasVector(p);
@@ -1443,7 +1446,7 @@ inline void exportCPUSolverState(
     cv_sing.velDim = total_num_dofs;
     cv_sing.numRowsJc = J_rows;
     cv_sing.numColsJc = J_cols;
-    cv_sing.muDim = total_contact_pts;
+    cv_sing.muDim = 3 * total_contact_pts;
     cv_sing.penetrationsDim = total_contact_pts;
 }
 
