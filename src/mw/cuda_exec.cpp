@@ -394,6 +394,7 @@ struct GPUKernels {
     CUfunction queueUserRun;
     CUfunction initBVHParams;
     CUfunction destroyECS;
+    CUfunction queryCheckpointInfo;
 };
 
 struct BVHKernelCache {
@@ -428,6 +429,8 @@ struct GPUEngineState {
 #endif
 
     HeapArray<void *> exportedColumns;
+    HeapArray<void *> exportedCheckpoints;
+    uint32_t *checkpointSizes;
 
     FreeQueue *freeQueue;
 };
@@ -456,10 +459,13 @@ struct MWCudaExecutor::Impl {
     bool enableRaycasting;
     BVHKernels bvhKernels;
     CUfunction destroyKernel;
+    CUfunction queryCheckpointInfo;
 
     uint32_t numWorlds;
     uint32_t renderOutputResolution;
     uint32_t sharedMemPerSM;
+
+    uint32_t numCheckpoints;
 
     std::vector<TimingGroup> timingGroups;
 };
@@ -1605,6 +1611,8 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
                                "initBVHParams"));
     REQ_CU(cuModuleGetFunction(&gpu_kernels.destroyECS, gpu_kernels.mod,
                                "freeECSTables"));
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.queryCheckpointInfo, gpu_kernels.mod,
+                              "queryCheckpointInfo"));
 
     return gpu_kernels;
 }
@@ -2041,7 +2049,12 @@ static GPUEngineState initEngineAndUserState(
     memcpy(exported_cols.data(), exported_readback,
            sizeof(void *) * (uint64_t)num_exported);
 
+    HeapArray<void *> exported_checkpoints(num_checkpoints);
+    memcpy(exported_checkpoints.data(), checkpoint_ptr_readback,
+           sizeof(void *) * (uint64_t)num_checkpoints);
+
     cu::deallocCPU(exported_readback);
+    cu::deallocCPU(checkpoint_ptr_readback);
 
     if (render_cfg.has_value()) { 
         auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
@@ -2096,6 +2109,8 @@ static GPUEngineState initEngineAndUserState(
         std::move(device_tracing),
 #endif
         std::move(exported_cols),
+        std::move(exported_checkpoints),
+        checkpoint_size_readback,
         fq
     };
 }
@@ -2505,9 +2520,11 @@ MWCudaExecutor::MWCudaExecutor(
         render_cfg.has_value(),
         bvh_kernels,
         gpu_kernels.destroyECS,
+        gpu_kernels.queryCheckpointInfo,
         state_cfg.numWorlds,
         render_cfg.has_value() ? render_cfg->renderResolution : 0,
         (uint32_t)shared_mem_per_sm,
+        state_cfg.numCheckpoints,
         {}
     });
 
@@ -2898,5 +2915,39 @@ void * MWCudaExecutor::getExported(CountT slot) const
 {
     return impl_->engineState.exportedColumns[slot];
 }
+
+void * MWCudaExecutor::getCheckpoint(CountT checkpoint_idx) const
+{
+    return impl_->engineState.exportedCheckpoints[checkpoint_idx];
+}
+
+uint32_t MWCudaExecutor::getCheckpointSize(CountT checkpoint_idx) const
+{
+    return impl_->engineState.checkpointSizes[checkpoint_idx];
+}
+
+void MWCudaExecutor::queryCheckpointInfo(
+        uint32_t num_queries, void *readback)
+{
+    auto strm = impl_->cuStream;
+
+    auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
+                               uint32_t num_threads,
+                               HeapArray<void *> &args) {
+        REQ_CU(cuLaunchKernel(f, num_blocks, 1, 1, num_threads, 1, 1,
+                              0, strm, nullptr, args.data()));
+    };
+
+    uint32_t num_blocks = (num_queries + 255) / 256;
+    auto args = makeKernelArgBuffer(num_queries, readback);
+    launchKernel(impl_->queryCheckpointInfo, num_blocks, 256, args);
+    REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
+}
+
+uint32_t MWCudaExecutor::getNumCheckpoints() const
+{
+    return impl_->numCheckpoints;
+}
+
 
 }

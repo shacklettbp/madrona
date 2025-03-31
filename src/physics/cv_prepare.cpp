@@ -1547,10 +1547,6 @@ void initHierarchies(Context &ctx,
     computeExpandedParent(ctx, m, p);
     resetMasses(m, p);
     forwardKinematics(ctx, m, p);
-
-    if (p.qvDim > 0) {
-        printInfo(m, p, "initHierarchies");
-    }
 }
 
 void destroyHierarchies(Context &ctx,
@@ -2257,22 +2253,6 @@ TaskGraphNodeID setupCVResetTasks(
         >>(deps);
 #endif
 
-    cur_node = builder.addToGraph<ParallelForNode<Context,
-         tasks::initHierarchies,
-            InitBodyGroup
-         >>({cur_node});
-
-    // Dumb that we have to run this twice in a frame but it's cheap
-    // as hell so we'll just do that for now.
-    cur_node =
-        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
-            Entity,
-            Position,
-            Rotation,
-            Scale,
-            LinkParentDofObject
-        >>({cur_node});
-
     cur_node = builder.addToGraph<
         ClearTmpNode<DestroyBodyGroupArchetype>>({cur_node});
 
@@ -2284,6 +2264,25 @@ TaskGraphNodeID setupCVResetTasks(
         CompactArchetypeNode<LinkCollider>>({cur_node});
     cur_node = builder.addToGraph<
         CompactArchetypeNode<LinkVisual>>({cur_node});
+
+    cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::initHierarchies,
+            InitBodyGroup
+         >>({cur_node});
+
+    cur_node = builder.addToGraph<
+        ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
+
+    // Dumb that we have to run this twice in a frame but it's cheap
+    // as hell so we'll just do that for now.
+    cur_node =
+        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Entity,
+            Position,
+            Rotation,
+            Scale,
+            LinkParentDofObject
+        >>({cur_node});
 
     return cur_node;
 }
@@ -2311,12 +2310,17 @@ TaskGraphNodeID setupCVInitTasks(
 }
 
 TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
-                               TaskGraphNodeID solve)
+                               TaskGraphNodeID solve,
+                               bool replay)
 {
-    auto cur_node = builder.addToGraph<ParallelForNode<Context,
-         tasks::integrationStep,
-            DofObjectGroup
-        >>({solve});
+    TaskGraphNodeID cur_node;
+
+    if (!replay) {
+        cur_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::integrationStep,
+                DofObjectGroup
+            >>({solve});
+    }
 
     cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::forwardKinematics,

@@ -94,6 +94,25 @@ inline uint32_t BodyGroupMemory::tmpNumBytes(BodyGroupProperties p)
            36 * sizeof(float);
 }
 
+inline uint32_t BodyGroupMemory::checkpointNumBytes(BodyGroupProperties p)
+{
+    return sizeof(BodyGroupDesc) +
+           p.qDim * sizeof(float) +                 // q
+           p.qvDim * sizeof(float) +                // qv
+           p.qvDim * sizeof(float) +                // dqv
+           p.qvDim * sizeof(float) +                // force
+           p.numBodies * sizeof(float) +            // mus
+           p.numEq * sizeof(BodyLimitConstraint) +  // equalities
+           p.numBodies * sizeof(BodyInertial) +     // inertias
+           p.qvDim * sizeof(int32_t) +              // expanded parent
+           p.numBodies * sizeof(uint32_t) +         // fixed root status
+           p.numObjData * sizeof(BodyObjectData) +  // body object data
+           p.numBodies * sizeof(BodyHierarchy) +    // body hierarchy
+           p.numBodies * sizeof(BodyOffsets) +      // Body offsets
+           p.numHashes * sizeof(BodyNameHash) +     // Body name hashes
+           p.numBodies * sizeof(DofObjectProxies);
+}
+
 SpatialVector SpatialVector::fromVec(const float* v)
 {
     return { 

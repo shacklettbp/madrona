@@ -22,17 +22,27 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
              tasks::refreshPointers,
                 BodyGroupMemory>>({cur_node});
 
+    bool replay_mode = false;
+    if (num_substeps == 0) {
+        replay_mode = true;
+        num_substeps = 1;
+    }
     for (CountT i = 0; i < num_substeps; ++i) {
-        cur_node = narrowphase::setupTasks(builder, {cur_node});
+        if (!replay_mode) {
+            cur_node = narrowphase::setupTasks(builder, {cur_node});
+        }
 
 #ifdef MADRONA_GPU_MODE
         cur_node = builder.addToGraph<
             CompactArchetypeNode<Contact>>({cur_node});
 #endif
 
-        cur_node = setupPrepareTasks(builder, cur_node);
-        cur_node = setupSolveTasks(builder, cur_node);
-        cur_node = setupPostTasks(builder, cur_node);
+        if (!replay_mode) {
+            cur_node = setupPrepareTasks(builder, cur_node);
+            cur_node = setupSolveTasks(builder, cur_node);
+        }
+
+        cur_node = setupPostTasks(builder, cur_node, replay_mode);
 
         cur_node = builder.addToGraph<
             ClearTmpNode<Contact>>({cur_node});

@@ -309,7 +309,7 @@ namespace PhysicsSystem {
     TaskGraphNodeID setupPhysicsStepTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps,
-        CountT num_substeps,
+        CountT num_substeps, // Pass 0 for replay mode
         Solver solver = Solver::XPBD);
 
     TaskGraphNodeID setupCleanupTasks(

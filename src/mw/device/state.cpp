@@ -200,6 +200,9 @@ StateManager::StateManager(uint32_t, uint32_t num_checkpoints,
         };
 
         memory_range_elements_[i].emplace(0, type_info);
+
+        checkpoint_ptr_readback_[i] = memory_range_elements_[i]->tbl.columns[2];
+        checkpoint_size_readback_[i] = 0;
     }
 }
 
@@ -994,6 +997,14 @@ void StateManager::freeTables()
         host_alloc->reserveFree(
                 entity_store_.deletedEntities, num_idx_bytes, reserve_entity_bytes);
     }
+}
+
+void StateManager::updateCheckpointReadback(uint32_t checkpoint_idx)
+{
+    uint32_t num_elems = getMemoryRangeNumRows(checkpoint_idx);
+    uint32_t elem_size = memory_range_elements_[
+        checkpoint_idx]->tbl.columnSizes[2];
+    checkpoint_size_readback_[checkpoint_idx] = num_elems * elem_size;
 }
 
 }
