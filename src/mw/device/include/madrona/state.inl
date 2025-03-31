@@ -375,8 +375,10 @@ std::pair<ComponentT *, uint32_t> StateManager::getWorldComponentsAndCount(
 template <typename ArchetypeT>
 Entity * StateManager::getWorldEntities(uint32_t world_id)
 {
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+
     Entity *glob_comps = (Entity *)getArchetypeColumn<
-        ArchetypeT>(0);
+        ArchetypeT>(archetype_id, 0);
     int32_t *world_offsets = getArchetypeWorldOffsets<
         ArchetypeT>();
 
