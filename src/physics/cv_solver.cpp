@@ -2336,6 +2336,12 @@ void solveCPU(Context &ctx,
     nonlinearCG(ctx, a_solve, acc_ref_c, acc_ref_e, D_c, D_e,
         tol, ls_tol, max_iter, ls_iters, cv_sing);
     copyResult(ctx, a_solve);
+
+    printf("Acceleration: ");
+    for (uint32_t i = 0; i < cv_sing.totalNumDofs; ++i) {
+        printf("%f ", a_solve[i]);
+    }
+    printf("\n");
 }
 #endif
 }

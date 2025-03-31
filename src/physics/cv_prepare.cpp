@@ -602,17 +602,11 @@ void solveM(
 #ifdef MADRONA_GPU_MODE
 void compositeRigidBody(
         Context &,
-        BodyGroupProperties prop,
-        BodyGroupMemory mem)
+        BodyGroupProperties &prop,
+        BodyGroupMemory &mem)
 {
     uint32_t lane_id = threadIdx.x % 32;
     uint32_t warp_id = threadIdx.x / 32;
-
-    if (lane_id == 0) {
-        if (prop.qvDim > 0) {
-            printInfo(mem, prop, "pre crb");
-        }
-    }
 
     // ----------------- Composite rigid body -----------------
     // Mass Matrix of this entire body group, column-major
