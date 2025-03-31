@@ -612,16 +612,14 @@ void compositeRigidBody(
     // Mass Matrix of this entire body group, column-major
     BodyOffsets *offsets = mem.offsets(prop);
     BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
-    uint32_t *is_static = mem.isStatic(prop);
 
     // ----------------- Combine Spatial Inertias -----------------
     uint32_t num_bodies = prop.numBodies;
     MADRONA_GPU_SINGLE_THREAD {
         for (CountT i = num_bodies-1; i > 0; --i) {
-            if (is_static[i]) continue; // Ignore static bodies
             InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
             uint32_t parent_idx = offsets[i].parent;  // (don't include fixed bodies)
-            if (parent_idx == 0xFF) continue;
+            assert(parent_idx < 0xFF);
 
             InertiaTensor& spatial_inertia_parent =
                 spatialVectors[parent_idx].spatialInertia;
@@ -723,6 +721,12 @@ void compositeRigidBody(
     if (lane_id == 0) {
         // This overwrites bias with the acceleration
         solveM(prop, mem, bias);
+    }
+
+    if (lane_id == 0) {
+        if (prop.qvDim > 0) {
+            printInfo(mem, prop, "post crb");
+        }
     }
 }
 
@@ -863,12 +867,8 @@ inline void recursiveNewtonEuler(
             float *S = mem.phiFull(prop) + S_offset;
             float *S_dot = mem.phiDot(prop) + S_offset;
             float *qv = qvs + velOffset;
-            auto S_i = [&](uint32_t row, uint32_t col) -> float & { 
-                return S[row + 6 * col]; 
-            };
-            auto S_dot_i = [&](uint32_t row, uint32_t col) -> float & { 
-                return S_dot[row + 6 * col]; 
-            };
+            auto S_i = [&](uint32_t row, uint32_t col) -> float& { return S[row + 6 * col]; };
+            auto S_dot_i = [&](uint32_t row, uint32_t col) -> float& { return S_dot[row + 6 * col]; };
 
             // Initialization: gather parent spatial velocity and acceleration
             if (body_offset.parentWithDof == 0xFF || dof_type == DofType::FreeBody) {
@@ -884,7 +884,7 @@ inline void recursiveNewtonEuler(
             }
 
             // Update velocity, compute S_dot, update acceleration
-            switch (dof_type) {
+            switch(dof_type) {
                 case DofType::FreeBody: {
                     // Translational part (first three columns)
                     memset(S_dot, 0, 18 * sizeof(float));
@@ -2270,8 +2270,10 @@ TaskGraphNodeID setupCVResetTasks(
             InitBodyGroup
          >>({cur_node});
 
+#if 0
     cur_node = builder.addToGraph<
         ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
+#endif
 
     // Dumb that we have to run this twice in a frame but it's cheap
     // as hell so we'll just do that for now.
