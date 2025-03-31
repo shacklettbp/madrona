@@ -103,7 +103,7 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     // ctx.singleton<CVSolveData>().accRefMemory = MemoryRange::none();
     ctx.singleton<CVSolveData>().scratchAllocatedBytes = 0;
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
-    ctx.singleton<CVSolveData>().enablePhysics = 0;
+    ctx.singleton<CVSolveData>().enablePhysics = 1;
 }
 
 void registerTypes(ECSRegistry &registry)
@@ -134,7 +134,8 @@ void registerTypes(ECSRegistry &registry)
 
 void setEnablePhysics(Context &ctx, bool value)
 {
-    ctx.singleton<CVSolveData>().enablePhysics = value;
+    ctx.singleton<CVSolveData>().enablePhysics = true;
+    // ctx.singleton<CVSolveData>().enablePhysics = value;
 }
 
 }

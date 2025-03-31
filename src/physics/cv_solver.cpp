@@ -2022,6 +2022,17 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
         __syncwarp();
 
+
+        // Print all matrices
+        printMatrix<true>(curr_sd->J_c, curr_sd->numRowsJc, curr_sd->numColsJc, "J_c");
+        printMatrix<true>(curr_sd->J_e, curr_sd->numRowsJe, curr_sd->numColsJe, "J_e");
+        printMatrix(curr_sd->massSparse.blks[0].values,
+                curr_sd->massSparse.blks[0].dim,
+                curr_sd->massSparse.blks[0].dim,
+                "M");
+
+        __syncwarp();
+
         dobjWarp<true>(m_grad, x, curr_sd, scratch1,
                        jaccref_cont, jaccref_eq, 
                        mxmin, 
