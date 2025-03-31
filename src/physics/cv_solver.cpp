@@ -75,6 +75,8 @@ struct GaussMinimizationNode : NodeBase {
             uint32_t vel_dim,
             float h,
             Fn &&residual_fn,
+            float *diag_approx,
+            float *r_vec,
             bool dbg = false);
 
     void calculateSolverDims(uint32_t world_id, CVSolveData *sd);
@@ -1177,6 +1179,10 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
                 // diag approx of J_e
                 sizeof(float) * curr_sd->numRowsJe +
                 // Equality residuals
+                sizeof(float) * curr_sd->numRowsJe +
+                // R_c
+                sizeof(float) * curr_sd->numRowsJc +
+                // R_e
                 sizeof(float) * curr_sd->numRowsJe;
 
             curr_sd->prepMem = (uint8_t *)mwGPU::TmpAllocator::get().alloc(
@@ -1492,6 +1498,13 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                                     1.f,
                                     false);//(ct_idx == 0 && pt_idx == 0));
                         }
+
+                        { // Compute the diagonal approximation
+                            float inv_weight_trans = 0.f;
+                            diag_approx[curr_jacc_row + 0] = inv_weight_trans;
+                            diag_approx[curr_jacc_row + 1] = inv_weight_trans;
+                            diag_approx[curr_jacc_row + 2] = inv_weight_trans;
+                        }
                     }
                 }
             });
@@ -1702,7 +1715,9 @@ void GaussMinimizationNode::computeAccRef(
         float *vel,
         uint32_t vel_dim,
         float h,
-        Fn &&fn,
+        Fn &&residual_fn,
+        float *diag_approx,
+        float *r_vec,
         bool dbg)
 {
     using namespace gpu_utils;
@@ -1734,11 +1749,7 @@ void GaussMinimizationNode::computeAccRef(
             1);
 
     warpLoop(num_rows_j, [&](uint32_t iter) {
-#if 0
-        float r = (iter % 3 == 0) ?
-            -curr_sd->penetrations[iter / 3] : 0.f;
-#endif
-        float r = fn(iter);
+        float r = residual_fn(iter);
 
         float imp_x = fabs(r) / width;
         float imp_a = (1.f / powf(mid, power-1.f)) * powf(imp_x, power);
@@ -1759,6 +1770,8 @@ void GaussMinimizationNode::computeAccRef(
 
         acc_ref[iter] *= -b;
         acc_ref[iter] -= k * imp * r;
+
+        r_vec[iter] = ((1.f - imp) / imp) * diag_approx[i];
     });
 }
 
@@ -1825,7 +1838,10 @@ void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
                     [&](uint32_t iter) {
                         return (iter % 3 == 0) ?
                             -curr_sd->penetrations[iter / 3] : 0.f;
-                    });
+                    },
+                    curr_sd->getContactDiagApprox(state_mgr),
+                    curr_sd->getContactR(state_mgr));
+
 
             if (acc_ref && in_smem) {
                 float * acc_ref_glob =
@@ -1903,7 +1919,9 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
                     curr_sd->h,
                     [&](uint32_t iter) {
                         return residuals[iter];
-                    });
+                    },
+                    curr_sd->getEqualityDiagApprox(state_mgr),
+                    curr_sd->getEqualityR(state_mgr));
 
             if (acc_ref && in_smem) {
                 float * acc_ref_glob =

@@ -333,6 +333,45 @@ struct CVSolveData {
             sizeof(float) * numRowsJe;
         return (float *)bytes;
     }
+
+    inline float * getContactR(StateManager *state_mgr)
+    {
+        (void)state_mgr;
+        uint8_t *bytes =
+            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
+            prepMem +
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numRowsJc * numColsJc +
+            sizeof(float) * numRowsJc +
+            sizeof(float) * numRowsJe * numColsJe +
+            sizeof(float) * numRowsJe +
+            sizeof(float) * numRowsJe;
+        return (float *)bytes;
+    }
+
+    inline float * getEqualityR(StateManager *state_mgr)
+    {
+        (void)state_mgr;
+        uint8_t *bytes =
+            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
+            prepMem +
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numRowsJc * numColsJc +
+            sizeof(float) * numRowsJc +
+            sizeof(float) * numRowsJe * numColsJe +
+            sizeof(float) * numRowsJe +
+            sizeof(float) * numRowsJe +
+            sizeof(float) * numRowsJc;
+        return (float *)bytes;
+    }
 #endif
 };
 
