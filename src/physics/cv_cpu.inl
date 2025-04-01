@@ -103,9 +103,6 @@ inline void nonlinearCG(Context &ctx,
     cpu_utils::vecScale(p, -1.f, nv);
     uint32_t i = 0;
     for (; i < max_iter; i++) {
-        // Convergence check
-        if (scale * cpu_utils::norm(g, nv) < tol) break;
-
         // Exact line search
         float ada_ls_tol = tol * ls_tol * cpu_utils::norm(p, nv) / scale;
         float alpha = exactLineSearch(x, p, D_c, D_e, a_ref_c, a_ref_e,
@@ -119,9 +116,10 @@ inline void nonlinearCG(Context &ctx,
         // Temporary: dot(g, M_grad)
         float den = fmaxf(cpu_utils::dot(g, M_grad, nv), MINVAL);
 
-        // Check improvement
+        // Convergence check
         float fun_new = obj(g, x, D_c, D_e, a_ref_c, a_ref_e, ctx, cv_sing);
         if (scale * (fun - fun_new) < tol) break;
+        if (scale * cpu_utils::norm(g, nv) < tol) break;
 
         // Polak-Ribiere (Mgrad holds Mgrad_new - M_grad)
         memcpy(M_grad_new, g, nv_bytes);
@@ -138,7 +136,7 @@ inline void nonlinearCG(Context &ctx,
         fun = fun_new;
         memcpy(M_grad, M_grad_new, nv_bytes);
     }
-    printf("CG Iterations %d\n", i);
+    // printf("CG Iterations %d\n", i);
     memcpy(res, x, nv_bytes);
 }
 

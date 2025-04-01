@@ -1714,8 +1714,8 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
     jointNameToIndices.push_back(std::move(link_name_to_index));
 
-    printf("Model has %d colliders and %d visuals\n",
-            cfg.numVisuals, cfg.numColliders);
+    // printf("Model has %d colliders and %d visuals\n",
+            // cfg.numVisuals, cfg.numColliders);
 
     return { model_idx, total_num_dofs, cfg.numBodies };
 }

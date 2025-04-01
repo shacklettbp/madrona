@@ -1979,7 +1979,7 @@ inline void computeInvMass(
         float b = inertial.approxInvMassRot =
             (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
 
-        printf("(body %d) mass = %f; inv trans = %f; inv rot %f\n", i_body, inertial.mass, a, b);
+        // printf("(body %d) mass = %f; inv trans = %f; inv rot %f\n", i_body, inertial.mass, a, b);
     }
 
     // For each DOF, find the inverse weight
@@ -2050,6 +2050,10 @@ inline void computeInvMass(
         }
         dof_offset += offset.numDofs;
     }
+
+    // We should also initialize the acceleration to the free acceleration
+    //   for the first solve
+    memcpy(m.dqv(p), m.biasVector(p), p.qvDim * sizeof(float));
 }
 
 inline Quat integrateQuaternion(Quat curr_rot,
