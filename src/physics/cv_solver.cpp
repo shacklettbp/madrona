@@ -2065,9 +2065,6 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
         } ();
 
         if (curr_sd->numRowsJe > 0) {
-            printMatrix(curr_sd->getEqualityDiagApprox(nullptr),
-                    1, curr_sd->numRowsJe, "diagapprox_e");
-
             computeAccRef(
                     acc_ref,
                     curr_sd->numRowsJe,
@@ -2084,8 +2081,6 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
                     curr_sd->getEqualityR(state_mgr));
 
             float *r_vec = curr_sd->getEqualityR(state_mgr);
-
-            printMatrix(r_vec, 1, curr_sd->numRowsJe, "R_e");
 
             // The R becomes D now
             warpLoop(
@@ -2225,8 +2220,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 curr_sd->massSparse.blks[0].dim,
                 "M");
 #endif
-        printMatrix(curr_sd->getContactR(nullptr), 1, curr_sd->numRowsJc, "D_c");
-        printMatrix(curr_sd->getEqualityR(nullptr), 1, curr_sd->numRowsJe, "D_e");
 
         __syncwarp();
 
@@ -2347,6 +2340,9 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
             curr_fun = new_fun;
         }
+
+        if (threadIdx.x % 32 == 0)
+            printf("Num iters = %d\n", iter);
 
         { // Now, we need to copy x into the right components
             BodyGroupProperties *all_properties = state_mgr->getWorldComponents<

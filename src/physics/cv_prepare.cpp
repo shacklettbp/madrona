@@ -992,14 +992,6 @@ inline void recursiveNewtonEuler(
         int32_t *dof_to_body = mem.dofToBody(prop);
         memcpy(tau, mem.f(prop), prop.qvDim * sizeof(float));
 
-        if (prop.qvDim) {
-            printf("Before Tau: ");
-            for (uint32_t i = 0; i < prop.qvDim; ++i) {
-                printf("%f ", tau[i]);
-            }
-            printf("\n");
-        }
-
         // Then add the internal forces, mapped to generalized forces
         float *S_ptr = mem.phiFull(prop);
         for (int32_t i = 0; i < prop.qvDim; ++i) {
@@ -1008,14 +1000,6 @@ inline void recursiveNewtonEuler(
             for (int32_t j = 0; j < 6; ++j) {
                 tau[i] += S_i[j] * f_i[j];
             }
-        }
-
-        if (prop.qvDim) {
-            printf("After Tau: ");
-            for (uint32_t i = 0; i < prop.qvDim; ++i) {
-                printf("%f ", tau[i]);
-            }
-            printf("\n");
         }
     }
 }
