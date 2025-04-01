@@ -377,8 +377,7 @@ Entity * StateManager::getWorldEntities(uint32_t world_id)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
 
-    Entity *glob_comps = (Entity *)getArchetypeColumn<
-        ArchetypeT>(archetype_id, 0);
+    Entity *glob_comps = (Entity *)getArchetypeColumn(archetype_id, 0);
     int32_t *world_offsets = getArchetypeWorldOffsets<
         ArchetypeT>();
 
