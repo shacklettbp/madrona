@@ -40,6 +40,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         if (!replay_mode) {
             cur_node = setupPrepareTasks(builder, cur_node);
             cur_node = setupSolveTasks(builder, cur_node);
+        } else {
+            // Body groups should now all be set up at this point
+            cur_node = builder.addToGraph<
+                ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
         }
 
         cur_node = setupPostTasks(builder, cur_node, replay_mode);
