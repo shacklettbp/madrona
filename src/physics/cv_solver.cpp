@@ -2156,7 +2156,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
     constexpr float kTolerance = 1e-8f;
     constexpr float lsTolerance = 0.01f;
-    constexpr float MINVAL = 1e-12f;
+    // constexpr float MINVAL = 1e-12f;
 
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
 
