@@ -107,16 +107,17 @@ inline void nonlinearCG(Context &ctx,
         if (scale * cpu_utils::norm(g, nv) < tol) break;
 
         // Exact line search
+        float ada_ls_tol = tol * ls_tol * cpu_utils::norm(p, nv) / scale;
         float alpha = exactLineSearch(x, p, D_c, D_e, a_ref_c, a_ref_e,
                                       cv_sing.numRowsJc, cv_sing.numRowsJe,
-                                      cv_sing.totalNumDofs, ls_tol, ls_iters,
+                                      cv_sing.totalNumDofs, ada_ls_tol, ls_iters,
                                       ctx, cv_sing);
         if (alpha == 0.f) break;
 
         // Update x
         cpu_utils::sclAdd(x, p, alpha, nv);
         // Temporary: dot(g, M_grad)
-        float den = fmaxf(cpu_utils::dot(g, M_grad, nv), 1e-12f);
+        float den = fmaxf(cpu_utils::dot(g, M_grad, nv), MINVAL);
 
         // Check improvement
         float fun_new = obj(g, x, D_c, D_e, a_ref_c, a_ref_e, ctx, cv_sing);
@@ -136,8 +137,6 @@ inline void nonlinearCG(Context &ctx,
         cpu_utils::sclAdd(p, M_grad_new, -1, nv);
         fun = fun_new;
         memcpy(M_grad, M_grad_new, nv_bytes);
-
-        cpu_utils::vecScale(p, beta, nv);
     }
     printf("CG Iterations %d\n", i);
     memcpy(res, x, nv_bytes);
@@ -305,7 +304,7 @@ float exactLineSearch(float *xk, float *pk, float *D_c, float *D_e,
     };
 
     // Search vector too small
-    if (norm(pk, nv) < 1e-15f) return 0.f;
+    if (norm(pk, nv) < MINVAL) return 0.f;
 
     uint32_t nv_bytes = nv * sizeof(float);
 
@@ -400,7 +399,18 @@ float exactLineSearch(float *xk, float *pk, float *D_c, float *D_e,
             float T_sqr = c.UU + a * (2 * c.UV + a * c.VV);
             float T = sqrtf(T_sqr);
 
-            // Top zone
+            // No tangent force (just top or bottom)
+            if (T_sqr <= 0) {
+                // Bottom zone
+                if (N < 0) {
+                    fun += a * a * c.quad2 + a * c.quad1 + c.quad0;
+                    grad += 2 * a * c.quad2 + c.quad1;
+                    hess += 2 * c.quad2;
+                }
+                continue;
+            }
+
+            // Proceed as normal. Top zone
             if (N >= mu * T || (T <= 0 && N >= 0)) {
                 continue;
             }

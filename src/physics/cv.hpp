@@ -18,6 +18,8 @@
 
 namespace madrona::phys::cv {
 
+#define MINVAL    1E-15f
+
 struct MRElement128b {
     uint8_t d[128];
 };
