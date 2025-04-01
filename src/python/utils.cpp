@@ -408,11 +408,13 @@ void TrainInterface::key_() {}
 
 void ** TrainInterface::cudaCopyStepInputs(cudaStream_t strm, void **buffers)
 {
+
   auto copyToSim = [&strm](const Tensor &dst, void *src) {
     uint64_t num_bytes = numTensorBytes(dst);
 
     REQ_CUDA(cudaMemcpyAsync(dst.devicePtr(), src, num_bytes,
-                             cudaMemcpyDeviceToDevice, strm));
+      dst.isOnGPU() ? cudaMemcpyDeviceToDevice : cudaMemcpyDeviceToHost,
+      strm));
   };
 
   TrainStepInputInterface &inputs = impl_->inputs;
@@ -437,7 +439,7 @@ void TrainInterface::cudaCopyObservations(cudaStream_t strm, void **buffers)
     uint64_t num_bytes = numTensorBytes(src);
 
     REQ_CUDA(cudaMemcpyAsync(dst, src.devicePtr(), num_bytes,
-                             cudaMemcpyDeviceToDevice, strm));
+      src.isOnGPU() ? cudaMemcpyDeviceToDevice : cudaMemcpyHostToDevice, strm));
   };
 
   for (const NamedTensor &t : impl_->outputs.observations) {
@@ -451,7 +453,7 @@ void TrainInterface::cudaCopyStepOutputs(cudaStream_t strm, void **buffers)
     uint64_t num_bytes = numTensorBytes(src);
 
     REQ_CUDA(cudaMemcpyAsync(dst, src.devicePtr(), num_bytes,
-                             cudaMemcpyDeviceToDevice, strm));
+      src.isOnGPU() ? cudaMemcpyDeviceToDevice : cudaMemcpyHostToDevice, strm));
   };
 
   TrainStepOutputInterface &outputs = impl_->outputs;
