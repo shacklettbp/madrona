@@ -2508,6 +2508,7 @@ void solveCPU(Context &ctx,
     float *D_e = (float *)ctx.tmpAlloc(sizeof(float) * dim_e);
     float *r_con = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
     float *a_solve = (float *)ctx.tmpAlloc(sizeof(float) * cv_sing.totalNumDofs);
+    float *x0 = (float *)ctx.tmpAlloc(sizeof(float) * cv_sing.totalNumDofs);
 
     // Set residuals for contact constraints
     memset(r_con, 0, sizeof(float) * dim_c);
@@ -2540,7 +2541,9 @@ void solveCPU(Context &ctx,
     uint32_t max_iter = 100;
     uint32_t ls_iters = 50;
 
-    nonlinearCG(ctx, a_solve, acc_ref_c, acc_ref_e, D_c, D_e,
+    // Set initial guess to be previous acceleration
+    memcpy(x0, cv_sing.currAcc, sizeof(float) * cv_sing.totalNumDofs);
+    nonlinearCG(ctx, a_solve, x0, acc_ref_c, acc_ref_e, D_c, D_e,
         tol, ls_tol, max_iter, ls_iters, cv_sing);
     copyResult(ctx, a_solve);
 }

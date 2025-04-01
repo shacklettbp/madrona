@@ -137,6 +137,7 @@ struct CVSolveData {
     float *mass;
     float *freeAcc;
     float *vel;
+    float *currAcc;
     float *J_c;
     float *J_e;
     float *mu;

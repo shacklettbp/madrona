@@ -72,6 +72,7 @@ inline void adjustContactRegularization(float *R,
 
 inline void nonlinearCG(Context &ctx,
                         float *res,
+                        float *x0,
                         float *a_ref_c,
                         float *a_ref_e,
                         float *D_c,
@@ -92,9 +93,8 @@ inline void nonlinearCG(Context &ctx,
     float p[nv];
     uint32_t nv_bytes = nv * sizeof(float);
 
-    // x0 = a_free
-    memcpy(x, cv_sing.freeAcc, nv_bytes);
     // f(x0) and df(x0), M^{-1}df(x0)
+    memcpy(x, x0, nv_bytes);
     float fun = obj(g, x, D_c, D_e, a_ref_c, a_ref_e, ctx, cv_sing);
     memcpy(M_grad, g, nv_bytes);
     fullMSolveMul(ctx, M_grad, true);

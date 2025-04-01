@@ -24,6 +24,7 @@ void adjustContactRegularization(
 
 void nonlinearCG(Context &ctx,
                  float *res,
+                 float *x0,
                  float *a_ref_c,
                  float *a_ref_e,
                  float *D_c,

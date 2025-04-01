@@ -1115,6 +1115,10 @@ inline void exportCPUSolverState(
             num_full_dofs_bytes);
     memset(full_vel, 0, num_full_dofs_bytes);
 
+    float *full_curr_acc = (float *)ctx.tmpAlloc(
+            num_full_dofs_bytes);
+    memset(full_curr_acc, 0, num_full_dofs_bytes);
+
     uint32_t processed_dofs = 0;
 
     cv_sing.totalMass = 0; // sum of diagonals
@@ -1153,14 +1157,17 @@ inline void exportCPUSolverState(
 
         BodyOffsets *bg_offsets = m.offsets(p);
         float *bg_qv = m.qv(p);
+        float *bg_dqv = m.dqv(p);
 
         for (CountT body_idx = 0; body_idx < p.numBodies; ++body_idx) {
             float *qv = bg_qv + bg_offsets[body_idx].velOffset;
+            float *dqv = bg_dqv + bg_offsets[body_idx].velOffset;
             uint32_t num_dofs = BodyOffsets::getDofTypeDim(
                     bg_offsets[body_idx].dofType);
 
             for (CountT k = 0; k < num_dofs; ++k) {
                 full_vel[processed_dofs] = qv[k];
+                full_curr_acc[processed_dofs] = dqv[k];
                 processed_dofs++;
             }
         }
@@ -1391,8 +1398,8 @@ inline void exportCPUSolverState(
                             limit.hinge.dConstraintViolation(q[0]);
                         residuals[glob_row_offset] = limit.hinge.constraintViolation(q[0]);
                         diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
-                        printf("approxInvMassDof[glob_row_offset] = %f\n",
-                                inertial.approxInvMassDof[0]);
+                        // printf("approxInvMassDof[glob_row_offset] = %f\n",
+                                // inertial.approxInvMassDof[0]);
                         num_active_constraints++;
                     }
                 } break;
@@ -1431,6 +1438,7 @@ inline void exportCPUSolverState(
     cv_sing.mass = total_mass_mat;
     cv_sing.freeAcc = full_free_acc;
     cv_sing.vel = full_vel;
+    cv_sing.currAcc = full_curr_acc;
     cv_sing.mu = full_mu;
     cv_sing.penetrations = full_penetration;
     cv_sing.dofOffsets = block_start;
@@ -2040,7 +2048,6 @@ inline void computeInvMass(
         } else {
             dof_inertial.approxInvMassDof[0] = Ad(0, 0);
         }
-
         dof_offset += offset.numDofs;
     }
 }
