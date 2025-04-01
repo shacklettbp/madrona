@@ -250,7 +250,7 @@ struct CVSolveData {
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts;
+            sizeof(float) * numContactPts * 3;
         return (float *)bytes;
     }
 
@@ -263,8 +263,8 @@ struct CVSolveData {
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts +
-            sizeof(float) * numContactPts;
+            sizeof(float) * numContactPts * 3 +
+            sizeof(float) * numContactPts * 3;
         return (float *)bytes;
     }
 
@@ -277,8 +277,8 @@ struct CVSolveData {
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts +
-            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts * 3 +
+            sizeof(float) * numContactPts * 3 +
             sizeof(float) * numRowsJc * numColsJc;
         return (float *)bytes;
     }
@@ -292,8 +292,8 @@ struct CVSolveData {
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts +
-            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts * 3 +
+            sizeof(float) * numContactPts * 3 +
             sizeof(float) * numRowsJc * numColsJc +
             sizeof(float) * numRowsJc;
         return (float *)bytes;
@@ -308,8 +308,8 @@ struct CVSolveData {
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts +
-            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts * 3 +
+            sizeof(float) * numContactPts * 3 +
             sizeof(float) * numRowsJc * numColsJc +
             sizeof(float) * numRowsJc +
             sizeof(float) * numRowsJe * numColsJe;
@@ -325,8 +325,8 @@ struct CVSolveData {
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts +
-            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts * 3 +
+            sizeof(float) * numContactPts * 3 +
             sizeof(float) * numRowsJc * numColsJc +
             sizeof(float) * numRowsJc +
             sizeof(float) * numRowsJe * numColsJe +
@@ -343,8 +343,8 @@ struct CVSolveData {
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts +
-            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts * 3 +
+            sizeof(float) * numContactPts * 3 +
             sizeof(float) * numRowsJc * numColsJc +
             sizeof(float) * numRowsJc +
             sizeof(float) * numRowsJe * numColsJe +
@@ -362,8 +362,8 @@ struct CVSolveData {
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts +
-            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts * 3 +
+            sizeof(float) * numContactPts * 3 +
             sizeof(float) * numRowsJc * numColsJc +
             sizeof(float) * numRowsJc +
             sizeof(float) * numRowsJe * numColsJe +

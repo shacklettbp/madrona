@@ -1407,6 +1407,8 @@ inline void exportCPUSolverState(
                             limit.hinge.dConstraintViolation(q[0]);
                         residuals[glob_row_offset] = limit.hinge.constraintViolation(q[0]);
                         diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
+                        printf("approxInvMassDof[glob_row_offset] = %f\n",
+                                inertial.approxInvMassDof[0]);
                         num_active_constraints++;
                     }
                 } break;
@@ -1417,6 +1419,8 @@ inline void exportCPUSolverState(
                             limit.slider.dConstraintViolation(q[0]);
                         residuals[glob_row_offset] = limit.slider.constraintViolation(q[0]);
                         diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
+                        printf("approxInvMassDof[glob_row_offset] = %f\n",
+                                inertial.approxInvMassDof[0]);
                         num_active_constraints++;
                     }
                 } break;
