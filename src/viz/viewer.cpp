@@ -277,28 +277,6 @@ static void flyCamUI(ViewerCam &cam)
 
     ImGui::PopStyleVar();
 
-#if 0
-    auto ortho_size = ImGui::CalcTextSize(" Orthographic ");
-    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign,
-                        ImVec2(0.5f, 0.f));
-    if (ImGui::Selectable("Perspective", cam.perspective, 0,
-                          ortho_size)) {
-        cam.perspective = true;
-    }
-    ImGui::SameLine();
-
-    if (ImGui::Selectable("Orthographic", !cam.perspective, 0,
-                          ortho_size)) {
-        cam.perspective = false;
-    }
-
-    ImGui::SameLine();
-
-    ImGui::PopStyleVar();
-
-    ImGui::TextUnformatted("Projection");
-#endif
-
     float digit_width = ImGui::CalcTextSize("0").x;
     ImGui::SetNextItemWidth(digit_width * 6);
     if (cam.perspective) {
@@ -307,6 +285,9 @@ static void flyCamUI(ViewerCam &cam)
         ImGui::DragFloat("View Size", &cam.orthoHeight,
                           0.5f, 0.f, 100.f, "%0.1f");
     }
+
+    static float world_scale = 1.f;
+    ImGui::DragFloat("World Scale", &world_scale, 1.f, 0.1f, 10.f);
 }
 
 static void cfgUI(ViewerControl &ctrl,
