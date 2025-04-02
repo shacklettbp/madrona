@@ -37,6 +37,11 @@ struct Client {
     uint32_t numPendingRequests;
 
     std::queue<PendingRequest> pendingRequests;
+
+    std::chrono::time_point<
+        std::chrono::system_clock> lastPing;
+
+    bool toDelete;
 };
 
 struct CheckpointServer::Impl {
@@ -83,6 +88,7 @@ void CheckpointServer::Impl::acceptConnections()
             .sock = sock,
             .addr = addr,
             .numPendingRequests = 0,
+            .lastPing = std::chrono::system_clock::now(),
         };
 
         clients.push_back(cl);
@@ -103,10 +109,10 @@ void CheckpointServer::Impl::handleRequests(
     for (uint32_t i = 0; i < clients.size(); ++i) {
         Client &cl = clients[i];
 
-        { // Queue up new requests
+        for (;;) { // Queue up new requests
             PacketType type;
             if (cl.sock.receive(&type, sizeof(type)) != sizeof(type)) {
-                continue;
+                break;
             }
 
             switch (type) {
@@ -131,6 +137,10 @@ void CheckpointServer::Impl::handleRequests(
                 cl.pendingRequests.push(req);
             } break;
 
+            case PacketType::Ping: {
+                cl.lastPing = std::chrono::system_clock::now();
+            } break;
+
             default: {
                 FATAL("Server received invalid packet\n");
             } break;
@@ -140,6 +150,16 @@ void CheckpointServer::Impl::handleRequests(
         if (!cl.pendingRequests.empty()) { // Process current requests
             PendingRequest req = cl.pendingRequests.front();
             processing_requests.push_back(req);
+        }
+
+        { // Check if client isn't responding anymore
+            auto now = std::chrono::system_clock::now();
+            float dt = (now - cl.lastPing).count();
+
+            if (dt > 1.f) {
+                printf("Didn't receive client ping in a while; disconnecting\n");
+                cl.toDelete = true;
+            }
         }
     }
 
@@ -259,8 +279,20 @@ void CheckpointServer::Impl::handleRequests(
                 // Send to client
                 Client &cl = clients[processing_requests[i].clientID];
                 cl.sock.send((const char *)ds.ptr, ds.size);
+
+                trajectoryCount++;
             }
         }
+    }
+
+    uint32_t num_clients_pre = clients.size();
+    clients.erase(std::remove_if(clients.begin(), clients.end(),
+        [&](Client &cl) mutable { return cl.toDelete; }),
+        clients.end());
+
+    uint32_t num_clients_post = clients.size();
+    if (num_clients_post < num_clients_pre) {
+        printf("Deleted client\n");
     }
 }
 

@@ -138,6 +138,12 @@ void CheckpointClient::update()
         }
     }
 
+    { // Send a ping packet
+        PacketType type = PacketType::Ping;
+        if (impl_->sock.send((const char *)&type, sizeof(type)) != sizeof(type)) {
+            printf("Failed to send ping\n");
+        }
+    }
 }
 
 std::vector<Trajectory> CheckpointClient::getTrajectories()
