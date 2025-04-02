@@ -58,6 +58,16 @@ void Socket::setSendBufferSize(uint32_t size)
     }
 }
 
+void Socket::setReuseAddr()
+{
+    const int enable = 1;
+    if (setsockopt(hdl, SOL_SOCKET,
+                SO_REUSEADDR, &enable, sizeof(int)) < 0) {
+        FATAL("Failed to set socket to reuse address\n");
+    }
+
+}
+
 uint16_t Socket::bindToPort(Address addr)
 {
     sockaddr_in addr_struct = {};
@@ -67,8 +77,12 @@ uint16_t Socket::bindToPort(Address addr)
 
     if (bind(hdl, (sockaddr *)&addr_struct, sizeof(addr_struct)) < 0) {
         printf("Failed to bind to port %u\n", (uint32_t)addr.port);
-        return 0xFFFF;
+        // return 0xFFFF;
+        return bindToPort({
+            .port = (uint16_t)(addr.port + 1)
+        });
     } else {
+        printf("Successfully bound to port %u\n", (uint32_t)addr.port);
         return ntohs(addr.port);
     }
 }

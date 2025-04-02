@@ -23,8 +23,13 @@ struct PendingRequest {
 
     union {
         struct {
+            uint32_t trajectoryID;
             uint32_t worldID;
             uint32_t numSteps;
+
+            // This is required if client requested more steps than there are
+            // checkpoints in the MWCudaExecutor.
+            uint32_t stepOffset;
         } trajRequest;
 
         // ...
@@ -68,9 +73,12 @@ CheckpointServer::Impl::Impl(const Config &cfg)
 {
     // We will be using non-blocking sockets for now
     acceptSock.setBlockingMode(false);
+    acceptSock.setReuseAddr();
 
     acceptSock.bindToPort({ cfg.bindPort });
     acceptSock.setToListening(cfg.maxClients);
+
+    printf("Launch server\n");
 }
 
 void CheckpointServer::Impl::acceptConnections()
@@ -124,14 +132,21 @@ void CheckpointServer::Impl::handleRequests(
                 assert(cl.sock.receive(
                         &num_steps, sizeof(num_steps)) == sizeof(num_steps));
 
+                trajectoryCount++;
+
                 PendingRequest req = {
                     .type = PendingRequest::RequestType::TrajectoryRequest,
                     .clientID = i,
                 };
 
+                TrajectoryID traj_id = ((uint16_t)trajectoryCount << 16) |
+                                        (uint16_t)world_id;
+
                 req.trajRequest = {
+                    .trajectoryID = traj_id,
                     .worldID = world_id,
                     .numSteps = num_steps,
+                    .stepOffset = 0,
                 };
 
                 cl.pendingRequests.push(req);
@@ -158,7 +173,7 @@ void CheckpointServer::Impl::handleRequests(
             auto now = std::chrono::system_clock::now();
             float dt = std::chrono::duration_cast<std::chrono::seconds>(now - cl.lastPing).count();
 
-            if (dt > 1.f) {
+            if (dt > 5.f) {
                 printf("Didn't receive client ping in a while; disconnecting\n");
                 cl.toDelete = true;
             }
@@ -175,6 +190,7 @@ void CheckpointServer::Impl::handleRequests(
             uint64_t worldID;
             uint64_t numSteps;
             uint64_t offset;
+            uint64_t stepOffset;
         };
 
         // Prepare to request information from the GPU
@@ -213,16 +229,25 @@ void CheckpointServer::Impl::handleRequests(
                 .worldID = processing_requests[i].trajRequest.worldID,
                 .numSteps = processing_requests[i].trajRequest.numSteps,
                 .offset = offset,
+                .stepOffset = processing_requests[i].trajRequest.stepOffset,
             };
 
             offset += processing_requests[i].trajRequest.numSteps;
+
+            // If we have already received some steps, we just need to get
+            // the next one only and not the previous `numCheckpoints` steps
+            // because there would be overlap.
+            if (traj_infos[i].stepOffset > 0) {
+                traj_infos[i].numSteps = 1;
+            }
         }
 
         // This should fill in everything in readback_ptr
         query_ckpt_fn(fn_data, processing_requests.size(), readback_ptr);
 
         for (uint32_t i = 0; i < processing_requests.size(); ++i) {
-            if (traj_avails[i] == 1) {
+            uint32_t num_acquired_steps = traj_avails[i];
+            if (num_acquired_steps > 0) {
                 // Package the trajectory and send it to the client
                 uint64_t *traj_ckpt_sizes = ckpt_sizes + traj_infos[i].offset;
                 void **traj_ckpt_ptrs = ckpt_ptrs + traj_infos[i].offset;
@@ -230,9 +255,9 @@ void CheckpointServer::Impl::handleRequests(
                 // This first uint32_t is for the trajectory ID
                 uint64_t data_size = sizeof(TrajectoryID) +
                                      sizeof(uint32_t) + // number of ckpts
-                                     sizeof(uint32_t) * traj_infos[i].numSteps +
-                                     sizeof(uint32_t) * traj_infos[i].numSteps;
-                for (uint32_t c = 0; c < traj_infos[i].numSteps; ++c) {
+                                     sizeof(uint32_t) * num_acquired_steps +
+                                     sizeof(uint32_t) * num_acquired_steps;
+                for (uint32_t c = 0; c < num_acquired_steps; ++c) {
                     data_size += traj_ckpt_sizes[c];
                 }
 
@@ -250,29 +275,28 @@ void CheckpointServer::Impl::handleRequests(
                 ds.write(PacketType::TrajectoryPackage);
                 ds.write((uint32_t)data_size);
 
-                printf("Sending packet with size %u\n", (uint32_t)data_size);
-
-                TrajectoryID traj_id = ((uint16_t)trajectoryCount << 16) |
-                                        (uint16_t)traj_infos[i].worldID;
+                TrajectoryID traj_id =
+                    processing_requests[i].trajRequest.trajectoryID;
 
                 // Start of actual data
                 ds.write(traj_id); // Trajectory ID
-                ds.write((uint32_t)traj_infos[i].numSteps); // Number of checkpoints
+                //ds.write((uint32_t)traj_infos[i].numSteps); // Number of checkpoints
+                ds.write((uint32_t)num_acquired_steps);
 
                 // Write the checkpoints offsets
                 uint64_t traj_offset = 0;
-                for (uint32_t c = 0; c < traj_infos[i].numSteps; ++c) {
+                for (uint32_t c = 0; c < num_acquired_steps; ++c) {
                     ds.write((uint32_t)traj_offset);
                     traj_offset += traj_ckpt_sizes[c];
                 }
 
                 // Write the checkpoint sizes
-                for (uint32_t c = 0; c < traj_infos[i].numSteps; ++c) {
+                for (uint32_t c = 0; c < num_acquired_steps; ++c) {
                     ds.write((uint32_t)traj_ckpt_sizes[c]);
                 }
 
                 // Now, write all the checkpoint data
-                for (uint32_t c = 0; c < traj_infos[i].numSteps; ++c) {
+                for (uint32_t c = 0; c < num_acquired_steps; ++c) {
                     uint64_t num_bytes = traj_ckpt_sizes[c];
                     void *gpu_ptr = traj_ckpt_ptrs[c];
                     ds.writeFromGPU(gpu_ptr, (uint32_t)num_bytes);
@@ -282,10 +306,15 @@ void CheckpointServer::Impl::handleRequests(
                 Client &cl = clients[processing_requests[i].clientID];
                 cl.sock.send((const char *)ds.ptr, ds.size);
 
-                // cl.pendingRequests.pop_front();
-                cl.pendingRequests.pop();
+                processing_requests[i].trajRequest.stepOffset += num_acquired_steps;
 
-                trajectoryCount++;
+                if (processing_requests[i].trajRequest.stepOffset <
+                        processing_requests[i].trajRequest.numSteps) {
+                    cl.pendingRequests.front() = processing_requests[i];
+                } else {
+                    cl.pendingRequests.pop();
+                    printf("Finished sending trajectory %u\n", traj_id);
+                }
             }
         }
     }

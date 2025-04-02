@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <madrona/context.hpp>
 #include <madrona/checkpoint.hpp>
 
@@ -129,14 +130,13 @@ extern "C" __global__ void queryCheckpointInfo(uint32_t num_queries, void *readb
     if (tid >= num_queries)
         return;
 
-    printf("Thread made it past return!\n");
-
     uint64_t *readback_u64 = (uint64_t *)readback;
 
     struct TrajInfo {
         uint64_t worldID;
         uint64_t numSteps;
         uint64_t offset;
+        uint64_t stepOffset;
     };
 
     uint64_t total_num_ckpts = *readback_u64;
@@ -166,7 +166,11 @@ extern "C" __global__ void queryCheckpointInfo(uint32_t num_queries, void *readb
 
     *curr_traj_avails = 1;
 
-    for (uint32_t i = 0; i < curr_traj_info->numSteps; ++i) {
+    uint64_t num_acquired_steps = 0;
+
+    uint32_t max_steps = std::min(state_mgr->getNumCheckpoints(),
+            (uint32_t)curr_traj_info->numSteps);
+    for (uint32_t i = 0; i < max_steps; ++i) {
         uint32_t ckpt_idx = (num_checkpoints + most_recent_write - i) %
             num_checkpoints;
 
@@ -179,9 +183,18 @@ extern "C" __global__ void queryCheckpointInfo(uint32_t num_queries, void *readb
                     ckpts[ckpt_idx].data);
             uint32_t num_bytes = ckpts[ckpt_idx].numBytes;
 
+#if 0
+            printf("ckpt num bytes = %u -> %p\n", num_bytes, 
+                    curr_ckpt_sizes + curr_traj_info->numSteps - 1 - i);
+#endif
+
             // We are going from last to first
-            curr_ckpt_sizes[curr_traj_info->numSteps - 1 - i] = num_bytes;
-            curr_ckpt_ptrs[curr_traj_info->numSteps - 1 - i] = ptr;
+            curr_ckpt_sizes[max_steps - 1 - i] = num_bytes;
+            curr_ckpt_ptrs[max_steps - 1 - i] = ptr;
+
+            num_acquired_steps++;
         }
     }
+
+    *curr_traj_avails = num_acquired_steps;
 }
