@@ -73,6 +73,11 @@ void CheckpointClient::requestTrajectory(
 
 void CheckpointClient::update()
 {
+    { // Send a ping packet
+        PacketType type = PacketType::Ping;
+        impl_->sock.send((const char *)&type, sizeof(type));
+    }
+
     { // Procedure for receiving a single packet.
         PacketType type;
         if (impl_->sock.receive(&type, sizeof(type)) != sizeof(type)) {
@@ -104,7 +109,6 @@ void CheckpointClient::update()
                 }
 
                 read_bytes += (uint32_t)main_recv_bytes;
-                printf("Received %u bytes\n", main_recv_bytes);
             }
 
             DataSerial ds = {
@@ -135,13 +139,6 @@ void CheckpointClient::update()
         default: {
             FATAL("Client received invalid packet\n");
         } break;
-        }
-    }
-
-    { // Send a ping packet
-        PacketType type = PacketType::Ping;
-        if (impl_->sock.send((const char *)&type, sizeof(type)) != sizeof(type)) {
-            printf("Failed to send ping\n");
         }
     }
 }
