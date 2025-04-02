@@ -135,6 +135,8 @@ void CheckpointServer::Impl::handleRequests(
                 };
 
                 cl.pendingRequests.push(req);
+
+                printf("Received trajectory request!\n");
             } break;
 
             case PacketType::Ping: {
@@ -154,7 +156,7 @@ void CheckpointServer::Impl::handleRequests(
 
         { // Check if client isn't responding anymore
             auto now = std::chrono::system_clock::now();
-            float dt = (now - cl.lastPing).count();
+            float dt = std::chrono::duration_cast<std::chrono::seconds>(now - cl.lastPing).count();
 
             if (dt > 1.f) {
                 printf("Didn't receive client ping in a while; disconnecting\n");
@@ -279,6 +281,9 @@ void CheckpointServer::Impl::handleRequests(
                 // Send to client
                 Client &cl = clients[processing_requests[i].clientID];
                 cl.sock.send((const char *)ds.ptr, ds.size);
+
+                // cl.pendingRequests.pop_front();
+                cl.pendingRequests.pop();
 
                 trajectoryCount++;
             }

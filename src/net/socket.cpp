@@ -125,8 +125,6 @@ uint32_t Socket::receiveImpl(char *buf, uint32_t buf_size)
 
 bool Socket::send(const char *buf, uint32_t buf_size)
 {
-    printf("Sending something\n");
-
     int32_t send_ret = ::send(hdl, buf, buf_size, MSG_NOSIGNAL);
 
     if (send_ret < 0) {
