@@ -1374,7 +1374,7 @@ inline void exportCPUSolverState(
 
             for (uint32_t body_idx = 0; body_idx < p.numBodies; ++body_idx) {
                 BodyOffsets offset = curr_offsets[body_idx];
-                if (offset.dofType == DofType::FixedBody) {
+                if (offset.dofType == DofType::FixedBody || offset.numEqs == 0) {
                     continue;
                 }
 
