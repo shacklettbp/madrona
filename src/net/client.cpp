@@ -1,4 +1,5 @@
 #include <mutex>
+#include <chrono>
 #include <memory>
 #include <thread>
 #include <madrona/net/net.hpp>
@@ -19,6 +20,9 @@ struct CheckpointClient::Impl {
     std::mutex mu;
     std::thread recvThread;
 
+    std::chrono::time_point<
+        std::chrono::system_clock> lastPing;
+
     Impl();
 };
 
@@ -36,6 +40,7 @@ CheckpointClient::Impl::Impl()
       trajectories(64),
       recvBuf((uint8_t *)malloc(1024 * 1024))
 {
+    lastPing = std::chrono::system_clock::now();
 }
 
 void CheckpointClient::connect(const char *ipv4, uint16_t port)
@@ -74,8 +79,13 @@ void CheckpointClient::requestTrajectory(
 void CheckpointClient::update()
 {
     { // Send a ping packet
-        PacketType type = PacketType::Ping;
-        impl_->sock.send((const char *)&type, sizeof(type));
+        auto now = std::chrono::system_clock::now();
+        if (std::chrono::duration_cast<
+                std::chrono::seconds>(now - impl_->lastPing).count() > 0.5) {
+            // Send a ping every 0.5 seconds
+            PacketType type = PacketType::Ping;
+            impl_->sock.send((const char *)&type, sizeof(type));
+        }
     }
 
     { // Procedure for receiving a single packet.
@@ -134,6 +144,8 @@ void CheckpointClient::update()
             }
 
             impl_->trajectories[traj_id].snapshots.push_back(snapshot);
+            printf("Trajectory %u now has %u snapshots\n",
+                    traj_id, impl_->trajectories[traj_id].snapshots.size());
         } break;
 
         default: {
