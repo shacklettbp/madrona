@@ -88,14 +88,12 @@ void CheckpointClient::update()
         }
     }
 
-    { // Procedure for receiving a single packet.
+    for (;;) { // Procedure for receiving a single packet.
         PacketType type;
         if (impl_->sock.receive(&type, sizeof(type)) != sizeof(type)) {
             // Nothing was received from the server.
             return;
         }
-
-        printf("Received a packet!\n");
 
         switch (type) {
         case PacketType::ServerShutdown: {
@@ -112,7 +110,8 @@ void CheckpointClient::update()
 
             while (read_bytes < packet_size) {
                 int32_t main_recv_bytes = impl_->sock.receive(
-                        (void *)((uint8_t *)data + read_bytes), packet_size);
+                        (void *)((uint8_t *)data + read_bytes),
+                        packet_size - read_bytes);
 
                 if (main_recv_bytes < 0) {
                     continue;
@@ -130,9 +129,6 @@ void CheckpointClient::update()
             // The trajectory ID contains the world ID in it.
             TrajectoryID traj_id = ds.read<uint32_t>();
 
-            printf("Received trajectory with ID %u, packet size %u\n", 
-                    traj_id, packet_size);
-
             TrajectorySnapshot snapshot = {
                 .ckptData = data,
             };
@@ -144,6 +140,7 @@ void CheckpointClient::update()
             }
 
             impl_->trajectories[traj_id].snapshots.push_back(snapshot);
+
             printf("Trajectory %u now has %u snapshots\n",
                     traj_id, impl_->trajectories[traj_id].snapshots.size());
         } break;
@@ -161,6 +158,11 @@ std::vector<Trajectory> CheckpointClient::getTrajectories()
     for (auto [id, traj] : impl_->trajectories) {
         trajs.push_back(traj);
     }
+
+    std::sort(trajs.begin(), trajs.end(),
+            [](const Trajectory &a, const Trajectory &b) {
+                return strcmp(a.name.c_str(), b.name.c_str());
+            });
 
     return trajs;
 }
