@@ -830,6 +830,9 @@ void compositeRigidBody(
 
 
 // Recursive Newton Euler algorithm: Compute bias forces and gravity
+// Set kComputeWithQDDot to true when calling this after contact solve
+// Set kComputeWithQDDot to false when calling this before contact solve
+template <bool kComputeWithQDDot>
 inline void recursiveNewtonEuler(
         Context &ctx,
         BodyGroupProperties &prop,
@@ -840,6 +843,7 @@ inline void recursiveNewtonEuler(
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
     uint32_t* is_static = mem.isStatic(prop);
     float* qvs = mem.qv(prop);
+    float* dqvs = mem.dqv(prop);
 
     MADRONA_GPU_SINGLE_THREAD {
         // Reset the spatial vectors
@@ -867,6 +871,7 @@ inline void recursiveNewtonEuler(
             float *S = mem.phiFull(prop) + S_offset;
             float *S_dot = mem.phiDot(prop) + S_offset;
             float *qv = qvs + velOffset;
+            float *dqv = dqvs + velOffset;
             auto S_i = [&](uint32_t row, uint32_t col) -> float& { return S[row + 6 * col]; };
             auto S_dot_i = [&](uint32_t row, uint32_t col) -> float& { return S_dot[row + 6 * col]; };
 
@@ -874,7 +879,23 @@ inline void recursiveNewtonEuler(
             if (body_offset.parentWithDof == 0xFF || dof_type == DofType::FreeBody) {
                 // v_0 = 0, a_0 = -g (fictitious upward acceleration)
                 sv.sVel = {Vector3::zero(), Vector3::zero()};
-                sv.sAcc = {-physics_state.g, Vector3::zero()};
+
+                if constexpr (kComputeWithQDDot) {
+#if 0
+                    sv.sAcc = { 
+                        Vector3{ dqv[0], dqv[1], dqv[2] },
+                        Vector3{ dqv[3], dqv[4], dqv[5] }
+                    };
+#else
+                    sv.sAcc = {
+                        Vector3::zero(),
+                        Vector3::zero(),
+                    };
+#endif
+                } else {
+                    sv.sAcc = {-physics_state.g, Vector3::zero()};
+                }
+
                 sv.sForce = {Vector3::zero(), Vector3::zero()};
             } else {
                 BodySpatialVectors &p_sv = spatialVectors[body_offset.parent];
@@ -917,7 +938,11 @@ inline void recursiveNewtonEuler(
                     // Update acceleration: \dot{S}_i * \dot{q}_i + S_i * \ddot{q}_i
                     for (uint32_t j = 0; j < 6; ++j) {
                         for (uint32_t k = 0; k < 6; ++k) {
-                            sv.sAcc[j] += S_dot_i(j, k) * qv[k];
+                            if constexpr (kComputeWithQDDot) {
+                                sv.sAcc[j] += S_dot_i(j, k) * qv[k] + S_i(j, k) * dqv[k];
+                            } else {
+                                sv.sAcc[j] += S_dot_i(j, k) * qv[k];
+                            }
                         }
                     }
                     break;
@@ -944,7 +969,11 @@ inline void recursiveNewtonEuler(
                     // Update acceleration: \dot{S}_i * \dot{q}_i + S_i * \ddot{q}_i
                     for (uint32_t j = 0; j < 6; ++j) {
                         for (uint32_t k = 0; k < 3; ++k) {
-                            sv.sAcc[j] += S_dot_i(j, k) * qv[k];
+                            if constexpr (kComputeWithQDDot) {
+                                sv.sAcc[j] += S_dot_i(j, k) * qv[k] + S_i(j, k) * dqv[k];
+                            } else {
+                                sv.sAcc[j] += S_dot_i(j, k) * qv[k];
+                            }
                         }
                     }
                     break;
@@ -964,8 +993,12 @@ inline void recursiveNewtonEuler(
                     for (int j = 0; j < 6; ++j) {
                         sv.sVel[j] += S[j] * q_dot;
                         S_dot[j] = tmp[j];
-                        sv.sAcc[j] += S_dot[j] * q_dot;
-                        // sv.sAcc[j] += S[j] * q_ddot;
+
+                        if constexpr (kComputeWithQDDot) {
+                            sv.sAcc[j] += S_dot[j] * q_dot + S[j] * dqv[0];
+                        } else {
+                            sv.sAcc[j] += S_dot[j] * q_dot;
+                        }
                     }
                     break;
                 }
@@ -987,18 +1020,34 @@ inline void recursiveNewtonEuler(
             }
         }
 
-        // First set bias force to external force
-        float *tau = mem.biasVector(prop);
-        int32_t *dof_to_body = mem.dofToBody(prop);
-        memcpy(tau, mem.f(prop), prop.qvDim * sizeof(float));
+        if (kComputeWithQDDot) {
+            float *tau = mem.f(prop);
+            int32_t *dof_to_body = mem.dofToBody(prop);
 
-        // Then add the internal forces, mapped to generalized forces
-        float *S_ptr = mem.phiFull(prop);
-        for (int32_t i = 0; i < prop.qvDim; ++i) {
-            SpatialVector f_i = spatialVectors[dof_to_body[i]].sForce;
-            float *S_i = S_ptr + 6 * i;
-            for (int32_t j = 0; j < 6; ++j) {
-                tau[i] += S_i[j] * f_i[j];
+            // Then add the internal forces, mapped to generalized forces
+            float *S_ptr = mem.phiFull(prop);
+            for (int32_t i = 0; i < prop.qvDim; ++i) {
+                SpatialVector f_i = spatialVectors[dof_to_body[i]].sForce;
+                float *S_i = S_ptr + 6 * i;
+                tau[i] = 0.f;
+                for (int32_t j = 0; j < 6; ++j) {
+                    tau[i] += S_i[j] * f_i[j];
+                }
+            }
+        } else {
+            // First set bias force to external force
+            float *tau = mem.biasVector(prop);
+            int32_t *dof_to_body = mem.dofToBody(prop);
+            memcpy(tau, mem.f(prop), prop.qvDim * sizeof(float));
+
+            // Then add the internal forces, mapped to generalized forces
+            float *S_ptr = mem.phiFull(prop);
+            for (int32_t i = 0; i < prop.qvDim; ++i) {
+                SpatialVector f_i = spatialVectors[dof_to_body[i]].sForce;
+                float *S_i = S_ptr + 6 * i;
+                for (int32_t j = 0; j < 6; ++j) {
+                    tau[i] += S_i[j] * f_i[j];
+                }
             }
         }
     }
@@ -2183,13 +2232,13 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
 
 #ifdef MADRONA_GPU_MODE
     cur_node = builder.addToGraph<CustomParallelForNode<Context,
-         tasks::recursiveNewtonEuler, 32, 1,
+         tasks::recursiveNewtonEuler<false>, 32, 1,
             BodyGroupProperties,
             BodyGroupMemory
         >>({cur_node});
 #else
     cur_node = builder.addToGraph<ParallelForNode<Context,
-         tasks::recursiveNewtonEuler,
+         tasks::recursiveNewtonEuler<false>,
             BodyGroupProperties,
             BodyGroupMemory
         >>({cur_node});
@@ -2333,6 +2382,22 @@ TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
     TaskGraphNodeID cur_node;
 
     if (!replay) {
+#if 0
+#ifdef MADRONA_GPU_MODE
+        cur_node = builder.addToGraph<CustomParallelForNode<Context,
+             tasks::recursiveNewtonEuler<true>, 32, 1,
+                BodyGroupProperties,
+                BodyGroupMemory
+            >>({cur_node});
+#else
+        cur_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::recursiveNewtonEuler<true>,
+                BodyGroupProperties,
+                BodyGroupMemory
+            >>({cur_node});
+#endif
+#endif
+
         cur_node = builder.addToGraph<ParallelForNode<Context,
              tasks::integrationStep,
                 DofObjectGroup
