@@ -1628,14 +1628,18 @@ void destroyHierarchies(Context &ctx,
     auto cleanup_obj = [&](uint32_t iter) {
         BodyObjectData obj = objs[iter];
         if (obj.type == BodyObjectData::Type::Render) {
-            render::RenderingSystem::cleanupRenderableEntity(ctx, obj.proxy);
+            if (ctx.singleton<PhysicsSystemState>().createRenderObjects) {
+                render::RenderingSystem::cleanupRenderableEntity(ctx, obj.proxy);
+            }
         }
 
         ctx.destroyEntity(obj.proxy);
 
         if (obj.optionalRender != Entity::none()) {
-            render::RenderingSystem::cleanupRenderableEntity(
-                    ctx, obj.optionalRender);
+            if (ctx.singleton<PhysicsSystemState>().createRenderObjects) {
+                render::RenderingSystem::cleanupRenderableEntity(
+                        ctx, obj.optionalRender);
+            }
             ctx.destroyEntity(obj.optionalRender);
         }
     };

@@ -100,6 +100,7 @@ void init(Context &ctx,
           CountT num_substeps,
           math::Vector3 gravity,
           CountT max_dynamic_objects,
+          bool create_render_objects,
           Solver solver,
           CVXSolve *cvx_solve)
 {
@@ -148,6 +149,9 @@ void init(Context &ctx,
     }
 
     ctx.singleton<ObjectData>() = { obj_mgr };
+
+    ctx.singleton<PhysicsSystemState>().createRenderObjects = 
+        create_render_objects;
 }
 
 void reset(Context &ctx)

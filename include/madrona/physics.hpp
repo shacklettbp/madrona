@@ -242,6 +242,7 @@ namespace PhysicsSystem {
               CountT num_substeps,
               math::Vector3 gravity,
               CountT max_dynamic_objects,
+              bool create_render_objects = true,
               Solver solver = Solver::XPBD,
               CVXSolve *cvx_solver = nullptr);
 

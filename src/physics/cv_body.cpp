@@ -1,6 +1,7 @@
 #include "cv.hpp"
 #include "cv_gpu.hpp"
 #include <madrona/cv_physics.hpp>
+#include "physics_impl.hpp"
 
 namespace madrona::phys::cv {
 
@@ -307,7 +308,9 @@ void attachCollision(
         ctx.get<ObjectID>(viz_obj) = { (int32_t)desc.renderObjID };
 
         // Make this entity renderable
-        render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+        if (ctx.singleton<PhysicsSystemState>().createRenderObjects) {
+            render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+        }
 
         ctx.get<LinkParentDofObject>(viz_obj) = {
             .bodyGroup = body_grp,
@@ -371,7 +374,9 @@ void attachVisual(
 
     ctx.get<ObjectID>(viz_obj) = { (int32_t)desc.objID };
 
-    render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+    if (ctx.singleton<PhysicsSystemState>().createRenderObjects) {
+        render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+    }
 
     ctx.get<LinkParentDofObject>(viz_obj) = {
         .bodyGroup = body_grp,
