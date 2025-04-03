@@ -2374,20 +2374,18 @@ TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
     TaskGraphNodeID cur_node;
 
     if (!replay) {
-#if 0
 #ifdef MADRONA_GPU_MODE
         cur_node = builder.addToGraph<CustomParallelForNode<Context,
              tasks::recursiveNewtonEuler<true>, 32, 1,
                 BodyGroupProperties,
                 BodyGroupMemory
-            >>({cur_node});
+            >>({solve});
 #else
         cur_node = builder.addToGraph<ParallelForNode<Context,
              tasks::recursiveNewtonEuler<true>,
                 BodyGroupProperties,
                 BodyGroupMemory
-            >>({cur_node});
-#endif
+            >>({solve});
 #endif
 
         cur_node = builder.addToGraph<ParallelForNode<Context,
