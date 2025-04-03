@@ -830,8 +830,8 @@ void compositeRigidBody(
 
 
 // Recursive Newton Euler algorithm: Compute bias forces and gravity
-// Set kComputeWithQDDot to true when calling this after contact solve
-// Set kComputeWithQDDot to false when calling this before contact solve
+// Set kComputeWithQDDot to true when calling this after solve (total force)
+// Set kComputeWithQDDot to false when calling this before solve (bias force)
 template <bool kComputeWithQDDot>
 inline void recursiveNewtonEuler(
         Context &ctx,
@@ -879,23 +879,11 @@ inline void recursiveNewtonEuler(
             if (body_offset.parentWithDof == 0xFF || dof_type == DofType::FreeBody) {
                 // v_0 = 0, a_0 = -g (fictitious upward acceleration)
                 sv.sVel = {Vector3::zero(), Vector3::zero()};
-
                 if constexpr (kComputeWithQDDot) {
-#if 0
-                    sv.sAcc = { 
-                        Vector3{ dqv[0], dqv[1], dqv[2] },
-                        Vector3{ dqv[3], dqv[4], dqv[5] }
-                    };
-#else
-                    sv.sAcc = {
-                        Vector3::zero(),
-                        Vector3::zero(),
-                    };
-#endif
+                    sv.sAcc = { Vector3::zero(), Vector3::zero(), };
                 } else {
                     sv.sAcc = {-physics_state.g, Vector3::zero()};
                 }
-
                 sv.sForce = {Vector3::zero(), Vector3::zero()};
             } else {
                 BodySpatialVectors &p_sv = spatialVectors[body_offset.parent];
