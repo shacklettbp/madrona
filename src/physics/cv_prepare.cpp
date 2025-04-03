@@ -2391,7 +2391,9 @@ TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
         cur_node = builder.addToGraph<ParallelForNode<Context,
              tasks::integrationStep,
                 DofObjectGroup
-            >>({solve});
+            >>({cur_node});
+    } else {
+        cur_node = solve;
     }
 
     cur_node = builder.addToGraph<ParallelForNode<Context,
