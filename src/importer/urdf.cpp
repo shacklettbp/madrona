@@ -123,6 +123,7 @@ struct URDFVisual {
     URDFGeometry geometry;
     std::string materialName;
     URDFMaterial material;
+    uint32_t numGeoms;
 
     static URDFVisual defaultValue()
     {
@@ -186,6 +187,14 @@ struct URDFLink {
             0
         };
     }
+
+    uint32_t totalNumVisualGeoms() {
+        uint32_t numGeoms = 0;
+        for (auto &visual : visualArray) {
+            numGeoms += visual.numGeoms;
+        }
+        return numGeoms;
+    }
 };
 
 struct URDFCollisionDisable {
@@ -199,6 +208,7 @@ enum class URDFJointType {
     Prismatic, // Sliding joint with limits
     Floating,
     Planar,
+    Spherical,
     Fixed,
     Invalid,
 };
@@ -208,6 +218,10 @@ static DofType urdfToDofType(URDFJointType type)
     switch (type) {
     case URDFJointType::Revolute: {
         return DofType::Hinge;
+    };
+
+    case URDFJointType::Spherical: {
+        return DofType::Ball;
     };
 
     case URDFJointType::Continuous: {
@@ -223,7 +237,7 @@ static DofType urdfToDofType(URDFJointType type)
     };
 
     case URDFJointType::Planar: {
-        return DofType::Ball;
+        assert(false);
     };
 
     case URDFJointType::Fixed: {
@@ -441,7 +455,7 @@ static void parseMesh(URDFMesh &m, tinyxml2::XMLElement *c)
     }
 }
 
-static void parseGeometry(URDFGeometry &geom, tinyxml2::XMLElement *g)
+static uint32_t parseGeometry(URDFGeometry &geom, tinyxml2::XMLElement *g)
 {
     massert(g, "URDF Loading: Geometry element doesn't exist");
 
@@ -458,12 +472,18 @@ static void parseGeometry(URDFGeometry &geom, tinyxml2::XMLElement *g)
     } else if (type_name == "cylinder") {
         geom.type = URDFGeometryType::Cylinder;
         parseCylinder(geom.cylinder, shape);
+        return 3;
+    } else if (type_name == "capsule") {
+        geom.type = URDFGeometryType::Cylinder;
+        parseCylinder(geom.cylinder, shape);
+        return 3;
     } else if (type_name == "mesh") {
         geom.type = URDFGeometryType::Mesh;
         parseMesh(geom.mesh, shape);
     } else {
         printf("Unknown geometry type '%s'\n", type_name.c_str());
     }
+    return 1;
 }
 
 static bool parseMaterial(
@@ -523,7 +543,7 @@ static bool parseVisual(URDFVisual &vis, tinyxml2::XMLElement *config)
 
     // Geometry
     tinyxml2::XMLElement *geom = config->FirstChildElement("geometry");
-    parseGeometry(vis.geometry, geom);
+    vis.numGeoms = parseGeometry(vis.geometry, geom);
 
     const char *name_char = config->Attribute("name");
     if (name_char) {
@@ -923,6 +943,8 @@ static void parseJoint(
         joint.type = URDFJointType::Prismatic;
     else if (type_str == "fixed")
         joint.type = URDFJointType::Fixed;
+    else if (type_str == "spherical")
+        joint.type = URDFJointType::Spherical;
     else
         massert(false, "Joint doesn't have a known type");
 
@@ -1229,7 +1251,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             .initialRot = Quat::id(),
             .responseType = ResponseType::Dynamic,
             .numCollisionObjs = (uint32_t)link.collisionArray.size(),
-            .numVisualObjs = (uint32_t)link.visualArray.size(),
+            .numVisualObjs = (uint32_t)link.totalNumVisualGeoms(),
             .numLimits = 0,
             .mass = link.inertial.mass,
             .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
@@ -1319,10 +1341,11 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             .type = urdfToDofType(joint.type),
             .responseType = ResponseType::Dynamic,
             .numCollisionObjs = (uint32_t)link.collisionArray.size(),
-            .numVisualObjs = (uint32_t)link.visualArray.size(),
+            .numVisualObjs = (uint32_t)link.totalNumVisualGeoms(),
             .numLimits = num_limits,
             .mass = link.inertial.mass,
             .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
+            .initialRot = Quat::id(), // for ball joints
             // ... ?
             .muS = 1.0f
         };
@@ -1572,6 +1595,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             cfg.numColliders++;
         }
 
+        uint32_t visual_offset = 0;
         for (uint32_t v = 0; v < link.visualArray.size(); ++v) {
             URDFVisual &visual = link.visualArray[v];
 
@@ -1622,6 +1646,32 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                     visual.geometry.cylinder.length / 2.f
                 };
                 obj_id = primitives.capsuleRenderIdx;
+
+                // Push the two spherical caps
+                Vector3 cap_offset = Vector3 { 0.f, 0.f, scale.z };
+                cap_offset = visual.origin.rotation.rotateVec(cap_offset);
+                VisualDesc viz_desc = {
+                    .objID = primitives.sphereRenderIdx,
+                    .offset = visual.origin.position - link.jointToChildCom - cap_offset,
+                    .rotation = visual.origin.rotation,
+                    .scale = Diag3x3::uniform(scale.x),
+                    .linkIdx = l,
+                    .subIndex = visual_offset,
+                };
+                visualDescs.push_back(viz_desc);
+                cfg.numVisuals++;
+
+                VisualDesc viz_desc2 = {
+                    .objID = primitives.sphereRenderIdx,
+                    .offset = visual.origin.position - link.jointToChildCom + cap_offset,
+                    .rotation = visual.origin.rotation,
+                    .scale = Diag3x3::uniform(scale.x),
+                    .linkIdx = l,
+                    .subIndex = visual_offset + 1,
+                };
+                visualDescs.push_back(viz_desc2);
+                cfg.numVisuals++;
+                visual_offset += 2;
             } break;
 
             default: {
@@ -1635,8 +1685,9 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                 .rotation = visual.origin.rotation,
                 .scale = Diag3x3::fromVec(scale),
                 .linkIdx = l,
-                .subIndex = v
+                .subIndex = visual_offset
             };
+            visual_offset += 1;
 
             visualDescs.push_back(viz_desc);
             cfg.numVisuals++;
@@ -1663,8 +1714,8 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
     jointNameToIndices.push_back(std::move(link_name_to_index));
 
-    printf("Model has %d colliders and %d visuals\n",
-            cfg.numVisuals, cfg.numColliders);
+    // printf("Model has %d colliders and %d visuals\n",
+            // cfg.numVisuals, cfg.numColliders);
 
     return { model_idx, total_num_dofs, cfg.numBodies };
 }

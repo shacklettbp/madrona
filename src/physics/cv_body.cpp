@@ -1,6 +1,7 @@
 #include "cv.hpp"
 #include "cv_gpu.hpp"
 #include <madrona/cv_physics.hpp>
+#include "physics_impl.hpp"
 
 namespace madrona::phys::cv {
 
@@ -222,7 +223,9 @@ static void initBodyGroupMemory(
             // Fill in inertia
             inertials[i] = BodyInertial {
                 .mass = bd.mass,
-                .inertia = bd.inertia
+                .inertia = bd.inertia,
+                .originalMass = bd.mass,
+                .originalInertia = bd.inertia,
             };
 
             assert((uint8_t *)(inertials + i) < max_ptr);
@@ -305,7 +308,9 @@ void attachCollision(
         ctx.get<ObjectID>(viz_obj) = { (int32_t)desc.renderObjID };
 
         // Make this entity renderable
-        render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+        if (ctx.singleton<PhysicsSystemState>().createRenderObjects) {
+            render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+        }
 
         ctx.get<LinkParentDofObject>(viz_obj) = {
             .bodyGroup = body_grp,
@@ -369,7 +374,9 @@ void attachVisual(
 
     ctx.get<ObjectID>(viz_obj) = { (int32_t)desc.objID };
 
-    render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+    if (ctx.singleton<PhysicsSystemState>().createRenderObjects) {
+        render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+    }
 
     ctx.get<LinkParentDofObject>(viz_obj) = {
         .bodyGroup = body_grp,
@@ -455,7 +462,7 @@ static inline void joinBodiesGeneral(
     offsets[child_info.idx].parent = (uint8_t)parent_info.idx;
 
     hiers[child_info.idx] = BodyHierarchy {
-        .axis = axis,
+        .axis = axis.normalize(),
         .relPositionParent = rel_position_parent,
         .relPositionLocal = rel_position_child,
         .parentToChildRot = rel_parent_rotation,
@@ -556,7 +563,7 @@ void attachLimit(
     l.bodyIdx = body_info.idx;
     l.hinge = hinge_limit;
 
-    m.q(p)[offsets[body_info.idx].posOffset] = (hinge_limit.lower + hinge_limit.upper) / 2.f;
+    // m.q(p)[offsets[body_info.idx].posOffset] = (hinge_limit.lower + hinge_limit.upper) / 2.f;
 }
 
 void attachLimit(
@@ -638,6 +645,12 @@ float * getBodyGroupForces(Context &ctx, Entity body_grp)
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
     return m.f(p);
+}
+
+uint8_t getBodyGroupNumDofs(Context &ctx, Entity body_grp, bool pos)
+{
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return pos ? p.qDim - p.numFixedQ : p.qvDim;
 }
 
 uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, uint32_t body_idx)

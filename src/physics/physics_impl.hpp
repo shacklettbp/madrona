@@ -12,6 +12,7 @@ struct PhysicsSystemState {
     float restitutionThreshold;
     uint32_t contactArchetypeID;
     uint32_t jointArchetypeID;
+    bool createRenderObjects;
 };
 
 struct CandidateTemporary : Archetype<CandidateCollision> {};
