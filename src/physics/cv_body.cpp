@@ -647,6 +647,12 @@ float * getBodyGroupForces(Context &ctx, Entity body_grp)
     return m.f(p);
 }
 
+uint8_t getBodyGroupNumDofs(Context &ctx, Entity body_grp, bool pos)
+{
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return pos ? p.qDim - p.numFixedQ : p.qvDim;
+}
+
 uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, uint32_t body_idx)
 {
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);

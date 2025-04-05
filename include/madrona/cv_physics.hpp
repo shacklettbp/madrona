@@ -590,6 +590,7 @@ float * getBodyGroupDofVel(Context &ctx, Entity body_grp);
 float * getBodyGroupDofAcc(Context &ctx, Entity body_grp);
 float * getBodyGroupForces(Context &ctx, Entity body_grp);
 
+uint8_t getBodyGroupNumDofs(Context &ctx, Entity body_grp, bool pos);
 uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, uint32_t body_idx);
 
 float * getBodyDofPos(Context &ctx, Entity body_grp, uint32_t body_idx);
