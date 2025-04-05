@@ -2370,6 +2370,8 @@ TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
     TaskGraphNodeID cur_node;
 
     if (!replay) {
+// TODO: rne would overwrite external forces (tau) here
+#if 0
 #ifdef MADRONA_GPU_MODE
         cur_node = builder.addToGraph<CustomParallelForNode<Context,
              tasks::recursiveNewtonEuler<true>, 32, 1,
@@ -2382,6 +2384,7 @@ TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
                 BodyGroupProperties,
                 BodyGroupMemory
             >>({solve});
+#endif
 #endif
 
         cur_node = builder.addToGraph<ParallelForNode<Context,
