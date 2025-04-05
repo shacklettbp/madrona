@@ -2196,10 +2196,6 @@ inline void convertPostSolve(
     BodyTransform transforms = m.bodyTransforms(p)[link.bodyIdx];
     BodyObjectData obj_data = m.objectData(p)[link.objDataIdx];
 
-    // if(link.bodyIdx != 15 && link.bodyIdx != 0 && link.type==LinkParentDofObject::Type::Render) {
-    //     return;
-    // }
-
     scale = obj_data.scale * p.globalScale;
     position = transforms.com + p.globalScale *
                     transforms.composedRot.rotateVec(obj_data.offset);
