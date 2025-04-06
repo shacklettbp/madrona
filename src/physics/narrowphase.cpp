@@ -2587,6 +2587,8 @@ inline void runNarrowphaseSystem(
 #endif
     )
 {
+    CV_PROF_START(t0, narrowphase);
+
     PROF_START(all_ctr, narrowphaseAllClocks);
 #ifdef MADRONA_GPU_MODE
     const int32_t mwgpu_warp_id = threadIdx.x / 32;
