@@ -1025,6 +1025,101 @@ inline void findIntersectingEntry(
                 CountT a_prim_idx = prim_check_idx / b_num_prims;
                 CountT b_prim_idx = prim_check_idx % b_num_prims;
 
+                // First check the primitive's AABB overlap. This used to be
+                // done in narrowphase. Moving it to here to check how
+                // performance compares.
+                {
+                    const uint32_t a_prim_offset =
+                        obj_mgr.rigidBodyPrimitiveOffsets[a_obj.idx];
+                    const uint32_t b_prim_offset =
+                        obj_mgr.rigidBodyPrimitiveOffsets[b_obj.idx];
+
+                    uint32_t glob_a_prim_idx = a_prim_offset + a_prim_idx;
+                    uint32_t glob_b_prim_idx = b_prim_offset + b_prim_idx;
+
+                    const CollisionPrimitive *a_prim =
+                        &obj_mgr.collisionPrimitives[glob_a_prim_idx];
+                    const CollisionPrimitive *b_prim =
+                        &obj_mgr.collisionPrimitives[glob_b_prim_idx];
+
+                    uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
+                    uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
+
+                    // Swap a & b to be properly ordered based on object type
+                    if (raw_type_a > raw_type_b) {
+                        std::swap(a_loc, b_loc);
+                        std::swap(a_prim, b_prim);
+                        std::swap(glob_a_prim_idx, glob_b_prim_idx);
+                        std::swap(raw_type_a, raw_type_b);
+                    }
+
+                    const Vector3 a_pos = ctx.getDirect<Position>(RGDCols::Position, a_loc);
+                    const Vector3 b_pos = ctx.getDirect<Position>(RGDCols::Position, b_loc);
+                    const Quat a_rot = ctx.getDirect<Rotation>(RGDCols::Rotation, a_loc);
+                    const Quat b_rot = ctx.getDirect<Rotation>(RGDCols::Rotation, b_loc);
+                    const Diag3x3 a_scale(ctx.getDirect<Scale>(RGDCols::Scale, a_loc));
+                    const Diag3x3 b_scale(ctx.getDirect<Scale>(RGDCols::Scale, b_loc));
+
+                    {
+                        AABB a_obj_aabb = obj_mgr.primitiveAABBs[glob_a_prim_idx];
+                        AABB b_obj_aabb = obj_mgr.primitiveAABBs[glob_b_prim_idx];
+
+                        // TODO: Have a better way of handling this capsule edge case.
+                        AABB a_world_aabb = [&]() {
+                            if (raw_type_a == (uint32_t)CollisionPrimitive::Type::Capsule) {
+                                assert(a_scale.d0 == a_scale.d1);
+
+                                float r = a_scale.d0;
+                                float half_h = a_scale.d2;
+
+                                AABB capsule_aabb = {
+                                    .pMin = { -r, -r, -(r + half_h) },
+                                    .pMax = { r, r, r + half_h },
+                                };
+
+                                return capsule_aabb.applyTRS(a_pos, a_rot, { 1.f, 1.f, 1.f });
+                            } else {
+                                return a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
+                            }
+                        } ();
+
+                        AABB b_world_aabb = [&]() {
+                            if (raw_type_b == (uint32_t)CollisionPrimitive::Type::Capsule) {
+                                assert(b_scale.d0 == b_scale.d1);
+
+                                float r = b_scale.d0;
+                                float half_h = b_scale.d2;
+
+                                AABB capsule_aabb = {
+                                    .pMin = { -r, -r, -(r + half_h) },
+                                    .pMax = { r, r, r + half_h },
+                                };
+
+                                return capsule_aabb.applyTRS(b_pos, b_rot, { 1.f, 1.f, 1.f });
+                            } else {
+                                return b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
+                            }
+                        } ();
+
+                        if (!a_world_aabb.intersects(b_world_aabb)) {
+                            continue;
+                        } else {
+                            Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
+
+                            CandidateCollision &candidate =
+                                ctx.getDirect<CandidateCollision>(
+                                        RGDCols::CandidateCollision, candidate_loc);
+
+                            candidate.a = a_loc;
+                            candidate.b = b_loc;
+                            candidate.aPrim = a_prim_idx;
+                            candidate.bPrim = b_prim_idx;
+                        }
+                    }
+                }
+
+
+#if 0
                 Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
                 CandidateCollision &candidate =
                     ctx.getDirect<CandidateCollision>(
@@ -1034,6 +1129,7 @@ inline void findIntersectingEntry(
                 candidate.b = b_loc;
                 candidate.aPrim = a_prim_idx;
                 candidate.bPrim = b_prim_idx;
+#endif
             }
         }
     });
