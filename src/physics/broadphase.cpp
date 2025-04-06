@@ -5,6 +5,9 @@
 
 #include "physics_impl.hpp"
 
+#include "cv.hpp"
+#include "cv_gpu.hpp"
+
 namespace madrona::phys::broadphase {
 
 using namespace base;
@@ -1019,11 +1022,14 @@ inline void findIntersectingEntry(
             
             CountT total_narrowphase_checks = a_num_prims * b_num_prims;
 
-            // printf("Creating contact between %d %d\n", e.id, intersecting_entity.id);
-
+#ifdef MADRONA_GPU_MODE
+            cv::gpu_utils::warpLoop(total_narrowphase_checks,
+                    [&](uint32_t prim_check_idx) {
+#else
             for (CountT prim_check_idx = 0;
                  prim_check_idx < total_narrowphase_checks;
                  prim_check_idx++) {
+#endif
                 CountT a_prim_idx = prim_check_idx / b_num_prims;
                 CountT b_prim_idx = prim_check_idx % b_num_prims;
 
@@ -1104,7 +1110,11 @@ inline void findIntersectingEntry(
                         } ();
 
                         if (!a_world_aabb.intersects(b_world_aabb)) {
+#ifdef MADRONA_GPU_MODE
+                            return;
+#else
                             continue;
+#endif
                         } else {
                             Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
 
@@ -1119,20 +1129,11 @@ inline void findIntersectingEntry(
                         }
                     }
                 }
-
-
-#if 0
-                Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
-                CandidateCollision &candidate =
-                    ctx.getDirect<CandidateCollision>(
-                        RGDCols::CandidateCollision, candidate_loc);
-
-                candidate.a = a_loc;
-                candidate.b = b_loc;
-                candidate.aPrim = a_prim_idx;
-                candidate.bPrim = b_prim_idx;
-#endif
+#ifdef MADRONA_GPU_MODE
+            });
+#else
             }
+#endif
         }
     });
 }
@@ -1165,8 +1166,16 @@ TaskGraphNodeID setupPreIntegrationTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps)
 {
+#ifdef MADRONA_GPU_MODE
+    auto find_intersects = builder.addToGraph<CustomParallelForNode<Context,
+        broadphase::findIntersectingEntry, 32, 1,
+            Entity, LeafID
+        >>(deps);
+#else
     auto find_intersects = builder.addToGraph<ParallelForNode<Context,
         broadphase::findIntersectingEntry, Entity, LeafID>>(deps);
+#endif
+
 
     return find_intersects;
 }
