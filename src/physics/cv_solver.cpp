@@ -1174,6 +1174,8 @@ void GaussMinimizationNode::calculateSolverDims(
 
 void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
 {
+    CV_PROF_START(t0, allocScratch)
+
     { // Solver dims
         uint32_t world_id = invocation_idx;
         CVSolveData *curr_sd = &solveDatas[world_id];
@@ -1299,6 +1301,8 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
 
 void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 {
+    CV_PROF_START(t0, prepSolver);
+
     using namespace gpu_utils;
 
     uint32_t lane_id = threadIdx.x % 32;
@@ -1906,6 +1910,8 @@ void GaussMinimizationNode::computeAccRef(
 // experiment.
 void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
 {
+    CV_PROF_START(t0, contAccRef);
+
     using namespace gpu_utils;
 
     uint32_t total_num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
@@ -2020,6 +2026,8 @@ void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
 
 void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
 {
+    CV_PROF_START(t0, eqAccRef);
+
     using namespace gpu_utils;
 
     uint32_t total_num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
@@ -2149,6 +2157,8 @@ void GaussMinimizationNode::prepareRegInfos(CVSolveData *sd)
 
 void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 {
+    CV_PROF_START(t0, cg);
+
 #define iter_warp_printf(...) if (iter < 4) { warp_printf(__VA_ARGS__); }
 #define iter_matrix_printf(...) if (iter < 4) { printMatrix(__VA_ARGS__); }
 

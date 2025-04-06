@@ -1,54 +1,38 @@
 #pragma once
 
+#include <madrona/sync.hpp>
 #include <madrona/physics.hpp>
 
 #ifdef MADRONA_GPU_MODE
-// #define CV_COUNT_GPU_CLOCKS
+#define CV_COUNT_GPU_CLOCKS
 #endif
 
 
 
 #ifdef CV_COUNT_GPU_CLOCKS
 extern "C" {
-struct CVClocks {
-    AtomicU64 com;
-    AtomicU64 interias;
-
-    // RNE with just G
-    AtomicU64 rneG;
-    // RNE with full acceleration as input
-    AtomicU64 rne;
-
-    AtomicU64 crb;
-    AtomicU64 invMass;
-
-    AtomicU64 processContacts;
-
-    AtomicU64 convert;
-
-    AtomicU64 destroy;
-    AtomicU64 init;
-
-    // Integration
-    AtomicU64 intg;
-
-    AtomicU64 fk;
-
-    AtomicU64 narrowphase;
-
-    AtomicU64 allocScratch;
-    AtomicU64 prepSolver;
-    AtomicU64 contAccRef;
-    AtomicU64 eqAccRef;
-    AtomicU64 cg;
-};
-
-extern CVClocks cvClocks;
+extern madrona::AtomicU64 cvcom;
+extern madrona::AtomicU64 cvinertias;
+extern madrona::AtomicU64 cvrne;
+extern madrona::AtomicU64 cvcrb;
+extern madrona::AtomicU64 cvinvMass;
+extern madrona::AtomicU64 cvprocessContacts;
+extern madrona::AtomicU64 cvconvert;
+extern madrona::AtomicU64 cvdestroy;
+extern madrona::AtomicU64 cvinit;
+extern madrona::AtomicU64 cvintg;
+extern madrona::AtomicU64 cvfk;
+extern madrona::AtomicU64 cvnarrowphase;
+extern madrona::AtomicU64 cvallocScratch;
+extern madrona::AtomicU64 cvprepSolver;
+extern madrona::AtomicU64 cvcontAccRef;
+extern madrona::AtomicU64 cveqAccRef;
+extern madrona::AtomicU64 cvcg;
 }
 
 class CVClockHelper {
 public:
-    inline CVClockHelper(AtomicU64 &counter)
+    inline CVClockHelper(madrona::AtomicU64 &counter)
         : counter_(&counter)
     {
         cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
@@ -81,14 +65,17 @@ private:
         return v;
     }
 
-    AtomicU64 *counter_;
+    madrona::AtomicU64 *counter_;
     uint64_t start_;
 };
 
 #define CV_PROF_START(name, counter) \
-    CVClockHelper name(cvClocks. counter)
+    CVClockHelper name(cv##counter);
 
-#define CV_PROF_END(name) name.end()
+#define CV_PROF_END(name) name.end();
+#else
+#define CV_PROF_START(name, counter)
+#define CV_PROF_END(name)
 #endif
 
 namespace madrona::phys {

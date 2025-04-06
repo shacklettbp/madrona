@@ -41,6 +41,8 @@ void forwardKinematics(Context &,
                        BodyGroupMemory m,
                        BodyGroupProperties p)
 {
+    CV_PROF_START(t0, fk);
+
     float *all_q = m.q(p);
     BodyTransform *all_transforms = m.bodyTransforms(p);
     BodyHierarchy *all_hiers = m.hierarchies(p);
@@ -363,6 +365,8 @@ void computeGroupCOM(Context &ctx,
                      BodyGroupProperties &prop,
                      BodyGroupMemory &mem)
 {
+    CV_PROF_START(t0, com);
+
     (void)ctx;
 
     uint32_t num_bodies = prop.numBodies;
@@ -415,6 +419,8 @@ void computeGroupCOM(Context &ctx,
 void computeSpatialInertiasAndPhi(Context &ctx,
                                   DofObjectGroup obj_grp)
 {
+    CV_PROF_START(t0, inertias);
+
     BodyGroupProperties &prop = ctx.get<BodyGroupProperties>(obj_grp.bodyGroup);
     BodyGroupMemory &mem = ctx.get<BodyGroupMemory>(obj_grp.bodyGroup);
     // Skip if this is a static body
@@ -605,6 +611,8 @@ void compositeRigidBody(
         BodyGroupProperties &prop,
         BodyGroupMemory &mem)
 {
+    CV_PROF_START(t0, crb);
+
     uint32_t lane_id = threadIdx.x % 32;
     uint32_t warp_id = threadIdx.x / 32;
 
@@ -737,6 +745,8 @@ void compositeRigidBody(
         BodyGroupProperties &prop,
         BodyGroupMemory &mem)
 {
+    CV_PROF_START(t0, crb);
+
     BodyOffsets *offsets = mem.offsets(prop);
     BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
     uint32_t *is_static = mem.isStatic(prop);
@@ -838,6 +848,8 @@ inline void recursiveNewtonEuler(
         BodyGroupProperties &prop,
         BodyGroupMemory &mem)
 {
+    CV_PROF_START(t0, rne);
+
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     BodyOffsets* offsets = mem.offsets(prop);
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
@@ -1046,6 +1058,8 @@ inline void processContacts(Context &ctx,
                             ContactConstraint &contact,
                             ContactTmpState &tmp_state)
 {
+    CV_PROF_START(t0, processContacts);
+
     LinkParentDofObject &link_parent_ref = ctx.get<LinkParentDofObject>(contact.ref);
     LinkParentDofObject &link_parent_alt = ctx.get<LinkParentDofObject>(contact.alt);
 
@@ -1590,6 +1604,8 @@ inline void resetMasses(BodyGroupMemory &m,
 void initHierarchies(Context &ctx,
                      InitBodyGroup body_grp)
 {
+    CV_PROF_START(t0, init);
+
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
@@ -1601,6 +1617,8 @@ void initHierarchies(Context &ctx,
 void destroyHierarchies(Context &ctx,
                         DestroyBodyGroup &body_grp)
 {
+    CV_PROF_START(t0, destroy);
+
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
 
@@ -1697,6 +1715,8 @@ inline void computeInvMassGPU(
         Context &ctx,
         InitBodyGroup body_grp)
 {
+    CV_PROF_START(t0, invMass);
+
     using namespace gpu_utils;
 
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
@@ -2116,6 +2136,8 @@ inline Quat integrateQuaternion(Quat curr_rot,
 inline void integrationStep(Context &ctx,
                             DofObjectGroup grp_info)
 {
+    CV_PROF_START(t0, intg);
+
     float h = ctx.singleton<PhysicsSystemState>().h;
     if (!ctx.singleton<CVSolveData>().enablePhysics) {
         return;
@@ -2189,6 +2211,8 @@ inline void convertPostSolve(
         Scale &scale,
         LinkParentDofObject &link)
 {
+    CV_PROF_START(t0, convert);
+
     (void)e;
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
