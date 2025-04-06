@@ -972,6 +972,8 @@ inline void findIntersectingEntry(
     const Entity &e,
     LeafID leaf_id)
 {
+    CV_PROF_START(t0, broadphase);
+
     BVH &bvh = ctx.singleton<BVH>();
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 

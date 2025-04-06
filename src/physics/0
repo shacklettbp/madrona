@@ -1,0 +1,118 @@
+#include "cv.hpp"
+#include "cv_gpu.hpp"
+
+namespace madrona::phys::cv {
+
+#ifdef MADRONA_GPU_MODE
+struct ContactInfo {
+    ContactConstraint contact;
+
+    BodyGroupProperties *pRef;
+    BodyGroupMemory *mRef;
+    uint32_t refBodyIndex;
+
+    BodyGroupProperties *pAlt;
+    BodyGroupMemory *mAlt;
+    uint32_t altBodyIndex;
+};
+
+static bool isBodyGroupStatic(BodyGroupMemory &m,
+                              BodyGroupProperties &p)
+{
+    if (p.numBodies == 1) {
+        return p.isStatic(p)[0];
+    } else {
+        return false;
+    }
+}
+
+static bool isContactWithStaticGroup(const ContactInfo &info)
+{
+    return isBodyGroupStatic(*info.mRef, *info.pRef) ||
+           isBodyGroupStatic(*info.mAlt, *info.pAlt);
+}
+
+static ContactInfo getContactInfo(
+        StateManager *state_mgr,
+        ContactConstraint contact)
+{
+    auto contact = contact;
+
+    auto &ref_link = state_mgr->getUnsafe<LinkParentDofObject>(
+            contact.ref);
+    auto &alt_link = state_mgr->getUnsafe<LinkParentDofObject>(
+            contact.alt);
+
+    BodyGroupProperties &p_ref = state_mgr->getUnsafe<BodyGroupProperties>(ref_link.bodyGroup);
+    BodyGroupMemory &m_ref = state_mgr->getUnsafe<BodyGroupMemory>(ref_link.bodyGroup);
+    uint32_t body_idx_ref = ref_link.bodyIdx;
+
+    BodyGroupProperties &p_alt = state_mgr->getUnsafe<BodyGroupProperties>(alt_link.bodyGroup);
+    BodyGroupMemory &m_alt = state_mgr->getUnsafe<BodyGroupMemory>(alt_link.bodyGroup);
+    uint32_t body_idx_alt = alt_link.bodyIdx;
+
+    return {
+        contact,
+
+        &p_ref,
+        &m_ref,
+        body_idx_ref,
+
+        &p_alt,
+        &m_alt,
+        body_idx_alt,
+    };
+}
+
+// This is for a given world
+void markBodyGroupIslands(
+        StateManager *state_mgr,
+        ContactConstraint *contacts,
+        uint32_t num_contacts,
+        BodyGroupProperties *ps,
+        uint32_t num_body_grps)
+{
+    using namespace gpu_utils;
+
+    warpLoop(
+        num_body_grps,
+        [&](uint32_t grp_idx) {
+            ps[grp_idx].islandNumber.store_relaxed(grp_idx);
+        });
+
+    uint32_t max_iters = num_body_grps;
+
+    for (uint32_t i = 0; i < max_iters; ++i) {
+        bool changed = false;
+
+        warpLoop(
+            num_contacts,
+            [&](uint32_t contact_idx) {
+                // ContactConstraint *edge = contacts[contact_idx];
+                ContactInfo contact_info = getContactInfo(
+                        state_mgr, contacts[contact_idx]);
+
+                if (isContactWithStaticGroup(contact_info)) {
+                    return;
+                }
+
+                uint32_t ref_num = contact_info.pRef->islandNumber;
+                uint32_t alt_num = contact_info.pRef->islandNumber;
+                uint32_t min_island_number = std::min(ref_num, alt_num);
+
+                uint32_t old_ref = contact_info.pRef->islandNumber.fetch_min(min_island_number);
+                uint32_t old_alt = contact_info.pAlt->islandNumber.fetch_min(min_island_number);
+
+                changed = changed || (old_ref != ref_num) || (old_alt != alt_num);
+            });
+        __syncwarp();
+
+        bool can_exit = !__any_sync(0xFFFF'FFFF, changed);
+        if (can_exit) {
+            break;
+        }
+    }
+}
+#endif
+    
+}

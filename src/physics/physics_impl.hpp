@@ -23,6 +23,7 @@ extern madrona::AtomicU64 cvinit;
 extern madrona::AtomicU64 cvintg;
 extern madrona::AtomicU64 cvfk;
 extern madrona::AtomicU64 cvnarrowphase;
+extern madrona::AtomicU64 cvbroadphase;
 extern madrona::AtomicU64 cvallocScratch;
 extern madrona::AtomicU64 cvprepSolver;
 extern madrona::AtomicU64 cvcontAccRef;
