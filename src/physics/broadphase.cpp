@@ -1022,7 +1022,7 @@ inline void findIntersectingEntry(
             CountT total_narrowphase_checks = a_num_prims * b_num_prims;
 
 #ifdef MADRONA_GPU_MODE
-            static constexpr uint32_t kMaxTmpsPerWarp = 256;
+            static constexpr uint32_t kMaxTmpsPerWarp = 256*256;
 
             uint32_t num_tmps = 
                 (total_narrowphase_checks + kMaxTmpsPerWarp - 1) /
