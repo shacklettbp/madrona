@@ -59,7 +59,8 @@ inline void reportPhysicsClocks(Context &ctx,
         CV_PREP_TOTAL(intg);
         CV_PREP_TOTAL(fk);
         CV_PREP_TOTAL(narrowphase);
-        CV_PREP_TOTAL(broadphase);
+        CV_PREP_TOTAL(broadphase1);
+        CV_PREP_TOTAL(broadphase2);
         CV_PREP_TOTAL(allocScratch);
         CV_PREP_TOTAL(prepSolver);
         CV_PREP_TOTAL(contAccRef);
@@ -78,7 +79,8 @@ inline void reportPhysicsClocks(Context &ctx,
         CV_REPORT_CLOCK(intg);
         CV_REPORT_CLOCK(fk);
         CV_REPORT_CLOCK(narrowphase);
-        CV_REPORT_CLOCK(broadphase);
+        CV_REPORT_CLOCK(broadphase1);
+        CV_REPORT_CLOCK(broadphase2);
         CV_REPORT_CLOCK(allocScratch);
         CV_REPORT_CLOCK(prepSolver);
         CV_REPORT_CLOCK(contAccRef);

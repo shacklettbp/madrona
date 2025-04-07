@@ -3,10 +3,9 @@
 
 #include <algorithm>
 
-#include "physics_impl.hpp"
-
 #include "cv.hpp"
 #include "cv_gpu.hpp"
+#include "physics_impl.hpp"
 
 namespace madrona::phys::broadphase {
 
@@ -975,7 +974,7 @@ inline void findIntersectingEntry(
     const Entity &e,
     LeafID leaf_id)
 {
-    CV_PROF_START(t0, broadphase);
+    CV_PROF_START(t0, broadphase1);
 
     BVH &bvh = ctx.singleton<BVH>();
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
@@ -1023,120 +1022,187 @@ inline void findIntersectingEntry(
             CountT total_narrowphase_checks = a_num_prims * b_num_prims;
 
 #ifdef MADRONA_GPU_MODE
-            cv::gpu_utils::warpLoop(total_narrowphase_checks,
-                    [&](uint32_t prim_check_idx) {
-#else
-            for (CountT prim_check_idx = 0;
-                 prim_check_idx < total_narrowphase_checks;
-                 prim_check_idx++) {
-#endif
-                CountT a_prim_idx = prim_check_idx / b_num_prims;
-                CountT b_prim_idx = prim_check_idx % b_num_prims;
+            static constexpr uint32_t kMaxTmpsPerWarp = 256;
 
-                // First check the primitive's AABB overlap. This used to be
-                // done in narrowphase. Moving it to here to check how
-                // performance compares.
-                {
-                    const uint32_t a_prim_offset =
-                        obj_mgr.rigidBodyPrimitiveOffsets[a_obj.idx];
-                    const uint32_t b_prim_offset =
-                        obj_mgr.rigidBodyPrimitiveOffsets[b_obj.idx];
+            uint32_t num_tmps = 
+                (total_narrowphase_checks + kMaxTmpsPerWarp - 1) /
+                kMaxTmpsPerWarp;
 
-                    uint32_t glob_a_prim_idx = a_prim_offset + a_prim_idx;
-                    uint32_t glob_b_prim_idx = b_prim_offset + b_prim_idx;
+            Loc candidate_loc = ctx.makeTemporary<BroadphaseTemporary>(num_tmps);
 
-                    const CollisionPrimitive *a_prim =
-                        &obj_mgr.collisionPrimitives[glob_a_prim_idx];
-                    const CollisionPrimitive *b_prim =
-                        &obj_mgr.collisionPrimitives[glob_b_prim_idx];
+            for (uint32_t i = 0; i < total_narrowphase_checks; i += kMaxTmpsPerWarp) {
+                BroadphaseObjectTemporary &candidate =
+                    ctx.getDirect<BroadphaseObjectTemporary>(
+                            RGDCols::BroadphaseObjectTemporary, candidate_loc);
 
-                    uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
-                    uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
+                candidate.offset = i;
+                candidate.count = std::min(kMaxTmpsPerWarp,
+                                           (uint32_t)total_narrowphase_checks - i);
+                candidate.a = a_loc;
+                candidate.b = b_loc;
+                candidate.aPos = ctx.getDirect<Position>(RGDCols::Position, a_loc);
+                candidate.bPos = ctx.getDirect<Position>(RGDCols::Position, b_loc);
+                candidate.aRot = ctx.getDirect<Rotation>(RGDCols::Rotation, a_loc);
+                candidate.bRot = ctx.getDirect<Rotation>(RGDCols::Rotation, b_loc);
+                candidate.aScale = (ctx.getDirect<Scale>(RGDCols::Scale, a_loc));
+                candidate.bScale = (ctx.getDirect<Scale>(RGDCols::Scale, b_loc));
 
-                    // Swap a & b to be properly ordered based on object type
-                    if (raw_type_a > raw_type_b) {
-                        std::swap(a_loc, b_loc);
-                        std::swap(a_prim, b_prim);
-                        std::swap(glob_a_prim_idx, glob_b_prim_idx);
-                        std::swap(raw_type_a, raw_type_b);
-                    }
-
-                    const Vector3 a_pos = ctx.getDirect<Position>(RGDCols::Position, a_loc);
-                    const Vector3 b_pos = ctx.getDirect<Position>(RGDCols::Position, b_loc);
-                    const Quat a_rot = ctx.getDirect<Rotation>(RGDCols::Rotation, a_loc);
-                    const Quat b_rot = ctx.getDirect<Rotation>(RGDCols::Rotation, b_loc);
-                    const Diag3x3 a_scale(ctx.getDirect<Scale>(RGDCols::Scale, a_loc));
-                    const Diag3x3 b_scale(ctx.getDirect<Scale>(RGDCols::Scale, b_loc));
-
-                    {
-                        AABB a_obj_aabb = obj_mgr.primitiveAABBs[glob_a_prim_idx];
-                        AABB b_obj_aabb = obj_mgr.primitiveAABBs[glob_b_prim_idx];
-
-                        // TODO: Have a better way of handling this capsule edge case.
-                        AABB a_world_aabb = [&]() {
-                            if (raw_type_a == (uint32_t)CollisionPrimitive::Type::Capsule) {
-                                assert(a_scale.d0 == a_scale.d1);
-
-                                float r = a_scale.d0;
-                                float half_h = a_scale.d2;
-
-                                AABB capsule_aabb = {
-                                    .pMin = { -r, -r, -(r + half_h) },
-                                    .pMax = { r, r, r + half_h },
-                                };
-
-                                return capsule_aabb.applyTRS(a_pos, a_rot, { 1.f, 1.f, 1.f });
-                            } else {
-                                return a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
-                            }
-                        } ();
-
-                        AABB b_world_aabb = [&]() {
-                            if (raw_type_b == (uint32_t)CollisionPrimitive::Type::Capsule) {
-                                assert(b_scale.d0 == b_scale.d1);
-
-                                float r = b_scale.d0;
-                                float half_h = b_scale.d2;
-
-                                AABB capsule_aabb = {
-                                    .pMin = { -r, -r, -(r + half_h) },
-                                    .pMax = { r, r, r + half_h },
-                                };
-
-                                return capsule_aabb.applyTRS(b_pos, b_rot, { 1.f, 1.f, 1.f });
-                            } else {
-                                return b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
-                            }
-                        } ();
-
-                        if (!a_world_aabb.intersects(b_world_aabb)) {
-#ifdef MADRONA_GPU_MODE
-                            return;
-#else
-                            continue;
-#endif
-                        } else {
-                            Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
-
-                            CandidateCollision &candidate =
-                                ctx.getDirect<CandidateCollision>(
-                                        RGDCols::CandidateCollision, candidate_loc);
-
-                            candidate.a = a_loc;
-                            candidate.b = b_loc;
-                            candidate.aPrim = a_prim_idx;
-                            candidate.bPrim = b_prim_idx;
-                        }
-                    }
-                }
-#ifdef MADRONA_GPU_MODE
-            });
-#else
+                candidate_loc.row++;
             }
+#else
+            Loc candidate_loc = ctx.makeTemporary<BroadphaseTemporary>();
+            BroadphaseObjectTemporary &candidate =
+                ctx.getDirect<BroadphaseObjectTemporary>(
+                        RGDCols::BroadphaseObjectTemporary, candidate_loc);
+
+            candidate.offset = 0;
+            candidate.count = (uint32_t)total_narrowphase_checks;
+            candidate.a = a_loc;
+            candidate.b = b_loc;
+            candidate.aPos = ctx.getDirect<Position>(RGDCols::Position, a_loc);
+            candidate.bPos = ctx.getDirect<Position>(RGDCols::Position, b_loc);
+            candidate.aRot = ctx.getDirect<Rotation>(RGDCols::Rotation, a_loc);
+            candidate.bRot = ctx.getDirect<Rotation>(RGDCols::Rotation, b_loc);
+            candidate.aScale = (ctx.getDirect<Scale>(RGDCols::Scale, a_loc));
+            candidate.bScale = (ctx.getDirect<Scale>(RGDCols::Scale, b_loc));
 #endif
         }
     });
 }
+
+inline void createCandidateCollisions(
+    Context &ctx,
+    BroadphaseObjectTemporary tmp)
+{
+    CV_PROF_START(t0, broadphase2);
+
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+
+    Loc a_loc = tmp.a;
+    Loc b_loc = tmp.b;
+
+    ObjectID a_obj = ctx.getDirect<ObjectID>(RGDCols::ObjectID, a_loc);
+    CountT a_num_prims = obj_mgr.rigidBodyPrimitiveCounts[a_obj.idx];
+
+    ObjectID b_obj = ctx.getDirect<ObjectID>(RGDCols::ObjectID, b_loc);
+    CountT b_num_prims = obj_mgr.rigidBodyPrimitiveCounts[b_obj.idx];
+
+    CountT total_narrowphase_checks = a_num_prims * b_num_prims;
+
+    const uint32_t a_prim_offset =
+        obj_mgr.rigidBodyPrimitiveOffsets[a_obj.idx];
+    const uint32_t b_prim_offset =
+        obj_mgr.rigidBodyPrimitiveOffsets[b_obj.idx];
+
+#ifdef MADRONA_GPU_MODE
+    cv::gpu_utils::warpLoop(
+        tmp.count, [&](uint32_t prim_check_idx) {
+#else
+    for (CountT prim_check_idx = 0;
+            prim_check_idx < tmp.count;
+            prim_check_idx++) {
+#endif
+        CountT a_prim_idx = (prim_check_idx + tmp.offset) / b_num_prims;
+        CountT b_prim_idx = (prim_check_idx + tmp.offset) % b_num_prims;
+
+        // First check the primitive's AABB overlap. This used to be
+        // done in narrowphase. Moving it to here to check how
+        // performance compares.
+        {
+            uint32_t glob_a_prim_idx = a_prim_offset + a_prim_idx;
+            uint32_t glob_b_prim_idx = b_prim_offset + b_prim_idx;
+
+            const CollisionPrimitive *a_prim =
+                &obj_mgr.collisionPrimitives[glob_a_prim_idx];
+            const CollisionPrimitive *b_prim =
+                &obj_mgr.collisionPrimitives[glob_b_prim_idx];
+
+            uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
+            uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
+
+            // Swap a & b to be properly ordered based on object type
+            if (raw_type_a > raw_type_b) {
+                std::swap(a_loc, b_loc);
+                std::swap(a_prim, b_prim);
+                std::swap(glob_a_prim_idx, glob_b_prim_idx);
+                std::swap(raw_type_a, raw_type_b);
+            }
+
+            const Vector3 a_pos = tmp.aPos;
+            const Vector3 b_pos = tmp.bPos;
+            const Quat a_rot = tmp.aRot;
+            const Quat b_rot = tmp.bRot;
+            const Diag3x3 a_scale = tmp.aScale;
+            const Diag3x3 b_scale = tmp.bScale;
+
+            {
+                AABB a_obj_aabb = obj_mgr.primitiveAABBs[glob_a_prim_idx];
+                AABB b_obj_aabb = obj_mgr.primitiveAABBs[glob_b_prim_idx];
+
+                // TODO: Have a better way of handling this capsule edge case.
+                AABB a_world_aabb = [&]() {
+                    if (raw_type_a == (uint32_t)CollisionPrimitive::Type::Capsule) {
+                        assert(a_scale.d0 == a_scale.d1);
+
+                        float r = a_scale.d0;
+                        float half_h = a_scale.d2;
+
+                        AABB capsule_aabb = {
+                            .pMin = { -r, -r, -(r + half_h) },
+                            .pMax = { r, r, r + half_h },
+                        };
+
+                        return capsule_aabb.applyTRS(a_pos, a_rot, { 1.f, 1.f, 1.f });
+                    } else {
+                        return a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
+                    }
+                } ();
+
+                AABB b_world_aabb = [&]() {
+                    if (raw_type_b == (uint32_t)CollisionPrimitive::Type::Capsule) {
+                        assert(b_scale.d0 == b_scale.d1);
+
+                        float r = b_scale.d0;
+                        float half_h = b_scale.d2;
+
+                        AABB capsule_aabb = {
+                            .pMin = { -r, -r, -(r + half_h) },
+                            .pMax = { r, r, r + half_h },
+                        };
+
+                        return capsule_aabb.applyTRS(b_pos, b_rot, { 1.f, 1.f, 1.f });
+                    } else {
+                        return b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
+                    }
+                } ();
+
+                if (!a_world_aabb.intersects(b_world_aabb)) {
+#ifdef MADRONA_GPU_MODE
+                    return;
+#else
+                    continue;
+#endif
+                } else {
+                    Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
+
+                    CandidateCollision &candidate =
+                        ctx.getDirect<CandidateCollision>(
+                                RGDCols::CandidateCollision, candidate_loc);
+
+                    candidate.a = a_loc;
+                    candidate.b = b_loc;
+                    candidate.aPrim = a_prim_idx;
+                    candidate.bPrim = b_prim_idx;
+                }
+            }
+        }
+#ifdef MADRONA_GPU_MODE
+    });
+#else
+    }
+#endif
+}
+
 
 TaskGraphNodeID setupBVHTasks(
     TaskGraphBuilder &builder,
@@ -1166,18 +1232,23 @@ TaskGraphNodeID setupPreIntegrationTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps)
 {
-#ifdef MADRONA_GPU_MODE
-    auto find_intersects = builder.addToGraph<CustomParallelForNode<Context,
-        broadphase::findIntersectingEntry, 32, 1,
-            Entity, LeafID
-        >>(deps);
-#else
     auto find_intersects = builder.addToGraph<ParallelForNode<Context,
         broadphase::findIntersectingEntry, Entity, LeafID>>(deps);
+
+#ifdef MADRONA_GPU_MODE
+    auto create_cands = builder.addToGraph<CustomParallelForNode<Context,
+         broadphase::createCandidateCollisions, 32, 1,
+         BroadphaseObjectTemporary>>({find_intersects});
+#else
+    auto create_cands = builder.addToGraph<ParallelForNode<Context,
+         broadphase::createCandidateCollisions,
+         BroadphaseObjectTemporary>>({find_intersects});
 #endif
 
+    auto clear_tmp = builder.addToGraph<
+        ClearTmpNode<BroadphaseTemporary>>({create_cands});
 
-    return find_intersects;
+    return clear_tmp;
 }
 
 TaskGraphNodeID setupPostIntegrationTasks(

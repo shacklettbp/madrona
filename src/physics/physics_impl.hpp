@@ -23,7 +23,8 @@ extern madrona::AtomicU64 cvinit;
 extern madrona::AtomicU64 cvintg;
 extern madrona::AtomicU64 cvfk;
 extern madrona::AtomicU64 cvnarrowphase;
-extern madrona::AtomicU64 cvbroadphase;
+extern madrona::AtomicU64 cvbroadphase1;
+extern madrona::AtomicU64 cvbroadphase2;
 extern madrona::AtomicU64 cvallocScratch;
 extern madrona::AtomicU64 cvprepSolver;
 extern madrona::AtomicU64 cvcontAccRef;
@@ -94,6 +95,24 @@ struct PhysicsSystemState {
 
 struct CandidateTemporary : Archetype<CandidateCollision> {};
 
+// This is going to create the actual CandidateCollisions
+struct BroadphaseObjectTemporary {
+    uint32_t offset;
+    uint32_t count;
+
+    Loc a;
+    Loc b;
+
+    math::Vector3 aPos;
+    math::Vector3 bPos;
+    math::Quat aRot;
+    math::Quat bRot;
+    math::Diag3x3 aScale;
+    math::Diag3x3 bScale;
+};
+
+struct BroadphaseTemporary : Archetype<BroadphaseObjectTemporary> {};
+
 namespace broadphase {
 
 TaskGraphNodeID setupBVHTasks(
@@ -130,6 +149,7 @@ namespace RGDCols {
     constexpr inline CountT ExternalTorque = 10;
     constexpr inline CountT SolverBase = 11;
 
+    constexpr inline CountT BroadphaseObjectTemporary = 2;
     constexpr inline CountT CandidateCollision = 2;
     constexpr inline CountT ContactConstraint = 2;
     constexpr inline CountT JointConstraint = 2;

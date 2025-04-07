@@ -752,17 +752,18 @@ Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
 }
 
 Loc StateManager::makeTemporary(WorldID world_id,
-                                uint32_t archetype_id)
+                                uint32_t archetype_id,
+                                CountT count)
 {
     auto &archetype = *archetypes_[archetype_id];
 
     ArchetypeTable &tbl = archetype.tbl;
     archetype.needsSort = true;
 
-    int32_t row = tbl.numRows.fetch_add_relaxed(1);
+    int32_t row = tbl.numRows.fetch_add_relaxed(count);
 
     if (row >= tbl.mappedRows) {
-        growTable(tbl, row);
+        growTable(tbl, row, count);
     }
 
     Loc loc {
@@ -775,10 +776,12 @@ Loc StateManager::makeTemporary(WorldID world_id,
     // needs a sentinel value written here so it doesn't try to do
     // invalid entity ID remapping
     Entity *entity_column = (Entity *)tbl.columns[0];
-    entity_column[row] = Entity::none();
-
     WorldID *world_column = (WorldID *)tbl.columns[1];
-    world_column[row] = world_id;
+
+    for (CountT i = 0; i < count; ++i) {
+        entity_column[row + i] = Entity::none();
+        world_column[row + i] = world_id;
+    }
 
     return loc;
 }

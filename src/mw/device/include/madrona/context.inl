@@ -58,16 +58,16 @@ void Context::freeMemoryRange(MemoryRange memory_range)
 }
 
 template <typename ArchetypeT>
-Loc Context::makeTemporary()
+Loc Context::makeTemporary(CountT count)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-    return makeTemporary(archetype_id);
+    return makeTemporary(archetype_id, count);
 }
 
-Loc Context::makeTemporary(uint32_t archetype_id)
+Loc Context::makeTemporary(uint32_t archetype_id, CountT count)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    return state_mgr->makeTemporary(world_id_, archetype_id);
+    return state_mgr->makeTemporary(world_id_, archetype_id, count);
 }
 
 void Context::destroyEntity(Entity e)

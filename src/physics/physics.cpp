@@ -380,6 +380,9 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<CandidateCollision>();
     registry.registerArchetype<CandidateTemporary>();
 
+    registry.registerComponent<BroadphaseObjectTemporary>();
+    registry.registerArchetype<BroadphaseTemporary>();
+
     registry.registerComponent<JointConstraint>();
     registry.registerComponent<ContactConstraint>();
 

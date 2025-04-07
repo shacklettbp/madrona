@@ -130,7 +130,7 @@ public:
 
     void destroyEntityNow(Entity e);
 
-    Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
+    Loc makeTemporary(WorldID world_id, uint32_t archetype_id, CountT count);
 
     template <typename ArchetypeT>
     void clearTemporaries();
