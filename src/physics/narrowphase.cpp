@@ -2444,7 +2444,7 @@ static inline void runNarrowphase(
         } ();
 
         if (!a_world_aabb.intersects(b_world_aabb)) {
-            printf("Rejected narrowphase collision\n");
+            // printf("Rejected narrowphase collision\n");
 #ifdef MADRONA_GPU_MODE
             lane_active = false;
 #else
