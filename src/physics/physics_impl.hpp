@@ -4,7 +4,7 @@
 #include <madrona/physics.hpp>
 
 #ifdef MADRONA_GPU_MODE
-#define CV_COUNT_GPU_CLOCKS
+// #define CV_COUNT_GPU_CLOCKS
 #endif
 
 

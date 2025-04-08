@@ -2219,7 +2219,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         } ();
 
         // We are using freeAcc as initial guess
-        //warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
+        // warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
 #if 1
         { // Let's use the current acceleration as the initial acceleration
             BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
@@ -2379,10 +2379,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             }
 
             curr_fun = new_fun;
-        }
-
-        if (threadIdx.x % 32 == 0) {
-            printf("num iters = %u\n", iter);
         }
 
         { // Now, we need to copy x into the right components
