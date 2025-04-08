@@ -4,7 +4,7 @@
 #include <madrona/physics.hpp>
 
 #ifdef MADRONA_GPU_MODE
-// #define CV_COUNT_GPU_CLOCKS
+#define CV_COUNT_GPU_CLOCKS
 #endif
 
 
@@ -30,6 +30,7 @@ extern madrona::AtomicU64 cvprepSolver;
 extern madrona::AtomicU64 cvcontAccRef;
 extern madrona::AtomicU64 cveqAccRef;
 extern madrona::AtomicU64 cvcg;
+extern madrona::AtomicU64 cvlineSearch;
 }
 
 class CVClockHelper {

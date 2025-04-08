@@ -66,6 +66,7 @@ inline void reportPhysicsClocks(Context &ctx,
         CV_PREP_TOTAL(contAccRef);
         CV_PREP_TOTAL(eqAccRef);
         CV_PREP_TOTAL(cg);
+        CV_PREP_TOTAL(lineSearch);
 
         CV_REPORT_CLOCK(com);
         CV_REPORT_CLOCK(inertias);
@@ -86,6 +87,7 @@ inline void reportPhysicsClocks(Context &ctx,
         CV_REPORT_CLOCK(contAccRef);
         CV_REPORT_CLOCK(eqAccRef);
         CV_REPORT_CLOCK(cg);
+        CV_REPORT_CLOCK(lineSearch);
     }
 }
 #endif

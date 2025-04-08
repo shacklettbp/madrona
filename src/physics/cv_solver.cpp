@@ -768,6 +768,8 @@ float GaussMinimizationNode::exactLineSearch(
         float *d_e,
         bool dbg)
 {
+    CV_PROF_START(t0, lineSearch);
+
     using namespace gpu_utils;
 
     float pMx_free = dotVectors(p, Mxmin, sd->freeAccDim);
@@ -2217,7 +2219,35 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         } ();
 
         // We are using freeAcc as initial guess
-        warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
+        //warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
+#if 1
+        { // Let's use the current acceleration as the initial acceleration
+            BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
+                BodyGroupArchetype, BodyGroupProperties>(world_id);
+            BodyGroupMemory *all_memories = state_mgr->getWorldComponents<
+                BodyGroupArchetype, BodyGroupMemory>(world_id);
+            CountT num_grps = state_mgr->numRows<BodyGroupArchetype>(world_id);
+
+            for (uint32_t grp = 0; grp < num_grps; ++grp) {
+                BodyGroupProperties p = all_properties[grp];
+                BodyGroupMemory m = all_memories[grp];
+
+                BodyOffsets *grp_offsets = m.offsets(p);
+                float *dqv = m.dqv(p);
+
+                warpLoop(
+                    p.numBodies,
+                    [&](uint32_t iter) {
+                        BodyOffsets o = grp_offsets[iter];
+
+                        for (uint32_t i = 0; i < o.numDofs; ++i) {
+                            // dqv[o.velOffset + i] = x[p.tmp.qvOffset + o.velOffset + i];
+                            x[p.tmp.qvOffset + o.velOffset + i] = dqv[o.velOffset + i];
+                        }
+                    });
+            }
+        }
+#endif
         __syncwarp();
 
 
@@ -2349,6 +2379,10 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             }
 
             curr_fun = new_fun;
+        }
+
+        if (threadIdx.x % 32 == 0) {
+            printf("num iters = %u\n", iter);
         }
 
         { // Now, we need to copy x into the right components
