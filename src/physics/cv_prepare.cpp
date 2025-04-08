@@ -894,7 +894,7 @@ inline void recursiveNewtonEuler(
                 if constexpr (kComputeWithQDDot) {
                     sv.sAcc = { Vector3::zero(), Vector3::zero(), };
                 } else {
-                    sv.sAcc = {-physics_state.g, Vector3::zero()};
+                    sv.sAcc = {-physics_state.g * prop.gravityCoeff, Vector3::zero()};
                 }
                 sv.sForce = {Vector3::zero(), Vector3::zero()};
             } else {

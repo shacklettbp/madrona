@@ -27,6 +27,7 @@ Entity makeBodyGroup(Context &ctx,
         p.numHashes = 0;
         p.numFixedQ = 0;
         p.tmp.bodyCounter = 0;
+        p.gravityCoeff = 1.f;
     }
 
     { // Initialize memory
@@ -899,6 +900,7 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
         p.numEq = desc.numEq;
         p.numObjData = desc.numObjData;
         p.numHashes = desc.numHashes;
+        p.gravityCoeff = 1.f;
     }
 
     { // Allocate frame persistent memory
@@ -1058,6 +1060,12 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
     }
 
     return { grp, read_ptr - (uint8_t *)ptr };
+}
+
+void setEnableGravity(Context &ctx, Entity body_grp, bool value)
+{
+    auto &p = ctx.get<BodyGroupProperties>(body_grp);
+    p.gravityCoeff = value ? 1.f : 0.f;
 }
 
 }

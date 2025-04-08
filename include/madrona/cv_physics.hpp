@@ -158,6 +158,8 @@ struct BodyGroupProperties {
 
     uint32_t numHashes;
 
+    float gravityCoeff;
+
     struct {
         uint32_t bodyCounter;
 
@@ -647,6 +649,8 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 void initializeHierarchies(Context &ctx);
 
 void setEnablePhysics(Context &ctx, bool value);
+
+void setEnableGravity(Context &ctx, Entity body_grp, bool value);
 
 }
 
