@@ -365,6 +365,17 @@ ComponentT *StateManager::getWorldComponents(
     return col;
 }
 
+template <typename ArchetypeT, typename ComponentT>
+std::pair<ComponentT *, uint32_t> StateManager::getWorldComponentsAndCount(
+        uint32_t world_id)
+{
+    ComponentT *comps = getWorldComponents<
+        ArchetypeT, ComponentT>(world_id);
+    uint32_t num_comps = (uint32_t)numRows<ArchetypeT>(world_id);
+
+    return std::make_pair(comps, num_comps);
+}
+
 template <typename ArchetypeT>
 Entity * StateManager::getWorldEntities(
         MADRONA_MW_COND(uint32_t world_id))

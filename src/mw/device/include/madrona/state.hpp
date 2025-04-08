@@ -181,6 +181,10 @@ public:
     // 2: RangeMapUnitT *
     inline void * getMemoryRangeColumn(uint32_t elem_id, uint32_t col_idx);
 
+    template <typename ArchetypeT, typename ComponentT>
+    std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
+            uint32_t world_id);
+
     template <typename ArchetypeT>
     int32_t * getArchetypeWorldOffsets();
 
