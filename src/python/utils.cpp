@@ -394,7 +394,6 @@ void Tensor::key_() {}
 void TrainInterface::key_() {}
 #endif
 
-#ifdef MADRONA_CUDA_SUPPORT
 [[maybe_unused]] static inline  uint64_t numTensorBytes(const Tensor &t)
 {
   uint64_t num_items = 1;
@@ -406,9 +405,95 @@ void TrainInterface::key_() {}
   return num_items * (uint64_t)t.numBytesPerItem();
 }
 
+void TrainInterface::cpuCopyStepInputs(void **buffers)
+{
+  auto copyToSim = [](const Tensor &dst, void *src) {
+    uint64_t num_bytes = numTensorBytes(dst);
+
+    if (dst.isOnGPU()) {
+#ifdef MADRONA_CUDA_SUPPORT
+      REQ_CUDA(cudaMemcpy(dst.devicePtr(), src, num_bytes, cudaMemcpyHostToDevice));
+#else
+      assert(false);
+#endif
+    } else {
+      memcpy(dst.devicePtr(), src, num_bytes);
+    }
+  };
+
+  TrainStepInputInterface &inputs = impl_->inputs;
+
+  for (const NamedTensor &t : inputs.actions) {
+    copyToSim(t.tensor, *buffers++);
+  }
+
+  copyToSim(inputs.resets, *buffers++);
+  copyToSim(inputs.simCtrl, *buffers++);
+
+  for (const NamedTensor &t : inputs.pbt) {
+    copyToSim(t.tensor, *buffers++);
+  }
+}
+
+void TrainInterface::cpuCopyObservations(void **buffers)
+{
+  auto copyFromSim = [](void *dst, const Tensor &src) {
+    uint64_t num_bytes = numTensorBytes(src);
+
+    if (src.isOnGPU()) {
+#ifdef MADRONA_CUDA_SUPPORT
+      REQ_CUDA(cudaMemcpy(dst, src.devicePtr(), num_bytes, cudaMemcpyHostToDevice));
+#else
+      assert(false);
+#endif
+    } else {
+      memcpy(dst, src.devicePtr(), num_bytes);
+    }
+  };
+
+  for (const NamedTensor &t : impl_->outputs.observations) {
+    copyFromSim(*buffers++, t.tensor);
+  }
+}
+
+void TrainInterface::cpuCopyStepOutputs(void **buffers)
+{
+  auto copyFromSim = [](void *dst, const Tensor &src) {
+    uint64_t num_bytes = numTensorBytes(src);
+
+    if (src.isOnGPU()) {
+#ifdef MADRONA_CUDA_SUPPORT
+      REQ_CUDA(cudaMemcpy(dst, src.devicePtr(), num_bytes, cudaMemcpyHostToDevice));
+#else
+      assert(false);
+#endif
+    } else {
+      memcpy(dst, src.devicePtr(), num_bytes);
+    }
+  };
+
+  TrainStepOutputInterface &outputs = impl_->outputs;
+
+  for (const NamedTensor &t : outputs.observations) {
+    copyFromSim(*buffers++, t.tensor);
+  }
+
+  copyFromSim(*buffers++, outputs.rewards);
+  copyFromSim(*buffers++, outputs.dones);
+
+  for (const NamedTensor &t : outputs.stats) {
+    copyFromSim(*buffers++, t.tensor);
+  }
+
+  for (const NamedTensor &t : outputs.pbt) {
+    copyFromSim(*buffers++, t.tensor);
+  }
+}
+
+
+#ifdef MADRONA_CUDA_SUPPORT
 void ** TrainInterface::cudaCopyStepInputs(cudaStream_t strm, void **buffers)
 {
-
   auto copyToSim = [&strm](const Tensor &dst, void *src) {
     uint64_t num_bytes = numTensorBytes(dst);
 
