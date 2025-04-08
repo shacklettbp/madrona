@@ -2219,8 +2219,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         } ();
 
         // We are using freeAcc as initial guess
-        // warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
-#if 1
+        warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
+#if 0
         { // Let's use the current acceleration as the initial acceleration
             BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
                 BodyGroupArchetype, BodyGroupProperties>(world_id);
