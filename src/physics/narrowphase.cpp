@@ -1915,6 +1915,34 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             // We have a collision
             float d = sqrt(d2);
 
+            // The two lines intersect at a point
+            if (d < 1e-15f) {
+                Vector3 contact_pt = a_point;
+                float penetration = fmaxf(a_scaled_capsule.radius,
+                                          b_scaled_capsule.radius);
+                // Try to use the cross product as the normal
+                Vector3 normal = cross(a_cap_axis, b_cap_axis);
+                if (normal.length() < 1e-15f) {
+                    // Lines are parallel. take cross with either x or y axis
+                    if (fabsf(a_cap_axis.x) > fabsf(a_cap_axis.y)) {
+                        normal = cross(a_cap_axis, { 0, 1, 0 });
+                    } else {
+                        normal = cross(a_cap_axis, { 1, 0, 0 });
+                    }
+                }
+                normal /= normal.length();
+                SphereContact contact {
+                    .normal = normal,
+                    .pt = contact_pt,
+                    .depth = -penetration
+                };
+
+                NarrowphaseResult result = {};
+                result.type = ContactType::Sphere;
+                result.sphere = contact;
+                return result;
+            }
+
             Vector3 contact_pt = a_point + a_scaled_capsule.radius *
                 diff / d;
             float penetration = d - 
