@@ -748,6 +748,7 @@ void compositeRigidBody(
     CV_PROF_START(t0, crb);
 
     BodyOffsets *offsets = mem.offsets(prop);
+    BodyInertial *body_inertials = mem.inertials(prop);
     BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
     uint32_t *is_static = mem.isStatic(prop);
 
@@ -775,6 +776,11 @@ void compositeRigidBody(
     auto qM = [&](int32_t row, int32_t col) -> float& {
         return M[row + total_dofs * col];
     };
+
+    // Set diagonal elements to armature
+    for (int32_t i = 0; i < total_dofs; ++i) {
+        qM(i, i) = body_inertials[dof_to_body[i]].armature;
+    }
 
     for (int32_t i = 0; i < total_dofs; ++i) {
         // buf = I_i * S_i

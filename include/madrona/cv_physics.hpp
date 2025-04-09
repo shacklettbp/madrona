@@ -84,6 +84,9 @@ struct BodyInertial {
     float mass;
     math::Diag3x3 inertia;
 
+    // Additional inertia associated with joint movement not due to mass
+    float armature;
+
     // Original mass and inertia
     float originalMass;
     math::Diag3x3 originalInertia;
