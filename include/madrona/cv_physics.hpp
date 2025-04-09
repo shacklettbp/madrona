@@ -86,6 +86,8 @@ struct BodyInertial {
 
     // Additional inertia associated with joint movement not due to mass
     float armature;
+    // Implicit damping during integration
+    float damping;
 
     // Original mass and inertia
     float originalMass;

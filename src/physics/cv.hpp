@@ -90,6 +90,8 @@ void computePhiTrans(DofType dof_type,
                      math::Vector3 origin,
                      float *S);
 
+void factorM(BodyGroupProperties prop,
+             BodyGroupMemory mem);
 void mulM(BodyGroupProperties prop,
         BodyGroupMemory mem,
         float *x, float *y);

@@ -226,6 +226,7 @@ static void initBodyGroupMemory(
                 .mass = bd.mass,
                 .inertia = bd.inertia,
                 .armature = 0.f, // TODO: potentially load in armature
+                .damping = 0.f, // TODO: potentially load in damping
                 .originalMass = bd.mass,
                 .originalInertia = bd.inertia,
             };

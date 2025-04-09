@@ -539,6 +539,38 @@ inline float * computeContactJacobian(BodyGroupProperties &p,
     return J;
 }
 
+// Computes LTDL factorization of the mass matrix
+void factorM(BodyGroupProperties prop,
+             BodyGroupMemory mem)
+{
+    float *LTDL = mem.massLTDLMatrix(prop);
+    float *M = mem.massMatrix(prop);
+    uint32_t total_dofs = prop.qvDim;
+    int32_t *expandedParent = mem.expandedParent(prop);
+
+    // First copy M to LTDL
+    memcpy(LTDL, M, total_dofs * total_dofs * sizeof(float));
+    auto ltdl = [&](int32_t row, int32_t col) -> float& {
+        return LTDL[row + total_dofs * col];
+    };
+
+    // Backward pass through DOFs
+    for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
+        int32_t i = expandedParent[k];
+        while (i != -1) {
+            // Temporary storage
+            float a = ltdl(k, i) / ltdl(k, k);
+            int32_t j = i;
+            while (j != -1) {
+                ltdl(i, j) = ltdl(i, j) - a * ltdl(k, j);
+                j = expandedParent[j];
+            }
+            ltdl(k, i) = a;
+            i = expandedParent[i];
+        }
+    }
+}
+
 // y = Mx. Based on Table 6.5 in Featherstone
 void mulM(
         BodyGroupProperties prop,
@@ -684,33 +716,7 @@ void compositeRigidBody(
     }
 
     // ----------------- Compute LTDL factorization -----------------
-    // First copy M to LTDL
-    float *LTDL = mem.massLTDLMatrix(prop);
-    gpu_utils::warpCopy(LTDL, M, total_dofs * total_dofs * sizeof(float));
-    __syncwarp();
-
-    if (lane_id == 0) {
-        // Helper
-        auto ltdl = [&](int32_t row, int32_t col) -> float& {
-            return LTDL[row + total_dofs * col];
-        };
-
-        // Backward pass through DOFs
-        for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
-            int32_t i = expandedParent[k];
-            while (i != -1) {
-                // Temporary storage
-                float a = ltdl(k, i) / ltdl(k, k);
-                int32_t j = i;
-                while (j != -1) {
-                    ltdl(i, j) = ltdl(i, j) - a * ltdl(k, j);
-                    j = expandedParent[j];
-                }
-                ltdl(k, i) = a;
-                i = expandedParent[i];
-            }
-        }
-    }
+    factorM(prop, mem);
 
     // ----------------- Sum Inertia Diagonals -----------------
     // Sum the diagonals of the mass matrix (used for solver scaling)
@@ -808,28 +814,7 @@ void compositeRigidBody(
     }
 
     // ----------------- Compute LTDL factorization -----------------
-    // First copy M to LTDL
-    float *LTDL = mem.massLTDLMatrix(prop);
-    memcpy(LTDL, M, total_dofs * total_dofs * sizeof(float));
-    auto ltdl = [&](int32_t row, int32_t col) -> float& {
-        return LTDL[row + total_dofs * col];
-    };
-
-    // Backward pass through DOFs
-    for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
-        int32_t i = expandedParent[k];
-        while (i != -1) {
-            // Temporary storage
-            float a = ltdl(k, i) / ltdl(k, k);
-            int32_t j = i;
-            while (j != -1) {
-                ltdl(i, j) = ltdl(i, j) - a * ltdl(k, j);
-                j = expandedParent[j];
-            }
-            ltdl(k, i) = a;
-            i = expandedParent[i];
-        }
-    }
+    factorM(prop, mem);
 
     // ----------------- Sum Inertia Diagonals -----------------
     // Sum the diagonals of the mass matrix (used for solver scaling)
@@ -2144,6 +2129,46 @@ inline Quat integrateQuaternion(Quat curr_rot,
     return new_rot;
 }
 
+// Apply damping
+void implicitDamping(Context &,
+                     BodyGroupProperties &prop,
+                     BodyGroupMemory &mem)
+{
+    BodyInertial *body_inertials = mem.inertials(prop);
+    int32_t *dof_to_body = mem.dofToBody(prop);
+    uint32_t total_dofs = prop.qvDim;
+
+    // Check if damping is required
+    bool damping_req = false;
+    for (int i = 0; i < prop.numBodies; ++i) {
+        BodyInertial &inertial = body_inertials[i];
+        if (inertial.damping != 0.f) {
+            damping_req = true;
+            break;
+        }
+    }
+    if (!damping_req) { return; }
+
+    float *M = mem.massMatrix(prop);
+    // Compute M * acc, store into tau
+    float *acc = mem.dqv(prop);
+    float *tau = mem.biasVector(prop);
+    mulM(prop, mem, acc, tau);
+
+    // Compute M + hB, where B is diagonal damping
+    auto qM = [&](int32_t row, int32_t col) -> float& {
+        return M[row + total_dofs * col];
+    };
+    for (int32_t i = 0; i < total_dofs; ++i) {
+        qM(i, i) += body_inertials[dof_to_body[i]].damping;
+    }
+    // LTDL factor (M + hB), then solve for damped acceleration
+    factorM(prop, mem);
+    solveM(prop, mem, tau);
+    memcpy(acc, tau, total_dofs * sizeof(float));
+}
+
+
 inline void integrationStep(Context &ctx,
                             DofObjectGroup grp_info)
 {
@@ -2421,6 +2446,11 @@ TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
             >>({solve});
 #endif
 #endif
+        cur_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::implicitDamping,
+                BodyGroupProperties,
+                BodyGroupMemory
+            >>({});
 
         cur_node = builder.addToGraph<ParallelForNode<Context,
              tasks::integrationStep,
