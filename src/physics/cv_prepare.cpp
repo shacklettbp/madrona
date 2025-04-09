@@ -2130,7 +2130,7 @@ inline Quat integrateQuaternion(Quat curr_rot,
 }
 
 // Apply damping
-void implicitDamping(Context &,
+void implicitDamping(Context &ctx,
                      BodyGroupProperties &prop,
                      BodyGroupMemory &mem)
 {
@@ -2156,11 +2156,12 @@ void implicitDamping(Context &,
     mulM(prop, mem, acc, tau);
 
     // Compute M + hB, where B is diagonal damping
+    float h = ctx.singleton<PhysicsSystemState>().h;
     auto qM = [&](int32_t row, int32_t col) -> float& {
         return M[row + total_dofs * col];
     };
     for (int32_t i = 0; i < total_dofs; ++i) {
-        qM(i, i) += body_inertials[dof_to_body[i]].damping;
+        qM(i, i) += h * body_inertials[dof_to_body[i]].damping;
     }
     // LTDL factor (M + hB), then solve for damped acceleration
     factorM(prop, mem);
