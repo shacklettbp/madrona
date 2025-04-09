@@ -225,6 +225,7 @@ static void initBodyGroupMemory(
             inertials[i] = BodyInertial {
                 .mass = bd.mass,
                 .inertia = bd.inertia,
+                .armature = 0.f, // TODO: potentially load in armature
                 .originalMass = bd.mass,
                 .originalInertia = bd.inertia,
             };
