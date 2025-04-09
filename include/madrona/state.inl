@@ -82,7 +82,8 @@ template <typename ArchetypeT, typename... MetadataComponentTs>
 ArchetypeID StateManager::registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadata,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities_per_world)
+        CountT max_num_entities_per_world,
+        const char *dbg_name)
 {
 #ifdef MADRONA_MW_MODE
     std::lock_guard lock(register_lock_);

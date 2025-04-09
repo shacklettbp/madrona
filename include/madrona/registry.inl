@@ -9,10 +9,10 @@ void ECSRegistry::registerComponent(uint32_t num_bytes)
 }
 
 template <typename ArchetypeT>
-void ECSRegistry::registerArchetype()
+void ECSRegistry::registerArchetype(const char *dbg_name)
 {
     state_mgr_->registerArchetype<ArchetypeT>(
-        ComponentMetadataSelector {}, ArchetypeFlags::None, 0);
+        ComponentMetadataSelector {}, ArchetypeFlags::None, 0, dbg_name);
 }
 
 template <typename ArchetypeT, typename... MetadataComponentTs>
@@ -68,10 +68,10 @@ void ECSRegistry::exportSingleton(EnumT slot)
 }
 
 template <typename ElementT>
-void ECSRegistry::registerMemoryRangeElement()
+void ECSRegistry::registerMemoryRangeElement(const char *dbg_name)
 {
 #ifdef MADRONA_GPU_MODE
-    state_mgr_->registerMemoryRangeElement<ElementT>();
+    state_mgr_->registerMemoryRangeElement<ElementT>(dbg_name);
 #else
     // Does nothing on the CPU backend.
 #endif

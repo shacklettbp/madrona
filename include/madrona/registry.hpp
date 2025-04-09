@@ -27,7 +27,7 @@ public:
     // Use as follows to register MyArchetype:
     // registry.registerComponent<MyArchetype>();
     template <typename ArchetypeT>
-    void registerArchetype();
+    void registerArchetype(const char *dbg_name = nullptr);
 
     // Use as follows to register an archetype but for which we want to specify
     // special properties for certain components:
@@ -70,7 +70,7 @@ public:
     void exportSingleton(EnumT slot);
 
     template <typename ElementT>
-    void registerMemoryRangeElement();
+    void registerMemoryRangeElement(const char *dbg_name = nullptr);
 
 private:
     StateManager *state_mgr_;

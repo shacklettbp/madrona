@@ -14,7 +14,7 @@ namespace madrona {
 struct MemoryRange {
     enum Status : uint32_t {
         Allocated = 0,
-        Freed = 1
+        Freed = 255
     };
 
     static constexpr inline MemoryRange none()

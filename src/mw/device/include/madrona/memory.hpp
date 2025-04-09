@@ -62,6 +62,7 @@ struct HostChannel {
     struct Map {
         void *addr;
         uint64_t numBytes;
+        uint64_t mapperID;
     };
 
     struct Alloc {
@@ -112,7 +113,7 @@ public:
     
     void * reserveMemory(uint64_t max_bytes, uint64_t init_num_bytes);
     void * allocMemory(uint64_t num_bytes);
-    void mapMemory(void *addr, uint64_t num_bytes);
+    void mapMemory(void *addr, uint64_t num_bytes, uint64_t mapper_id = 0);
     void reserveFree(void *addr, uint64_t num_bytes, uint64_t num_reserve_bytes);
     void allocFree(void *addr);
 

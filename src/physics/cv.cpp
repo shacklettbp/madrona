@@ -97,6 +97,11 @@ void refreshPointers(Context &ctx,
 {
     m.qVectorsPtr = ctx.memoryRangePointer<MRElement128b>(m.qVectors);
     m.tmpPtr = ctx.memoryRangePointer<SolverScratch256b>(m.tmp);
+
+#if 0
+    printf("tmp_ptr = %p; vectors_ptr = %p\n",
+            m.tmpPtr, m.qVectorsPtr);
+#endif
 }
 }
 
@@ -226,8 +231,8 @@ void registerTypes(ECSRegistry &registry)
     registry.registerArchetype<InitBodyGroupArchetype>();
     registry.registerArchetype<DestroyBodyGroupArchetype>();
 
-    registry.registerMemoryRangeElement<MRElement128b>();
-    registry.registerMemoryRangeElement<SolverScratch256b>();
+    registry.registerMemoryRangeElement<MRElement128b>("MRElement128b");
+    registry.registerMemoryRangeElement<SolverScratch256b>("SolverScratch256b");
 }
 
 void setEnablePhysics(Context &ctx, bool value)

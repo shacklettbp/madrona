@@ -58,7 +58,7 @@ static MADRONA_NO_INLINE void growTable(
 
         uint64_t mapped_bytes_diff = new_mapped_bytes - cur_mapped_bytes;
         void *grow_base = (char *)column_base + cur_mapped_bytes;
-        alloc->mapMemory(grow_base, mapped_bytes_diff);
+        alloc->mapMemory(grow_base, mapped_bytes_diff, tbl.mapperID);
 
         int32_t new_max_rows = new_mapped_bytes / column_bytes_per_row;
         min_mapped_rows = min(new_max_rows, min_mapped_rows);
@@ -80,7 +80,9 @@ StateManager::StateManager(uint32_t, uint32_t num_checkpoints,
                            void **checkpoint_ptrs, uint32_t *checkpoint_sizes)
     : num_checkpoints_(num_checkpoints),
       checkpoint_ptr_readback_(checkpoint_ptrs),
-      checkpoint_size_readback_(checkpoint_sizes)
+      checkpoint_size_readback_(checkpoint_sizes),
+      curr_mapper_id_(1),
+      curr_allocated_(0)
 {
     using namespace mwGPU;
 
@@ -226,6 +228,9 @@ void StateManager::registerMemoryRangeElement(
     memory_range_elements_[id].emplace(
         0, type_info
     );
+
+    memory_range_elements_[id]->tbl.mapperID = ~curr_mapper_id_;
+    curr_mapper_id_++;
 }
 
 StateManager::MemoryRangeStore::MemoryRangeStore(
@@ -462,6 +467,8 @@ void StateManager::registerArchetype(uint32_t id,
                             type_infos.data(),
                             lookup_input.data(),
                             flattened_flags.data());
+
+    archetypes_[id]->tbl.mapperID = curr_mapper_id_++;
 }
 
 
@@ -599,9 +606,9 @@ static inline int32_t getMemoryRangeElementSlotIdx(
             (uint64_t)range_store.numMappedSlots * sizeof(int32_t);
 
     auto *alloc = mwGPU::getHostAllocator();
-    alloc->mapMemory(element_grow_base, range_store.numSlotGrowBytes);
-    alloc->mapMemory(available_grow_base, range_store.numIdxGrowBytes);
-    alloc->mapMemory(deleted_grow_base, range_store.numIdxGrowBytes);
+    alloc->mapMemory(element_grow_base, range_store.numSlotGrowBytes, 2);
+    alloc->mapMemory(available_grow_base, range_store.numIdxGrowBytes, 2);
+    alloc->mapMemory(deleted_grow_base, range_store.numIdxGrowBytes, 2);
 
     for (int32_t i = 0; i < range_store.numGrowSlots; i++) {
         int32_t idx = i + range_store.numMappedSlots;
@@ -709,6 +716,9 @@ MemoryRange StateManager::allocMemoryRange(
         range_map_col[row + i] = range_map;
         status_col[row + i] = MemoryRange::Status::Allocated;
     }
+
+    int32_t num_allocd = curr_allocated_.fetch_add_relaxed((int32_t)num_elements);
+    // printf("Allocated -> now at %d allocations\n", num_allocd);
 
     return range_map_col[row];
 }
@@ -837,6 +847,9 @@ void StateManager::freeMemoryRange(MemoryRange memory_range)
 
         mr_element_store_.deletedSlots[deleted_offset + i] = id;
     }
+
+    int32_t num_allocd = curr_allocated_.fetch_add_relaxed(-(int32_t)memory_range.numElements);
+    // printf("Freed -> now at %d allocations\n", num_allocd);
 }
 
 void StateManager::clearTemporaries(uint32_t archetype_id)

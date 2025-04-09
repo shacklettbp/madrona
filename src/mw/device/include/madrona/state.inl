@@ -25,7 +25,8 @@ template <typename ArchetypeT, typename... MetadataComponentTs>
 ArchetypeID StateManager::registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities_per_world)
+        CountT max_num_entities_per_world,
+        const char *dbg_name)
 {
     uint32_t archetype_id = TypeTracker::registerType<ArchetypeT>(
         &StateManager::num_archetypes_);
@@ -88,13 +89,19 @@ ArchetypeID StateManager::registerArchetype(
                       component_flags.data(),
                       archetype_components.size());
 
+    if (dbg_name) {
+        printf("%s has mapper ID %llu\n",
+                dbg_name,
+                archetypes_[archetype_id]->tbl.mapperID);
+    }
+
     return ArchetypeID {
         archetype_id,
     };
 }
 
 template <typename ElementT>
-MemoryRangeElementID StateManager::registerMemoryRangeElement()
+MemoryRangeElementID StateManager::registerMemoryRangeElement(const char *dbg_name)
 {
     uint32_t id = TypeTracker::registerType<ElementT>(
         &StateManager::num_memory_range_elements_);
@@ -102,6 +109,12 @@ MemoryRangeElementID StateManager::registerMemoryRangeElement()
     uint32_t component_size = sizeof(ElementT);
 
     registerMemoryRangeElement(id, alignof(ElementT), component_size);
+
+    if (dbg_name) {
+        printf("%s has mapper ID %llu\n",
+                dbg_name,
+                memory_range_elements_[id]->tbl.mapperID);
+    }
 
     return MemoryRangeElementID {
         id,

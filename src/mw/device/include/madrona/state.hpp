@@ -89,10 +89,11 @@ public:
     ArchetypeID registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities_per_world);
+        CountT max_num_entities_per_world,
+        const char *dbg_name = nullptr);
 
     template <typename ElementT>
-    MemoryRangeElementID registerMemoryRangeElement();
+    MemoryRangeElementID registerMemoryRangeElement(const char *dbg_name = nullptr);
 
     template <typename SingletonT>
     void registerSingleton(uint32_t num_bytes = 0);
@@ -380,6 +381,10 @@ private:
     std::array<BundleInfo, max_bundles_> bundle_infos_ {};
     std::array<uint32_t, max_query_slots_> query_data_ {};
     EntityStore entity_store_;
+
+    uint64_t curr_mapper_id_;
+
+    AtomicI32 curr_allocated_;
 
     MemoryRangeElementStore mr_element_store_;
 };
