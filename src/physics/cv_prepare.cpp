@@ -657,6 +657,10 @@ void compositeRigidBody(
 
     // Build M
     MADRONA_GPU_SINGLE_THREAD {
+        // Set diagonal elements to armature
+        for (int32_t i = 0; i < total_dofs; ++i) {
+            qM(i, i) = body_inertials[dof_to_body[i]].armature;
+        }
         for (int32_t i = 0; i < total_dofs; ++i) {
             // buf = I_i * S_i
             float buf[6];
