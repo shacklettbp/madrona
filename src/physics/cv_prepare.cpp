@@ -619,6 +619,7 @@ void compositeRigidBody(
     // ----------------- Composite rigid body -----------------
     // Mass Matrix of this entire body group, column-major
     BodyOffsets *offsets = mem.offsets(prop);
+    BodyInertial *body_inertials = mem.inertials(prop);
     BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
 
     // ----------------- Combine Spatial Inertias -----------------
