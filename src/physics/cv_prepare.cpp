@@ -1121,6 +1121,8 @@ inline void processContacts(Context &ctx,
     tmp_state.C[1] = t;
     tmp_state.C[2] = s;
     tmp_state.mu = mu;
+
+    assert(tmp_state.mu != 0.f);
 }
 
 // This only runs on the CPU

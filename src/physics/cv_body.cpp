@@ -218,6 +218,7 @@ static void initBodyGroupMemory(
 
             // Fill in mus
             mus[i] = bd.muS;
+            assert(mus[i] != 0.f);
 
             assert((uint8_t *)(mus + i) < max_ptr);
 
