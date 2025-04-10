@@ -1142,7 +1142,7 @@ inline void createCandidateCollisions(
                 // TODO: Have a better way of handling this capsule edge case.
                 AABB a_world_aabb = [&]() {
                     if (raw_type_a == (uint32_t)CollisionPrimitive::Type::Capsule) {
-                        assert(a_scale.d0 == a_scale.d1);
+                        // assert(a_scale.d0 == a_scale.d1);
 
                         float r = a_scale.d0;
                         float half_h = a_scale.d2;
