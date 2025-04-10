@@ -70,6 +70,7 @@ void ECSRegistry::exportSingleton(EnumT slot)
 template <typename ElementT>
 void ECSRegistry::registerMemoryRangeElement(const char *dbg_name)
 {
+    (void)dbg_name;
 #ifdef MADRONA_GPU_MODE
     state_mgr_->registerMemoryRangeElement<ElementT>(dbg_name);
 #else

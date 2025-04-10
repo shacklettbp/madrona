@@ -1765,8 +1765,6 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
                        ptr, num_bytes);
             }
 
-            printf("Map memory from mapper ID %llu\n", mapper_id);
-
             mapGPUMemory(dev, (CUdeviceptr)ptr, num_bytes);
 
             if (verbose_host_alloc) {

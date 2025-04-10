@@ -231,8 +231,8 @@ void registerTypes(ECSRegistry &registry)
     registry.registerArchetype<InitBodyGroupArchetype>();
     registry.registerArchetype<DestroyBodyGroupArchetype>();
 
-    registry.registerMemoryRangeElement<MRElement128b>("MRElement128b");
-    registry.registerMemoryRangeElement<SolverScratch256b>("SolverScratch256b");
+    registry.registerMemoryRangeElement<MRElement128b>();
+    registry.registerMemoryRangeElement<SolverScratch256b>();
 }
 
 void setEnablePhysics(Context &ctx, bool value)

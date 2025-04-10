@@ -85,6 +85,7 @@ ArchetypeID StateManager::registerArchetype(
         CountT max_num_entities_per_world,
         const char *dbg_name)
 {
+    (void)dbg_name;
 #ifdef MADRONA_MW_MODE
     std::lock_guard lock(register_lock_);
 
