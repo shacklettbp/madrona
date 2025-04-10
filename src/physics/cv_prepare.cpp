@@ -1121,6 +1121,8 @@ inline void processContacts(Context &ctx,
     float mu_alt = mem_alt.mus(prop_alt)[alt_body_idx];
     float mu = fminf(mu_ref, mu_alt);
     tmp_state.mu = mu;
+
+    assert(tmp_state.mu != 0.f);
 }
 
 // This only runs on the CPU

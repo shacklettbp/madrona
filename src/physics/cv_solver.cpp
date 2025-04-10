@@ -230,6 +230,10 @@ inline ConeSpace GaussMinimizationNode::mapToConeSpace(
     float t2 = jar_t2 * mu2;
 
     float t = sqrtf(t1 * t1 + t2 * t2);
+    
+    if (0.f == (mu * mu * (1.f + mu * mu))) {
+        // printf("nan0 happening\n");
+    }
     float mid_weight = 1.f / (mu * mu * (1.f + mu * mu));
 
     return {
@@ -879,6 +883,10 @@ float GaussMinimizationNode::exactLineSearch(
                     float d2 = d_c[iter * 3 + 2];
 
                     // float mu = sd->mu[iter];
+                    if (0.f == (mu * mu * (1.f + mu * mu))) {
+                        // printf("nan1 happening; mu = %f\n", mu);
+                    }
+
                     float mw = 1.f / (mu * mu * (1.f + mu * mu));
 
                     float jp_n = Jp[iter * 3];
@@ -933,6 +941,9 @@ float GaussMinimizationNode::exactLineSearch(
                         return diff;
                     } else {
                         float dn_da = jp_n * mu;
+                        if (t_search == 0.f) {
+                            printf("nan2 happening\n");
+                        }
                         float dt_da = (square(mu1) * jp_t1 * jacc_t1 +
                                        square(mu2) * jp_t2 * jacc_t2) / t_search;
                         float d2tp_da2 = ((square(mu1) * square(mu2) *
@@ -1005,6 +1016,10 @@ float GaussMinimizationNode::exactLineSearch(
     Evals evals_alpha = fdh_phi(alpha);
 
     // Newton step
+    if (evals_alpha.hess == 0.f) {
+        printf("nan3 happening!\n");
+    }
+
     float alpha1 = alpha - evals_alpha.grad / evals_alpha.hess;
     if (evals_alpha.hess == 0.f) {
         printf("nan going to happen exactLineSeaarch hess\n");
@@ -1047,6 +1062,9 @@ float GaussMinimizationNode::exactLineSearch(
             return alpha1;
         }
 
+        if (evals_alpha1.hess == 0.f) {
+            printf("nan4 happening!\n");
+        }
         alpha1 -= evals_alpha1.grad / evals_alpha1.hess;
         if (evals_alpha1.hess == 0.f) {
             printf("nan going to happen exactLineSeaarch hess1\n");
@@ -1060,6 +1078,9 @@ float GaussMinimizationNode::exactLineSearch(
     }
 
     float alpha_low = alpha1;
+    if (evals_alpha1.hess == 0.f) {
+        printf("nan5 happening!\n");
+    }
     float alpha_high = alpha1 - evals_alpha1.grad / evals_alpha1.hess;
     if (evals_alpha1.hess == 0.f) {
         printf("nan going to happen exactLineSeaarch hess2\n");
@@ -1470,6 +1491,12 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
         curr_sd->mu = full_mu;
         curr_sd->penetrations = full_penetrations;
+
+        if (threadIdx.x == 0) {
+            for (uint32_t i = 0; i < curr_sd->numContactPts * 3; ++i) {
+                assert(curr_sd->mu[i] != 0.f);
+            }
+        }
     }
 
     { // Prepare prefix sum of body group DOFs in current world
@@ -1720,6 +1747,15 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                 });
         }
     }
+
+#if 0
+    for (uint32_t i = 0; i < curr_sd->numContactPts * 3; ++i) {
+        assert(curr_sd->mu[i] != 0.f);
+    }
+#endif
+
+
+
 #endif
 }
 
@@ -1885,7 +1921,14 @@ void GaussMinimizationNode::computeAccRef(
         float r = residual_fn(iter);
 
         float imp_x = fabs(r) / width;
+        if (0.f == powf(mid, power-1.f)) {
+            printf("nan6 happening!\n");
+        }
         float imp_a = (1.f / powf(mid, power-1.f)) * powf(imp_x, power);
+
+        if (0.f == powf(1.f - mid, power - 1)) {
+            printf("nan6 happening!\n");
+        }
         float imp_b = 1.f - (1.f / powf(1.f - mid, power - 1)) *
                       powf(1.f - imp_x, power);
         float imp_y = (imp_x < mid) ? imp_a : imp_b;
@@ -1904,6 +1947,9 @@ void GaussMinimizationNode::computeAccRef(
         acc_ref[iter] *= -b;
         acc_ref[iter] -= k * imp * r;
 
+        if (imp == 0.f) {
+            printf("nan7 happening!\n");
+        }
         r_vec[iter] = ((1.f - imp) / imp) * diag_approx[iter];
     });
 }
@@ -1990,10 +2036,16 @@ void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
 
                     r_vec[full_iter + 1] = r_vec[full_iter] / kImpRatio;
 
+                    if (r_vec[full_iter] == 0.f) {
+                        printf("nan8 happening\n");
+                    }
                     mus[full_iter] = mus[full_iter + 1] * sqrtf(
                             r_vec[full_iter + 1] / r_vec[full_iter]);
 
                     for (uint32_t i = 2; i < kConeDim; ++i) {
+                        if ((mus[full_iter + i] * mus[full_iter + i]) == 0.f) {
+                            printf("nan9 happening\n");
+                        }
                         r_vec[full_iter + i] =
                             r_vec[full_iter + 1] * mus[full_iter + 1] * mus[full_iter + 1] / 
                             (mus[full_iter + i] * mus[full_iter + i]);
@@ -2005,6 +2057,9 @@ void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
             warpLoop(
                 curr_sd->numRowsJc,
                 [&](uint32_t iter) {
+                    if (r_vec[iter] == 0.f) {
+                        printf("nan10 happening!\n");
+                    }
                     r_vec[iter] = 1.f / r_vec[iter];
                 });
 
@@ -2099,6 +2154,7 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
                     if (r_vec[iter] == 0.f) {
                         r_vec[iter] = 0.f;
                     } else {
+                        //if (r_vec[ite])
                         r_vec[iter] = 1.f / r_vec[iter];
                     }
                 });
@@ -2220,47 +2276,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
         // We are using freeAcc as initial guess
         warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
-#if 0
-        { // Let's use the current acceleration as the initial acceleration
-            BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
-                BodyGroupArchetype, BodyGroupProperties>(world_id);
-            BodyGroupMemory *all_memories = state_mgr->getWorldComponents<
-                BodyGroupArchetype, BodyGroupMemory>(world_id);
-            CountT num_grps = state_mgr->numRows<BodyGroupArchetype>(world_id);
-
-            for (uint32_t grp = 0; grp < num_grps; ++grp) {
-                BodyGroupProperties p = all_properties[grp];
-                BodyGroupMemory m = all_memories[grp];
-
-                BodyOffsets *grp_offsets = m.offsets(p);
-                float *dqv = m.dqv(p);
-
-                warpLoop(
-                    p.numBodies,
-                    [&](uint32_t iter) {
-                        BodyOffsets o = grp_offsets[iter];
-
-                        for (uint32_t i = 0; i < o.numDofs; ++i) {
-                            // dqv[o.velOffset + i] = x[p.tmp.qvOffset + o.velOffset + i];
-                            x[p.tmp.qvOffset + o.velOffset + i] = dqv[o.velOffset + i];
-                        }
-                    });
-            }
-        }
-#endif
-        __syncwarp();
-
-
-        // Print all matrices
-#if 0
-        printMatrix<true>(curr_sd->J_c, curr_sd->numRowsJc, curr_sd->numColsJc, "J_c");
-        printMatrix<true>(curr_sd->J_e, curr_sd->numRowsJe, curr_sd->numColsJe, "J_e");
-        printMatrix(curr_sd->massSparse.blks[0].values,
-                curr_sd->massSparse.blks[0].dim,
-                curr_sd->massSparse.blks[0].dim,
-                "M");
-#endif
-
         __syncwarp();
 
         dobjWarp<true>(m_grad, x, curr_sd, scratch1,
