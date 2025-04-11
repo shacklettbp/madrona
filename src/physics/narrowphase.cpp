@@ -96,14 +96,20 @@ using namespace geo;
 enum class NarrowphaseTest : uint32_t {
     SphereSphere = 0b1,
     HullHull = 0b10,
-    SphereHull = 0b11,
     PlanePlane = 0b100,
+    CapsuleCapsule = 0b1000,
+    BoxBox = 0b10000,
+
+    SphereHull = 0b11,
     SpherePlane = 0b101,
     SphereCapsule = 0b1001,
+    SphereBox = 0b10001,
     HullPlane = 0b110,
-    CapsuleCapsule = 0b1000,
     HullCapsule = 0b1010,
+    HullBox = 0b10010,
     PlaneCapsule = 0b1100,
+    PlaneBox = 0b10100,
+    CapsuleBox = 0b11000,
 };
 
 struct FaceQuery {
@@ -373,6 +379,36 @@ std::pair<Vector3, Vector3> findShortestConnection(
     return {r1, r2};
 }
 
+std::pair<bool, SphereContact> sphereSphereContact(
+        const Vector3 a_pos,
+        const Vector3 b_pos,
+        const float a_radius,
+        const float b_radius)
+{
+    Vector3 to_b = b_pos - a_pos;
+    float dist = to_b.length();
+
+    if (dist > a_radius + b_radius) {
+        return { false, {} };
+    }
+
+    Vector3 normal;
+    if (dist > 0.f) {
+        normal = to_b / dist;
+    } else {
+        normal = up;
+    }
+
+    float penetration = a_radius + b_radius - dist;
+
+    SphereContact contact {
+        .normal = -normal,
+        .pt = a_pos + (a_radius - 0.5f * penetration) * normal,
+        .depth = penetration,
+    };
+    return { true, contact };
+}
+
 // Contact between sphere (a) and plane (b)
 std::pair<bool, SphereContact> spherePlaneContact(
         const Vector3 a_pos,
@@ -391,7 +427,7 @@ std::pair<bool, SphereContact> spherePlaneContact(
         return { false, {} };
     }
 
-    Vector3 contact_point = a_pos - t * plane_normal;
+    Vector3 contact_point = a_pos - (t / 2.f) * plane_normal;
 
     SphereContact sphere_contact {
         .normal = plane_normal,
@@ -1547,45 +1583,17 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             a_radius = a_scale.d0 * a_prim->sphere.radius;
             b_radius = b_scale.d0 * b_prim->sphere.radius;
         }
-
-        Vector3 to_b = b_pos - a_pos;
-        float dist = to_b.length();
-
-        if (dist > a_radius + b_radius) {
-            NarrowphaseResult result;
+        NarrowphaseResult result;
+        auto [is_contact, contact] = sphereSphereContact(
+            a_pos, b_pos, a_radius, b_radius);
+        if (is_contact) {
+            result.type = ContactType::Sphere;
+            result.sphere = contact;
+            return result;
+        } else {
             result.type = ContactType::None;
             return result;
         }
-
-        Vector3 normal;
-        float penetration;
-
-        if (dist > 0.f) {
-            normal = to_b / dist;
-        } else {
-            normal = math::up;
-        }
-
-        penetration = a_radius + b_radius - dist;
-
-        SphereContact contact {
-            .normal = normal,
-            .pt = a_pos + a_radius * normal,
-            .depth = penetration,
-        };
-
-        NarrowphaseResult result;
-        result.type = ContactType::Sphere;
-        result.sphere = contact;
-        result.aVertices = nullptr;
-        result.bVertices = nullptr;
-        result.aVertices = nullptr;
-        result.bVertices = nullptr;
-        result.aHalfEdges = nullptr;
-        result.bHalfEdges = nullptr;
-        result.aFaceHedgeRoots = nullptr;
-        result.bFaceHedgeRoots = nullptr;
-        return result;
     } break;
     case NarrowphaseTest::HullHull: {
         // Get half edge mesh for hull A and hull B
@@ -1827,69 +1835,35 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
     } break;
 
     case NarrowphaseTest::SphereCapsule: {
+        assert(a_scale.d0 == a_scale.d1 && a_scale.d0 == a_scale.d2);
+        float sphere_radius = a_scale.d0 * a_prim->sphere.radius;
+
+        // Scale capsule properly
         constexpr Vector3 base_normal = { 0, 0, 1 };
+        assert(b_scale.d0 == b_scale.d1);
+        float cap_radius = b_scale.d0;
+        float cap_len = b_scale.d2; // half height
+        Vector3 b_cap_axis = b_rot.rotateVec(base_normal);
 
-        CollisionPrimitive::Capsule a_scaled_capsule;
-        Vector3 a_cap_axis, a_cap_p1, a_cap_p2;
-        { // Scale capsule properly
-            a_scaled_capsule.cylinderHeight = 0.f;
-            a_scaled_capsule.radius = a_scale.d0 * a_prim->sphere.radius;
+        // Find projection of sphere center onto capsule axis
+        Vector3 to_sphere = a_pos - b_pos;
+        float t = clamp(b_cap_axis.dot(to_sphere), -cap_len, cap_len);
+        Vector3 closest_pt = b_pos + t * b_cap_axis;
 
-            a_cap_axis = a_rot.rotateVec(base_normal);
-            a_cap_p1 = a_pos -
-                a_cap_axis * a_scaled_capsule.cylinderHeight * 0.5f;
-            a_cap_p2 = a_pos +
-                a_cap_axis * a_scaled_capsule.cylinderHeight * 0.5f;
-        }
-
-        CollisionPrimitive::Capsule b_scaled_capsule = b_prim->capsule;
-        Vector3 b_cap_axis, b_cap_p1, b_cap_p2;
-        { // Scale capsule properly
-            b_scaled_capsule.cylinderHeight = (b_scale.d2 * 2.f);
-            b_scaled_capsule.radius = b_scale.d0;
-            assert(b_scale.d0 == b_scale.d1);
-
-            b_cap_axis = b_rot.rotateVec(base_normal);
-            b_cap_p1 = b_pos -
-                b_cap_axis * b_scaled_capsule.cylinderHeight * 0.5f;
-            b_cap_p2 = b_pos +
-                b_cap_axis * b_scaled_capsule.cylinderHeight * 0.5f;
-        }
-
-        // Calculate shorting distance between the two segments.
-        auto [a_point, b_point] = findShortestConnection(
-                a_cap_p1, a_cap_p2,
-                b_cap_p1, b_cap_p2);
-
-        Vector3 diff = b_point - a_point;
-        float d2 = diff.length2();
-        float min_separation = a_scaled_capsule.radius + b_scaled_capsule.radius;
-
-        if (d2 > min_separation * min_separation) {
-            // No collision
-            NarrowphaseResult result;
-            result.type = ContactType::None;
-            return result;
-        } else {
-            // We have a collision
-            float d = sqrt(d2);
-
-            Vector3 contact_pt = a_point + a_scaled_capsule.radius *
-                diff / d;
-            float penetration = d - 
-                (a_scaled_capsule.radius + b_scaled_capsule.radius);
-
-            SphereContact contact {
-                .normal = -diff / d,
-                .pt = contact_pt,
-                .depth = -penetration
-            };
-
-            NarrowphaseResult result = {};
+        // Check for collision
+        // NarrowphaseResult result;
+        auto [is_contact, contact] = sphereSphereContact(
+            a_pos, closest_pt, sphere_radius, cap_radius);
+        NarrowphaseResult result;
+        if (is_contact) {
             result.type = ContactType::Sphere;
             result.sphere = contact;
             return result;
+        } else {
+            result.type = ContactType::None;
+            return result;
         }
+
     } break;
 
     case NarrowphaseTest::CapsuleCapsule: {
@@ -1941,6 +1915,34 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             // We have a collision
             float d = sqrt(d2);
 
+            // The two lines intersect at a point
+            if (d < 1e-15f) {
+                Vector3 contact_pt = a_point;
+                float penetration = fmaxf(a_scaled_capsule.radius,
+                                          b_scaled_capsule.radius);
+                // Try to use the cross product as the normal
+                Vector3 normal = cross(a_cap_axis, b_cap_axis);
+                if (normal.length() < 1e-15f) {
+                    // Lines are parallel. take cross with either x or y axis
+                    if (fabsf(a_cap_axis.x) > fabsf(a_cap_axis.y)) {
+                        normal = cross(a_cap_axis, { 0, 1, 0 });
+                    } else {
+                        normal = cross(a_cap_axis, { 1, 0, 0 });
+                    }
+                }
+                normal /= normal.length();
+                SphereContact contact {
+                    .normal = normal,
+                    .pt = contact_pt,
+                    .depth = -penetration
+                };
+
+                NarrowphaseResult result = {};
+                result.type = ContactType::Sphere;
+                result.sphere = contact;
+                return result;
+            }
+
             Vector3 contact_pt = a_point + a_scaled_capsule.radius *
                 diff / d;
             float penetration = d - 
@@ -1958,6 +1960,62 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             return result;
         }
     } break;
+    case NarrowphaseTest::PlaneBox: {
+        assert(b_prim->type == CollisionPrimitive::Type::Box);
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+        Vector3 plane_normal = a_rot.rotateVec(base_normal);
+        Vector3 halfExtents = b_scale * b_prim->box.dim * 0.5f;
+
+        ConvexContact cv_contact = {};
+        int32_t num_contacts = 0;
+        // Check contacts with corners
+        for (int32_t i = 0; i < 8; i++) {
+            Vector3 offset = halfExtents;
+            offset.x *= (i & 1) ? 1.f : -1.f;
+            offset.y *= (i & 2) ? 1.f : -1.f;
+            offset.z *= (i & 4) ? 1.f : -1.f;
+            Vector3 corner = b_pos + b_rot.rotateVec(offset);
+            float d = plane_normal.dot(corner - a_pos);
+            if (d > 0.f) {
+                continue;
+            }
+            cv_contact.contactPoints[num_contacts] = corner - (0.5f * d) * plane_normal;
+            cv_contact.normals[num_contacts] = -plane_normal;
+            cv_contact.penetrationDepths[num_contacts] = -d;
+            num_contacts++;
+            // Max number of contacts is 4
+            if (num_contacts == 4) {
+                break;
+            }
+        }
+
+        if (num_contacts == 0) {
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        }
+
+        cv_contact.numContactPoints = num_contacts;
+        NarrowphaseResult result = {};
+        result.type = ContactType::Convex;
+        result.convex = cv_contact;
+        return result;
+    }
+    case NarrowphaseTest::BoxBox: {
+        NarrowphaseResult result;
+        result.type = ContactType::None;
+        return result;
+    }
+    case NarrowphaseTest::CapsuleBox: {
+        NarrowphaseResult result;
+        result.type = ContactType::None;
+        return result;
+    }
+    case NarrowphaseTest::SphereBox: {
+        NarrowphaseResult result;
+        result.type = ContactType::None;
+        return result;
+    }
     case NarrowphaseTest::PlaneCapsule: {
         assert(b_prim->type == CollisionPrimitive::Type::Capsule);
 
@@ -1969,63 +2027,54 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         assert(b_scale.d0 == b_scale.d1);
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 plane_normal = a_rot.rotateVec(base_normal);
-
         Vector3 cap_axis = b_rot.rotateVec(base_normal);
         Vector3 cap_p1 = b_pos -
             cap_axis * scaled_capsule.cylinderHeight * 0.5f;
         Vector3 cap_p2 = b_pos +
             cap_axis * scaled_capsule.cylinderHeight * 0.5f;
 
-        { // Do plane / capsule collision test
-            float dp1 = (cap_p1 - a_pos).dot(plane_normal);
-            float dp2 = (cap_p2 - a_pos).dot(plane_normal);
+        // Do plane / capsule collision test
+        //  check the collision between the two spheres
+        auto [is_contact_a, contact_a] = spherePlaneContact(
+            cap_p1, a_pos, a_rot, scaled_capsule.radius);
+        auto [is_contact_b, contact_b] = spherePlaneContact(
+            cap_p2, a_pos, a_rot, scaled_capsule.radius);
+        // Negate since objects a and b are swapped
+        contact_a.normal *= -1.f;
+        contact_b.normal *= -1.f;
 
-            // These points must be on the same side of the plane
-            // assert(dp1 * dp2 > 0.f);
+        if (!is_contact_a && !is_contact_b) {
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        }
+        else if (is_contact_a && !is_contact_b) {
+            NarrowphaseResult result = {};
+            result.type = ContactType::Sphere;
+            result.sphere = contact_a;
+            return result;
+        }
+        else if (!is_contact_a && is_contact_b) {
+            NarrowphaseResult result = {};
+            result.type = ContactType::Sphere;
+            result.sphere = contact_b;
+            return result;
+        }
+        // Capsule is horizontal with plane
+        else {
+            ConvexContact cv_contact = {};
+            cv_contact.numContactPoints = 2;
+            cv_contact.contactPoints[0] = contact_a.pt;
+            cv_contact.contactPoints[1] = contact_b.pt;
+            cv_contact.penetrationDepths[0] = contact_a.depth;
+            cv_contact.penetrationDepths[1] = contact_b.depth;
+            cv_contact.normals[0] = contact_a.normal;
+            cv_contact.normals[1] = contact_b.normal;
 
-            // Check the collision between the two spheres
-            auto [is_contact_a, contact_a] = spherePlaneContact(
-                cap_p1, a_pos, a_rot, scaled_capsule.radius);
-            auto [is_contact_b, contact_b] = spherePlaneContact(
-                cap_p2, a_pos, a_rot, scaled_capsule.radius);
-            // Negate since objs a and b are swapped
-            contact_a.normal *= -1.f;
-            contact_b.normal *= -1.f;
-
-            if (!is_contact_a && !is_contact_b) {
-                NarrowphaseResult result;
-                result.type = ContactType::None;
-                return result;
-            }
-            else if (is_contact_a && !is_contact_b) {
-                NarrowphaseResult result = {};
-                result.type = ContactType::Sphere;
-                result.sphere = contact_a;
-                return result;
-            }
-            else if (!is_contact_a && is_contact_b) {
-                NarrowphaseResult result = {};
-                result.type = ContactType::Sphere;
-                result.sphere = contact_b;
-                return result;
-            }
-            // Capsule is horizontal with plane
-            else {
-                ConvexContact cv_contact = {};
-                cv_contact.numContactPoints = 2;
-                cv_contact.contactPoints[0] = contact_a.pt;
-                cv_contact.contactPoints[1] = contact_b.pt;
-                cv_contact.penetrationDepths[0] = contact_a.depth;
-                cv_contact.penetrationDepths[1] = contact_b.depth;
-                cv_contact.normals[0] = contact_a.normal;
-                cv_contact.normals[1] = contact_b.normal;
-
-                NarrowphaseResult result = {};
-                result.type = ContactType::Convex;
-                result.convex = cv_contact;
-                return result;
-            }
+            NarrowphaseResult result = {};
+            result.type = ContactType::Convex;
+            result.convex = cv_contact;
+            return result;
         }
     } break;
     case NarrowphaseTest::SpherePlane: {
@@ -2423,6 +2472,7 @@ static inline void runNarrowphase(
         } ();
 
         if (!a_world_aabb.intersects(b_world_aabb)) {
+            // printf("Rejected narrowphase collision\n");
 #ifdef MADRONA_GPU_MODE
             lane_active = false;
 #else
@@ -2566,6 +2616,8 @@ inline void runNarrowphaseSystem(
 #endif
     )
 {
+    CV_PROF_START(t0, narrowphase);
+
     PROF_START(all_ctr, narrowphaseAllClocks);
 #ifdef MADRONA_GPU_MODE
     const int32_t mwgpu_warp_id = threadIdx.x / 32;

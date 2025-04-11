@@ -25,8 +25,8 @@ public:
     inline Entity makeEntity(uint32_t archetype_id);
 
     template <typename ArchetypeT>
-    Loc makeTemporary();
-    inline Loc makeTemporary(uint32_t archetype_id);
+    Loc makeTemporary(CountT count = 1);
+    inline Loc makeTemporary(uint32_t archetype_id, CountT count = 1);
 
     inline void destroyEntity(Entity e);
 

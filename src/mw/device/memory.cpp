@@ -69,13 +69,14 @@ void * HostAllocator::allocMemory(uint64_t num_bytes)
     return result;
 }
 
-void HostAllocator::mapMemory(void *addr, uint64_t num_bytes)
+void HostAllocator::mapMemory(void *addr, uint64_t num_bytes, uint64_t mapper_id)
 {
     device_lock_.lock();
 
     channel_->op = HostChannel::Op::Map;
     channel_->map.addr = addr;
     channel_->map.numBytes = num_bytes;
+    channel_->map.mapperID = mapper_id;
 
     submitRequest(channel_);
 

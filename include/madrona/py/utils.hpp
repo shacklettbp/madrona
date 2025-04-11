@@ -180,6 +180,10 @@ public:
     TrainStepOutputInterface stepOutputs() const;
     Optional<TrainCheckpointingInterface> checkpointing() const;
 
+    void cpuCopyStepInputs(void **buffers);
+    void cpuCopyObservations(void **buffers);
+    void cpuCopyStepOutputs(void **buffers);
+
 #ifdef MADRONA_CUDA_SUPPORT
     void ** cudaCopyStepInputs(cudaStream_t strm, void **buffers);
     void cudaCopyObservations(cudaStream_t strm, void **buffers);

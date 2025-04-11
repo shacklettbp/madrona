@@ -46,6 +46,8 @@ struct Table {
     int32_t mappedRows;
     SpinLock growLock;
      
+    uint64_t mapperID;
+
     static inline constexpr uint64_t maxReservedBytesPerTable =
         128_u64 * 1024_u64 * 1024_u64 * 1024_u64;
 };

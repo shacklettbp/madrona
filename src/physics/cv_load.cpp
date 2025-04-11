@@ -57,7 +57,6 @@ Entity loadModel(Context &ctx,
     // Attach the colliders
     for (uint32_t i = 0; i < cfg.numColliders; ++i) {
         CollisionDesc desc = model_data.colliders[cfg.collidersOffset + i];
-
         attachCollision(
                 ctx,
                 grp,

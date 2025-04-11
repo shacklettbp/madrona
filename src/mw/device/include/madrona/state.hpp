@@ -89,10 +89,11 @@ public:
     ArchetypeID registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities_per_world);
+        CountT max_num_entities_per_world,
+        const char *dbg_name = nullptr);
 
     template <typename ElementT>
-    MemoryRangeElementID registerMemoryRangeElement();
+    MemoryRangeElementID registerMemoryRangeElement(const char *dbg_name = nullptr);
 
     template <typename SingletonT>
     void registerSingleton(uint32_t num_bytes = 0);
@@ -130,7 +131,7 @@ public:
 
     void destroyEntityNow(Entity e);
 
-    Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
+    Loc makeTemporary(WorldID world_id, uint32_t archetype_id, CountT count);
 
     template <typename ArchetypeT>
     void clearTemporaries();
@@ -180,6 +181,10 @@ public:
     // 1: RangeMap::Status *
     // 2: RangeMapUnitT *
     inline void * getMemoryRangeColumn(uint32_t elem_id, uint32_t col_idx);
+
+    template <typename ArchetypeT, typename ComponentT>
+    std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
+            uint32_t world_id);
 
     template <typename ArchetypeT>
     int32_t * getArchetypeWorldOffsets();
@@ -376,6 +381,10 @@ private:
     std::array<BundleInfo, max_bundles_> bundle_infos_ {};
     std::array<uint32_t, max_query_slots_> query_data_ {};
     EntityStore entity_store_;
+
+    uint64_t curr_mapper_id_;
+
+    AtomicI32 curr_allocated_;
 
     MemoryRangeElementStore mr_element_store_;
 };

@@ -335,7 +335,9 @@ struct SortNodeBase : NodeBase {
         void rearrangeEntities(int32_t invocation_idx);
         void rearrangeColumn(int32_t invocation_idx);
 
+        template <bool move_data>
         void stageColumnMemoryRange(int32_t invocation_idx);
+
         void rearrangeMemoryRangeElements(int32_t invocation_idx);
         void rearrangeColumnMemoryRange(int32_t invocation_idx);
     };

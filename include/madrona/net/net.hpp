@@ -26,6 +26,8 @@ struct Socket {
     void setRecvBufferSize(uint32_t size);
     void setSendBufferSize(uint32_t size);
 
+    void setReuseAddr();
+
     // Returns 0xFFFF upon failure, and host order port number
     uint16_t bindToPort(Address addr);
 

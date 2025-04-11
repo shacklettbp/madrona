@@ -82,8 +82,10 @@ template <typename ArchetypeT, typename... MetadataComponentTs>
 ArchetypeID StateManager::registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadata,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities_per_world)
+        CountT max_num_entities_per_world,
+        const char *dbg_name)
 {
+    (void)dbg_name;
 #ifdef MADRONA_MW_MODE
     std::lock_guard lock(register_lock_);
 
@@ -363,6 +365,17 @@ ComponentT *StateManager::getWorldComponents(
         MADRONA_MW_COND(world_id,) col_idx);
 
     return col;
+}
+
+template <typename ArchetypeT, typename ComponentT>
+std::pair<ComponentT *, uint32_t> StateManager::getWorldComponentsAndCount(
+        uint32_t world_id)
+{
+    ComponentT *comps = getWorldComponents<
+        ArchetypeT, ComponentT>(world_id);
+    uint32_t num_comps = (uint32_t)numRows<ArchetypeT>(world_id);
+
+    return std::make_pair(comps, num_comps);
 }
 
 template <typename ArchetypeT>

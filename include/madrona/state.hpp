@@ -108,7 +108,8 @@ public:
     ArchetypeID registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadata,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities_per_world);
+        CountT max_num_entities_per_world,
+        const char *dbg_name = nullptr);
 
     template <typename SingletonT>
     void registerSingleton(uint32_t num_bytes);
@@ -128,6 +129,10 @@ public:
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * getWorldComponents(
         MADRONA_MW_COND(uint32_t world_id));
+
+    template <typename ArchetypeT, typename ComponentT>
+    std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
+            uint32_t world_id);
 
     template <typename ArchetypeT>
     Entity * getWorldEntities(

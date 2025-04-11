@@ -1,6 +1,85 @@
 #pragma once
 
+#include <madrona/sync.hpp>
 #include <madrona/physics.hpp>
+
+#ifdef MADRONA_GPU_MODE
+// #define CV_COUNT_GPU_CLOCKS
+#endif
+
+
+
+#ifdef CV_COUNT_GPU_CLOCKS
+extern "C" {
+extern madrona::AtomicU64 cvcom;
+extern madrona::AtomicU64 cvinertias;
+extern madrona::AtomicU64 cvrne;
+extern madrona::AtomicU64 cvcrb;
+extern madrona::AtomicU64 cvinvMass;
+extern madrona::AtomicU64 cvprocessContacts;
+extern madrona::AtomicU64 cvconvert;
+extern madrona::AtomicU64 cvdestroy;
+extern madrona::AtomicU64 cvinit;
+extern madrona::AtomicU64 cvintg;
+extern madrona::AtomicU64 cvfk;
+extern madrona::AtomicU64 cvnarrowphase;
+extern madrona::AtomicU64 cvbroadphase1;
+extern madrona::AtomicU64 cvbroadphase2;
+extern madrona::AtomicU64 cvallocScratch;
+extern madrona::AtomicU64 cvprepSolver;
+extern madrona::AtomicU64 cvcontAccRef;
+extern madrona::AtomicU64 cveqAccRef;
+extern madrona::AtomicU64 cvcg;
+extern madrona::AtomicU64 cvlineSearch;
+}
+
+class CVClockHelper {
+public:
+    inline CVClockHelper(madrona::AtomicU64 &counter)
+        : counter_(&counter)
+    {
+        cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
+                                  cuda::thread_scope_thread);
+        start_ = timestamp();
+    }
+
+    inline void end()
+    {
+        cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
+                                  cuda::thread_scope_thread);
+        auto end = timestamp();
+        counter_->fetch_add_relaxed(end - start_);
+        counter_ = nullptr;
+    }
+
+    inline ~CVClockHelper()
+    {
+        if (counter_ != nullptr) {
+            end();
+        }
+    }
+
+private:
+    inline uint64_t timestamp() const
+    {
+        uint64_t v;
+        asm volatile("mov.u64 %0, %%globaltimer;"
+                     : "=l"(v));
+        return v;
+    }
+
+    madrona::AtomicU64 *counter_;
+    uint64_t start_;
+};
+
+#define CV_PROF_START(name, counter) \
+    CVClockHelper name(cv##counter);
+
+#define CV_PROF_END(name) name.end();
+#else
+#define CV_PROF_START(name, counter)
+#define CV_PROF_END(name)
+#endif
 
 namespace madrona::phys {
 
@@ -12,9 +91,28 @@ struct PhysicsSystemState {
     float restitutionThreshold;
     uint32_t contactArchetypeID;
     uint32_t jointArchetypeID;
+    bool createRenderObjects;
 };
 
 struct CandidateTemporary : Archetype<CandidateCollision> {};
+
+// This is going to create the actual CandidateCollisions
+struct BroadphaseObjectTemporary {
+    uint32_t offset;
+    uint32_t count;
+
+    Loc a;
+    Loc b;
+
+    math::Vector3 aPos;
+    math::Vector3 bPos;
+    math::Quat aRot;
+    math::Quat bRot;
+    math::Diag3x3 aScale;
+    math::Diag3x3 bScale;
+};
+
+struct BroadphaseTemporary : Archetype<BroadphaseObjectTemporary> {};
 
 namespace broadphase {
 
@@ -52,6 +150,7 @@ namespace RGDCols {
     constexpr inline CountT ExternalTorque = 10;
     constexpr inline CountT SolverBase = 11;
 
+    constexpr inline CountT BroadphaseObjectTemporary = 2;
     constexpr inline CountT CandidateCollision = 2;
     constexpr inline CountT ContactConstraint = 2;
     constexpr inline CountT JointConstraint = 2;

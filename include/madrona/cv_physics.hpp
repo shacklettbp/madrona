@@ -84,6 +84,15 @@ struct BodyInertial {
     float mass;
     math::Diag3x3 inertia;
 
+    // Additional inertia associated with joint movement not due to mass
+    float armature;
+    // Implicit damping during integration
+    float damping;
+
+    // Original mass and inertia
+    float originalMass;
+    math::Diag3x3 originalInertia;
+
     // Estimated inverse weight for the body
     float approxInvMassTrans;
     float approxInvMassRot;
@@ -119,6 +128,15 @@ struct BodyObjectData {
 
 struct BodyTransform {
     math::Vector3 com;
+
+    // Mass and COM of the subtree rooted at this body
+    float subtreeMass;
+    math::Vector3 subtreeCOM;
+
+    // (temporary) COM of sub fixed-bodies (if there are fixed body children)
+    float fixedSubtreeMass;
+    math::Vector3 fixedSubtreeCOM;
+
     math::Quat composedRot;
 };
 
@@ -140,11 +158,12 @@ struct BodyGroupProperties {
     uint32_t numEq;
     uint32_t numObjData;
 
-    math::Vector3 comPos;
     // Sum of diagonals of mass matrix
     float inertiaSum;
 
     uint32_t numHashes;
+
+    float gravityCoeff;
 
     struct {
         uint32_t bodyCounter;
@@ -273,6 +292,7 @@ struct BodyGroupMemory {
     inline int32_t * expandedParent(BodyGroupProperties);
     inline int32_t * dofToBody(BodyGroupProperties);
     inline uint32_t * isStatic(BodyGroupProperties);
+    inline uint32_t * bodyRoot(BodyGroupProperties);
     inline BodyObjectData * objectData(BodyGroupProperties);
     inline BodyHierarchy * hierarchies(BodyGroupProperties);
     inline Entity * entities(BodyGroupProperties);
@@ -577,6 +597,7 @@ float * getBodyGroupDofVel(Context &ctx, Entity body_grp);
 float * getBodyGroupDofAcc(Context &ctx, Entity body_grp);
 float * getBodyGroupForces(Context &ctx, Entity body_grp);
 
+uint8_t getBodyGroupNumDofs(Context &ctx, Entity body_grp, bool pos);
 uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, uint32_t body_idx);
 
 float * getBodyDofPos(Context &ctx, Entity body_grp, uint32_t body_idx);
@@ -633,6 +654,8 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 void initializeHierarchies(Context &ctx);
 
 void setEnablePhysics(Context &ctx, bool value);
+
+void setEnableGravity(Context &ctx, Entity body_grp, bool value);
 
 }
 

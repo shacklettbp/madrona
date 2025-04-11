@@ -1758,6 +1758,7 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
         } else if (channel->op == HostChannel::Op::Map) {
             void *ptr = channel->map.addr;
             uint64_t num_bytes = channel->map.numBytes;
+            uint64_t mapper_id = channel->map.mapperID;
 
             if (verbose_host_alloc) {
                 printf("Grow request received %p %lu\n",

@@ -1,14 +1,107 @@
 #include "cv.hpp"
+#include <madrona/sync.hpp>
 #include "physics_impl.hpp"
+
+#ifdef CV_COUNT_GPU_CLOCKS
+extern "C" {
+madrona::AtomicU64 cvinertias = 0;
+madrona::AtomicU64 cvrne = 0;
+madrona::AtomicU64 cvcrb = 0;
+madrona::AtomicU64 cvinvMass = 0;
+madrona::AtomicU64 cvprocessContacts = 0;
+madrona::AtomicU64 cvconvert = 0;
+madrona::AtomicU64 cvdestroy = 0;
+madrona::AtomicU64 cvinit = 0;
+madrona::AtomicU64 cvintg = 0;
+madrona::AtomicU64 cvfk = 0;
+madrona::AtomicU64 cvnarrowphase = 0;
+madrona::AtomicU64 cvallocScratch = 0;
+madrona::AtomicU64 cvprepSolver = 0;
+madrona::AtomicU64 cvcontAccRef = 0;
+madrona::AtomicU64 cveqAccRef = 0;
+madrona::AtomicU64 cvcg = 0;
+}
+#endif
 
 namespace madrona::phys::cv {
 
 namespace tasks {
+#ifdef CV_COUNT_GPU_CLOCKS
+inline void reportPhysicsClocks(Context &ctx,
+                                PhysicsSystemState &)
+{
+    uint64_t total_clocks = 0;
+    uint64_t count = 0;
+
+    #define CV_PREP_TOTAL(name) total_clocks += cv##name .load< sync::relaxed >(); \
+                                count++;
+
+    #define CV_REPORT_CLOCK(name) printf("\t- " #name " = %lu (%lf)\n", cv##name .load< sync::relaxed >(),\
+                                        (double)(cv##name .load< sync::relaxed >()) / (double)total_clocks); \
+                                  cv##name .store< sync::relaxed >(0);
+
+    if (ctx.worldID().idx != 0) {
+        return;
+    }
+
+    if (threadIdx.x == 0 && ctx.worldID().idx == 0) {
+        printf("Reporting physics clocks:\n");
+
+        CV_PREP_TOTAL(com);
+        CV_PREP_TOTAL(inertias);
+        CV_PREP_TOTAL(rne);
+        CV_PREP_TOTAL(crb);
+        CV_PREP_TOTAL(invMass);
+        CV_PREP_TOTAL(processContacts);
+        CV_PREP_TOTAL(convert);
+        CV_PREP_TOTAL(destroy);
+        CV_PREP_TOTAL(init);
+        CV_PREP_TOTAL(intg);
+        CV_PREP_TOTAL(fk);
+        CV_PREP_TOTAL(narrowphase);
+        CV_PREP_TOTAL(broadphase1);
+        CV_PREP_TOTAL(broadphase2);
+        CV_PREP_TOTAL(allocScratch);
+        CV_PREP_TOTAL(prepSolver);
+        CV_PREP_TOTAL(contAccRef);
+        CV_PREP_TOTAL(eqAccRef);
+        CV_PREP_TOTAL(cg);
+        CV_PREP_TOTAL(lineSearch);
+
+        CV_REPORT_CLOCK(com);
+        CV_REPORT_CLOCK(inertias);
+        CV_REPORT_CLOCK(rne);
+        CV_REPORT_CLOCK(crb);
+        CV_REPORT_CLOCK(invMass);
+        CV_REPORT_CLOCK(processContacts);
+        CV_REPORT_CLOCK(convert);
+        CV_REPORT_CLOCK(destroy);
+        CV_REPORT_CLOCK(init);
+        CV_REPORT_CLOCK(intg);
+        CV_REPORT_CLOCK(fk);
+        CV_REPORT_CLOCK(narrowphase);
+        CV_REPORT_CLOCK(broadphase1);
+        CV_REPORT_CLOCK(broadphase2);
+        CV_REPORT_CLOCK(allocScratch);
+        CV_REPORT_CLOCK(prepSolver);
+        CV_REPORT_CLOCK(contAccRef);
+        CV_REPORT_CLOCK(eqAccRef);
+        CV_REPORT_CLOCK(cg);
+        CV_REPORT_CLOCK(lineSearch);
+    }
+}
+#endif
+
 void refreshPointers(Context &ctx,
                      BodyGroupMemory &m)
 {
     m.qVectorsPtr = ctx.memoryRangePointer<MRElement128b>(m.qVectors);
     m.tmpPtr = ctx.memoryRangePointer<SolverScratch256b>(m.tmp);
+
+#if 0
+    printf("tmp_ptr = %p; vectors_ptr = %p\n",
+            m.tmpPtr, m.qVectorsPtr);
+#endif
 }
 }
 
@@ -40,6 +133,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         if (!replay_mode) {
             cur_node = setupPrepareTasks(builder, cur_node);
             cur_node = setupSolveTasks(builder, cur_node);
+        } else {
+            // Body groups should now all be set up at this point
+            cur_node = builder.addToGraph<
+                ClearTmpNode<InitBodyGroupArchetype>>({cur_node});
         }
 
         cur_node = setupPostTasks(builder, cur_node, replay_mode);
@@ -67,6 +164,12 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
     cur_node = builder.addToGraph<ParallelForNode<Context, 
              tasks::refreshPointers,
                 BodyGroupMemory>>({cur_node});
+
+#ifdef CV_COUNT_GPU_CLOCKS
+    cur_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::reportPhysicsClocks,
+                PhysicsSystemState>>({cur_node});
+#endif
 
     return cur_node;
 }
@@ -103,7 +206,7 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     // ctx.singleton<CVSolveData>().accRefMemory = MemoryRange::none();
     ctx.singleton<CVSolveData>().scratchAllocatedBytes = 0;
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
-    ctx.singleton<CVSolveData>().enablePhysics = 0;
+    ctx.singleton<CVSolveData>().enablePhysics = 1;
 }
 
 void registerTypes(ECSRegistry &registry)
@@ -134,7 +237,8 @@ void registerTypes(ECSRegistry &registry)
 
 void setEnablePhysics(Context &ctx, bool value)
 {
-    ctx.singleton<CVSolveData>().enablePhysics = value;
+    ctx.singleton<CVSolveData>().enablePhysics = true;
+    // ctx.singleton<CVSolveData>().enablePhysics = value;
 }
 
 }
