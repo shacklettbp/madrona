@@ -1352,44 +1352,30 @@ inline void exportCPUSolverState(
         for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
             BodyGroupMemory &m = all_memories[grp_idx];
             BodyGroupProperties &p = all_properties[grp_idx];
-            if (p.numEq == 0) {
-                continue;
-            }
+            if (p.numEq == 0) { continue; }
             BodyOffsets *curr_offsets = m.offsets(p);
 
-            num_active_constraints += p.numEq;
-
-#if 0
             for (uint32_t body_idx = 0; body_idx < p.numBodies; ++body_idx) {
                 BodyOffsets offset = curr_offsets[body_idx];
+                if (offset.dofType == DofType::FixedBody || offset.numEqs == 0) {
+                    continue;
+                }
                 float *q = m.q(p) + offset.posOffset;
-                if (offset.dofType == DofType::FixedBody) {
-                    continue;
-                }
-                BodyLimitConstraint limit = m.limits(p)[offset.eqOffset];
-                if (limit.type == BodyLimitConstraint::Type::None) {
-                    continue;
-                }
 
+                BodyLimitConstraint limit = m.limits(p)[offset.eqOffset];
+                if (limit.type == BodyLimitConstraint::Type::None) { continue; }
                 switch (limit.type) {
                 case BodyLimitConstraint::Type::Hinge: {
-                    if(limit.hinge.isActive(q[0])) {
-                        num_active_constraints++;
-                    }
+                    if(limit.hinge.isActive(q[0])) { num_active_constraints++; }
                 } break;
-
                 case BodyLimitConstraint::Type::Slider: {
-                    if(limit.slider.isActive(q[0])) {
-                        num_active_constraints++;
-                    }
+                    if(limit.slider.isActive(q[0])) { num_active_constraints++; }
                 } break;
-
                 default: {
                     MADRONA_UNREACHABLE();
                 } break;
                 }
             }
-#endif
         }
 
         uint32_t total_num_rows = num_active_constraints;

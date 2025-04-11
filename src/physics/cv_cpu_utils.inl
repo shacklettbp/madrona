@@ -43,6 +43,13 @@ inline void sclAdd(float *res, float *vec, float coeff, uint32_t dim) {
     }
 }
 
+inline void sclAddSet(float *res, float *a, float *b, float coeff, uint32_t dim)
+{
+    for (uint32_t i = 0; i < dim; i++) {
+        res[i] = a[i] + coeff * b[i];
+    }
+}
+
 inline void vecScale(float *res, float coeff, uint32_t dim) {
     for (uint32_t i = 0; i < dim; i++) {
         res[i] *= coeff;

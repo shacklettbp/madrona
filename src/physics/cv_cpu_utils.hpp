@@ -22,6 +22,12 @@ void sclAdd(float *res,
             float coeff,
             uint32_t dim);
 
+inline void sclAddSet(float *res,
+                      float *a,
+                      float *b,
+                      float coeff,
+                      uint32_t dim);
+
 void vecScale(float *res,
               float coeff,
               uint32_t dim);

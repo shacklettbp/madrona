@@ -2535,17 +2535,18 @@ void solveCPU(Context &ctx,
         return;
     }
 
-    // Memory for reference acceleration, impedance, and residuals
-    //  todo: make this contiguous
-    float *acc_ref_c = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
-    float *acc_ref_e = (float *)ctx.tmpAlloc(sizeof(float) * dim_e);
-    float *R_c = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
-    float *R_e = (float *)ctx.tmpAlloc(sizeof(float) * dim_e);
-    float *D_c = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
-    float *D_e = (float *)ctx.tmpAlloc(sizeof(float) * dim_e);
-    float *r_con = (float *)ctx.tmpAlloc(sizeof(float) * dim_c);
-    float *a_solve = (float *)ctx.tmpAlloc(sizeof(float) * cv_sing.totalNumDofs);
-    float *x0 = (float *)ctx.tmpAlloc(sizeof(float) * cv_sing.totalNumDofs);
+    //Allocate memory for reference acceleration, impedance, and residuals
+    uint32_t req_floats = 4 * dim_c + 3 * dim_e + 2 * cv_sing.totalNumDofs;
+    float *solve_scratch = (float *)ctx.tmpAlloc(req_floats * sizeof(float));
+    float *acc_ref_c = solve_scratch;
+    float *acc_ref_e = acc_ref_c + dim_c;
+    float *R_c = acc_ref_e + dim_e;
+    float *R_e = R_c + dim_c;
+    float *D_c = R_e + dim_e;
+    float *D_e = D_c + dim_c;
+    float *r_con = D_e + dim_c;
+    float *a_solve = r_con + dim_c;
+    float *x0 = a_solve + cv_sing.totalNumDofs;
 
     // Set residuals for contact constraints
     memset(r_con, 0, sizeof(float) * dim_c);
@@ -2569,19 +2570,18 @@ void solveCPU(Context &ctx,
     }
     for (uint32_t i = 0; i < dim_e; i++) {
         D_e[i] = 1 / R_e[i];
-        // Todo: filter out unused constraints
-        if (R_e[i] < MINVAL) { D_e[i] = 0.f; }
     }
 
     constexpr float tol = 1e-8f;
     constexpr float ls_tol = 0.01f;
+    bool adaptive_ls = true;
     uint32_t max_iter = 100;
     uint32_t ls_iters = 50;
 
     // Set initial guess to be previous acceleration
     memcpy(x0, cv_sing.currAcc, sizeof(float) * cv_sing.totalNumDofs);
-    nonlinearCG(ctx, a_solve, x0, acc_ref_c, acc_ref_e, D_c, D_e,
-        tol, ls_tol, max_iter, ls_iters, cv_sing);
+    nonlinearCG(ctx, a_solve, x0, acc_ref_c, acc_ref_e, D_c, D_e, tol, ls_tol,
+        adaptive_ls, max_iter, ls_iters, cv_sing);
     copyResult(ctx, a_solve);
 }
 #endif
