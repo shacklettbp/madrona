@@ -32,7 +32,7 @@ template <typename DataT>
 DataT warpSum(DataT *values, uint32_t num_values);
 
 template <typename DataT>
-bool checkNan(DataT *values,
+void checkNan(DataT *values,
               uint32_t num_rows,
               uint32_t num_cols);
 
@@ -50,8 +50,16 @@ void warpLoop(uint32_t total_num_iters, Fn &&fn);
 template <typename Fn>
 void warpLoopSync(uint32_t total_num_iters, Fn &&fn);
 
+#if 0
 static inline void warpSetZero(void *dst, uint32_t num_bytes);
 static inline void warpCopy(void *dst, void *src, uint32_t num_bytes, bool dbg = false);
+#endif
+
+template <typename T>
+inline void warpSetZero(T *dst, uint32_t num_values);
+
+template <typename T>
+inline void warpCopy(T *dst, T *src, uint32_t num_values);
 
 template <typename DataT>
 float norm2Warp(DataT *values, uint32_t dim);

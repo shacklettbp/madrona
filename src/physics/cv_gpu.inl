@@ -76,7 +76,7 @@ DataT warpSum(DataT *values, uint32_t num_values)
 }
 
 template <typename DataT>
-bool checkNan(DataT *values,
+void checkNan(DataT *values,
               uint32_t num_rows,
               uint32_t num_cols)
 {
@@ -87,8 +87,7 @@ bool checkNan(DataT *values,
         [&](uint32_t iter) {
             float v = (iter == 0xFFFF'FFFF) ? 0.f : values[iter];
             bool invalid = isnan(v);
-
-
+            assert(!invalid);
         });
 }
 
@@ -120,6 +119,8 @@ void warpLoop(uint32_t total_num_iters, Fn &&fn)
 
         iter += 32 * granularity;
     }
+
+    __syncwarp();
 }
 
 template <typename Fn>
@@ -131,6 +132,8 @@ void warpLoop(uint32_t total_num_iters, Fn &&fn)
 
         iter += 32;
     }
+
+    __syncwarp();
 }
 
 // Passes in 0xFFFF'FFFF to fn if invalid run
@@ -148,6 +151,21 @@ void warpLoopSync(uint32_t total_num_iters, Fn &&fn)
     }
 }
 
+template <typename T>
+void warpSetZero(T *dst, uint32_t num_values)
+{
+    warpLoop(num_values, [&](uint32_t iter) { dst[iter] = (T)0; });
+    __syncwarp();
+}
+
+template <typename T>
+void warpCopy(T *dst, T *src, uint32_t num_values)
+{
+    warpLoop(num_values, [&](uint32_t iter) { dst[iter] = src[iter]; });
+    __syncwarp();
+}
+
+#if 0
 static void warpSetZero(void *dst, uint32_t num_bytes)
 {
     int32_t lane_id = threadIdx.x % 32;
@@ -173,6 +191,7 @@ static void warpCopy(void *dst, void *src, uint32_t num_bytes, bool dbg)
         (uint8_t *)src + bytes_per_warp * lane_id,
         bytes_to_cpy);
 }
+#endif
 
 template <typename DataT>
 float norm2Warp(DataT *values, uint32_t dim)
@@ -657,7 +676,7 @@ DataT sparseBlkDiagSolve(
     uint32_t cur_dim_offset = 0;
 
     if constexpr (dot_res_and_input) {
-        warpCopy(scratch, res, a->fullDim * sizeof(DataT));
+        warpCopy(scratch, res, a->fullDim);
     }
 
     // I think for now, we are just going to naively assign each warp

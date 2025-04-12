@@ -232,7 +232,7 @@ inline ConeSpace GaussMinimizationNode::mapToConeSpace(
     float t = sqrtf(t1 * t1 + t2 * t2);
     
     if (0.f == (mu * mu * (1.f + mu * mu))) {
-        // printf("nan0 happening\n");
+        printf("nan0 happening\n");
     }
     float mid_weight = 1.f / (mu * mu * (1.f + mu * mu));
 
@@ -298,7 +298,7 @@ void GaussMinimizationNode::dobjWarp(
     // By now, res has M @ x_min_acc_free
 
     if constexpr (calc_package) {
-        warpCopy(Mxmin, res, sd->freeAccDim * sizeof(float));
+        warpCopy(Mxmin, res, sd->freeAccDim);
         __syncwarp();
     }
 
@@ -318,7 +318,7 @@ void GaussMinimizationNode::dobjWarp(
     __syncwarp();
 
     if constexpr (calc_package) {
-        warpCopy(jaccref_cont, scratch, sd->numRowsJc * sizeof(float), dbg);
+        warpCopy(jaccref_cont, scratch, sd->numRowsJc);
         __syncwarp();
     }
 
@@ -397,7 +397,7 @@ void GaussMinimizationNode::dobjWarp(
     __syncwarp();
 
     if constexpr (calc_package) {
-        warpCopy(jaccref_eq, scratch, sd->numRowsJe * sizeof(float), dbg);
+        warpCopy(jaccref_eq, scratch, sd->numRowsJe);
         __syncwarp();
     }
 
@@ -482,6 +482,7 @@ void GaussMinimizationNode::testNodeTransposeMul(int32_t invocation_idx)
                 a_mat_cols,
                 b_mat_rows,
                 b_mat_cols);
+        __syncwarp();
 
         if (lane_id == 0) {
             for (int i = 0; i < a_mat_rows; ++i) {
@@ -557,6 +558,7 @@ void GaussMinimizationNode::testNodeMul(int32_t invocation_idx)
                 a_mat_cols,
                 b_mat_rows,
                 b_mat_cols);
+        __syncwarp();
 
         if (lane_id == 0) {
             for (int i = 0; i < a_mat_rows; ++i) {
@@ -743,6 +745,7 @@ void GaussMinimizationNode::testNodeIdenMul(int32_t invocation_idx)
                 a_mat_cols,
                 b_mat_rows,
                 b_mat_cols);
+        __syncwarp();
 
         if (lane_id == 0) {
             for (int i = 0; i < a_mat_rows; ++i) {
@@ -775,6 +778,19 @@ float GaussMinimizationNode::exactLineSearch(
     CV_PROF_START(t0, lineSearch);
 
     using namespace gpu_utils;
+
+
+#if 0
+    checkNan(jaccref_cont, 1, sd->numRowsJc);
+    checkNan(jaccref_eq, 1, sd->numRowsJe);
+    checkNan(Mxmin, 1, sd->freeAccDim);
+    checkNan(p, 1, sd->freeAccDim);
+    checkNan(x, 1, sd->freeAccDim);
+    checkNan(d_c, 1, sd->numRowsJc);
+    checkNan(d_e, 1, sd->numRowsJe);
+#endif
+
+
 
     float pMx_free = dotVectors(p, Mxmin, sd->freeAccDim);
 
@@ -834,6 +850,25 @@ float GaussMinimizationNode::exactLineSearch(
     }
     __syncwarp();
 
+    auto check_nans = [&](float ret) {
+        checkNan(jaccref_cont, 1, sd->numRowsJc);
+        checkNan(jaccref_eq, 1, sd->numRowsJe);
+        checkNan(Mxmin, 1, sd->freeAccDim);
+        checkNan(p, 1, sd->freeAccDim);
+        checkNan(x, 1, sd->freeAccDim);
+        checkNan(d_c, 1, sd->numRowsJc);
+        checkNan(d_e, 1, sd->numRowsJe);
+        checkNan(Jp, 1, sd->freeAccDim);
+        checkNan(Jp, 1, sd->numRowsJc);
+        checkNan(Jep, 1, sd->numRowsJe);
+        assert(!isnan(pMx_free));
+        assert(!isnan(xmin_M_xmin));
+        assert(!isnan(pMp));
+        assert(!isnan(ret));
+    };
+
+    check_nans(0.f);
+
     // printMatrix(jaccref_eq, 1, sd->numRowsJe, "Jaccref_eq");
     // printMatrix(Jep, 1, sd->numRowsJe, "Jep");
 
@@ -884,7 +919,7 @@ float GaussMinimizationNode::exactLineSearch(
 
                     // float mu = sd->mu[iter];
                     if (0.f == (mu * mu * (1.f + mu * mu))) {
-                        // printf("nan1 happening; mu = %f\n", mu);
+                        printf("nan1 happening; mu = %f\n", mu);
                     }
 
                     float mw = 1.f / (mu * mu * (1.f + mu * mu));
@@ -912,9 +947,6 @@ float GaussMinimizationNode::exactLineSearch(
                             printf("iter = %d; first return (0)\n", iter);
                     } else if (mu * n_search + t_search <= 0.f || 
                             (t_search <= 0.f && n_search < 0.f)) {
-#if 0
-                        float p_sq = p0 * p0 + p1 * p1 + p2 * p2;
-#endif
 
                         float p_sq = dn * (jp_n * jp_n) + 
                                      d1 * (jp_t1 * jp_t1) +
@@ -934,6 +966,10 @@ float GaussMinimizationNode::exactLineSearch(
                             p_sq
                         };
 
+                        assert(!isnan(diff.dfun) && 
+                               !isnan(diff.dgrad) && 
+                               !isnan(diff.dhess));
+
                         if (print)
                             printf("iter = %d; second return; f=%f; g=%f; h=%f\n",
                                     iter, diff.dfun, diff.dgrad, diff.dhess);
@@ -944,10 +980,25 @@ float GaussMinimizationNode::exactLineSearch(
                         if (t_search == 0.f) {
                             printf("nan2 happening\n");
                         }
+
                         float dt_da = (square(mu1) * jp_t1 * jacc_t1 +
                                        square(mu2) * jp_t2 * jacc_t2) / t_search;
+
+                        float in_sqr = jp_t2 * jx_t1 - jp_t1 * jx_t2;
+
+                        float frac = in_sqr / t_search;
+
+#if 0
+                        float sqr = square(in_sqr);
+                        float t_search3 = cube(t_search);
+#endif
+
+                        assert(!isnan(frac));
+                        assert(!isnan(in_sqr));
+
                         float d2tp_da2 = ((square(mu1) * square(mu2) *
-                                           square(jp_t2 * jx_t1 - jp_t1 * jx_t2)) / cube(t_search));
+                                           frac * frac * frac) / in_sqr);
+
                         float tmp = n_search - mu * t_search;
                         float d_tmp = dn_da - mu * dt_da;
 
@@ -956,6 +1007,18 @@ float GaussMinimizationNode::exactLineSearch(
                             dn * mw * tmp * d_tmp,
                             dn * mw * (square(d_tmp) - tmp * mu * d2tp_da2),
                         };
+
+                        if (isnan(diff.dhess)) {
+                            LOG("dn = {}; mw = {}; d_tmp = {}; square(d_tmp) = {}; tmp = {}; mu = {}; d2tp_da2 = {}\n",
+                                dn, mw, d_tmp,
+                                square(d_tmp), tmp, mu, d2tp_da2);
+                            LOG("square(mu1) = {}; square(mu2) = {}; in_sqr = {}; frac = {}; t_search = {}; d2tp_da2 = {}\n",
+                                square(mu1), square(mu2), in_sqr, frac, t_search, d2tp_da2);
+                        }
+
+                        assert(!isnan(diff.dfun) && 
+                               !isnan(diff.dgrad) && 
+                               !isnan(diff.dhess));
 
                         return diff;
                     }
@@ -994,6 +1057,8 @@ float GaussMinimizationNode::exactLineSearch(
                 }
             } ();
 
+            assert(!isnan(d.dfun) && !isnan(d.dgrad) && !isnan(d.dhess));
+
             float dfun = warpReduceSum(d.dfun);
             float dgrad = warpReduceSum(d.dgrad);
             float dhess = warpReduceSum(d.dhess);
@@ -1015,10 +1080,21 @@ float GaussMinimizationNode::exactLineSearch(
     float alpha = 0.f;
     Evals evals_alpha = fdh_phi(alpha);
 
+#if 0
+    if (threadIdx.x % 32 && sd->worldID == 0) {
+        printf("fun = %f; grad = %f; hess = %f\n",
+                evals_alpha.fun,
+                evals_alpha.grad,
+                evals_alpha.hess);
+    }
+#endif
+
     // Newton step
     if (evals_alpha.hess == 0.f) {
         printf("nan3 happening!\n");
     }
+
+    assert(!isnan(evals_alpha.grad) && !isnan(evals_alpha.hess));
 
     float alpha1 = alpha - evals_alpha.grad / evals_alpha.hess;
     if (evals_alpha.hess == 0.f) {
@@ -1042,6 +1118,7 @@ float GaussMinimizationNode::exactLineSearch(
 
     // Initial convergence
     if (fabs(evals_alpha1.grad) < tol) {
+        check_nans(alpha1);
         return alpha1;
     }
 
@@ -1053,19 +1130,36 @@ float GaussMinimizationNode::exactLineSearch(
     for (; iters < ls_iters; ++iters) {
         __syncwarp();
 
+        check_nans(alpha1);
+
         evals_alpha1 = fdh_phi(alpha1);
+        assert(!isnan(evals_alpha1.fun));
+        assert(!isnan(evals_alpha1.grad));
+        assert(!isnan(evals_alpha1.hess));
 
         if (evals_alpha1.grad * a_dir > -tol)
             break;
         if (fabs(evals_alpha1.grad)  < tol) {
             dbg_warp_printf("second return\n");
+            check_nans(alpha1);
             return alpha1;
         }
 
         if (evals_alpha1.hess == 0.f) {
             printf("nan4 happening!\n");
         }
+
+        float before = alpha1;
+
         alpha1 -= evals_alpha1.grad / evals_alpha1.hess;
+
+        if (!isnan(before) && isnan(alpha1)) {
+            printf("before = %f; grad = %f; hess = %f\n",
+                    before, evals_alpha1.grad, evals_alpha1.hess);
+
+            assert(false);
+        }
+
         if (evals_alpha1.hess == 0.f) {
             printf("nan going to happen exactLineSeaarch hess1\n");
         }
@@ -1074,6 +1168,7 @@ float GaussMinimizationNode::exactLineSearch(
     if (iters == ls_iters) {
         // Failed to bracket...
         dbg_warp_printf("third return\n");
+        check_nans(alpha1);
         return alpha1;
     }
 
@@ -1099,6 +1194,7 @@ float GaussMinimizationNode::exactLineSearch(
 
         if (fabs(evals_alpha_mid.grad) < tol) {
             dbg_warp_printf("fourth return\n");
+            check_nans(alpha_mid);
             return alpha_mid;
         }
 
@@ -1109,6 +1205,7 @@ float GaussMinimizationNode::exactLineSearch(
 
         if (fabs(alpha_high - alpha_low) < tol) {
             dbg_warp_printf("fifth return\n");
+            check_nans(alpha_mid);
             return alpha_mid;
         }
     }
@@ -1116,6 +1213,7 @@ float GaussMinimizationNode::exactLineSearch(
     if (iters >= ls_iters) {
         // Failed to converge...
         dbg_warp_printf("sixth return\n");
+        check_nans(alpha_mid);
         return alpha_mid;
     }
 
@@ -1447,7 +1545,7 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
     uint32_t num_contacts = state_mgr->numRows<Contact>(world_id);
 
-#if 0
+#if 1
     if (lane_id == 0) {
         printf("num_contacts = %d\n", num_contacts);
     }
@@ -1520,12 +1618,9 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
         float *diag_approx = curr_sd->getContactDiagApprox(state_mgr);
 
-        warpSetZero(j_c, sizeof(float) *
-                         3 * curr_sd->numContactPts *
+        warpSetZero(j_c, 3 * curr_sd->numContactPts *
                          curr_sd->totalNumDofs);
-
-        warpSetZero(diag_approx, sizeof(float) *
-                        3 * curr_sd->numContactPts);
+        warpSetZero(diag_approx, 3 * curr_sd->numContactPts);
 
         // TODO: Maybe experiment with different axes of parallelism
         // Right now, trying to parallelize over contacts
@@ -1661,12 +1756,11 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
         curr_sd->eqResiduals = residuals;
 
         warpSetZero(j_e, 
-                    sizeof(float) *
                     curr_sd->numRowsJe *
                     curr_sd->numColsJe);
 
-        warpSetZero(diag_approx, sizeof(float) * curr_sd->numRowsJe);
-        warpSetZero(residuals, sizeof(float) * curr_sd->numRowsJe);
+        warpSetZero(diag_approx, curr_sd->numRowsJe);
+        warpSetZero(residuals, curr_sd->numRowsJe);
 
         for (uint32_t grp = 0; grp < num_grps; ++grp) {
             __syncwarp();
@@ -1891,6 +1985,10 @@ void GaussMinimizationNode::computeAccRef(
 {
     using namespace gpu_utils;
 
+    checkNan(j_mat, num_rows_j, num_cols_j);
+    checkNan(vel, vel_dim, 1);
+    checkNan(diag_approx, num_rows_j, 1);
+
     float time_const = 2.f * h;
     constexpr float damp_ratio = 1.f;
     constexpr float d_min = 0.9f,
@@ -1916,6 +2014,7 @@ void GaussMinimizationNode::computeAccRef(
             num_cols_j,
             vel_dim,
             1);
+    __syncwarp();
 
     warpLoop(num_rows_j, [&](uint32_t iter) {
         float r = residual_fn(iter);
@@ -1952,6 +2051,10 @@ void GaussMinimizationNode::computeAccRef(
         }
         r_vec[iter] = ((1.f - imp) / imp) * diag_approx[iter];
     });
+
+    __syncwarp();
+    checkNan(r_vec, num_rows_j, 1);
+    checkNan(acc_ref, num_rows_j, 1);
 }
 
 // Might be overkill to allocate a warp per world but we can obviously
@@ -2039,6 +2142,11 @@ void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
                     if (r_vec[full_iter] == 0.f) {
                         printf("nan8 happening\n");
                     }
+
+                    if (0.f > r_vec[full_iter + 1] / r_vec[full_iter]) {
+                        printf("negative sqrt!\n");
+                    }
+
                     mus[full_iter] = mus[full_iter + 1] * sqrtf(
                             r_vec[full_iter + 1] / r_vec[full_iter]);
 
@@ -2072,7 +2180,7 @@ void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
                     curr_sd->getContactAccRef(state_mgr);
 
                 warpCopy(acc_ref_glob, acc_ref,
-                         sizeof(float) * curr_sd->numRowsJc);
+                         curr_sd->numRowsJc);
                 acc_ref = (float *)acc_ref_glob;
             }
         }
@@ -2164,7 +2272,7 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
                     (float *)curr_sd->getEqualityAccRef(state_mgr);
 
                 warpCopy(acc_ref_glob, acc_ref,
-                         sizeof(float) * curr_sd->numRowsJe);
+                         curr_sd->numRowsJe);
                 acc_ref = (float *)acc_ref_glob;
             }
         }
@@ -2275,7 +2383,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         } ();
 
         // We are using freeAcc as initial guess
-        warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
+        warpCopy(x, curr_sd->freeAcc, curr_sd->freeAccDim);
         __syncwarp();
 
         dobjWarp<true>(m_grad, x, curr_sd, scratch1,
@@ -2289,7 +2397,11 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         __syncwarp();
 
         // Keep track of the norm2 of g (m_grad currently has g)
-        float g_norm = sqrtf(norm2Warp(m_grad, curr_sd->freeAccDim));
+        float tmp = norm2Warp(m_grad, curr_sd->freeAccDim);
+        if (tmp < 0.f) {
+            printf("wtf why is norm negative\n");
+        }
+        float g_norm = sqrtf(tmp);
 
         float g_dot_m_grad = sparseBlkDiagSolve<float, true>(
                 m_grad, &curr_sd->massSparse, scratch1);
@@ -2309,7 +2421,11 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             if (tol_scale * g_norm < kTolerance)
                 break;
 
-            float p_norm = sqrtf(norm2Warp(p, curr_sd->freeAccDim));
+            tmp = norm2Warp(p, curr_sd->freeAccDim);
+            if (tmp < 0.f) {
+                printf("wtf why is norm negative 2\n");
+            }
+            float p_norm = sqrtf(tmp);
 
             if (p_norm < MINVAL)
                 break;
@@ -2338,7 +2454,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             float *g_new = m_grad;
             float new_fun = 0.f;
             { // Get the new gradient
-                warpCopy(scratch2, m_grad, curr_sd->freeAccDim * sizeof(float));
+                warpCopy(scratch2, m_grad, curr_sd->freeAccDim);
 
                 dobjWarp<true>(g_new, x, curr_sd, scratch1,
                                jaccref_cont, jaccref_eq, mxmin, 
@@ -2349,7 +2465,11 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 new_fun = objWarp(x, curr_sd, jaccref_cont, jaccref_eq, mxmin);
                 __syncwarp();
 
-                g_norm = sqrtf(norm2Warp(g_new, curr_sd->freeAccDim));
+                tmp = norm2Warp(g_new, curr_sd->freeAccDim);
+                if (tmp < 0.f) {
+                    printf("wtf why is sqrt negative 3\n");
+                }
+                g_norm = sqrtf(tmp);
             }
 
             if (tol_scale * (curr_fun - new_fun) < kTolerance) {
@@ -2360,7 +2480,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 // Now we have scratch1 and scratch2 to play with
                 // We need have access to these three at the same time:
                 // g_new, Mgrad_new M_grad
-                warpCopy(scratch3, g_new, curr_sd->freeAccDim * sizeof(float));
+                warpCopy(scratch3, g_new, curr_sd->freeAccDim);
 
                 float g_dot_m_grad_new = sparseBlkDiagSolve<float, true>(
                         m_grad, &curr_sd->massSparse, scratch1);

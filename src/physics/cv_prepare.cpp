@@ -680,7 +680,7 @@ void compositeRigidBody(
     };
 
     // memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
-    gpu_utils::warpSetZero(M, total_dofs * total_dofs * sizeof(float));
+    gpu_utils::warpSetZero(M, total_dofs * total_dofs);
     __syncwarp();
 
     const int32_t num_smem_bytes_per_warp =
