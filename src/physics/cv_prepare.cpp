@@ -1399,9 +1399,7 @@ inline void exportCPUSolverState(
         for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
             BodyGroupMemory &m = all_memories[grp_idx];
             BodyGroupProperties &p = all_properties[grp_idx];
-            if (p.numEq == 0) {
-                continue;
-            }
+            if (p.numEq == 0) { continue; }
 
             BodyOffsets *curr_offsets = m.offsets(p);
 
@@ -1443,8 +1441,6 @@ inline void exportCPUSolverState(
                             limit.slider.dConstraintViolation(q[0]);
                         residuals[glob_row_offset] = limit.slider.constraintViolation(q[0]);
                         diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
-                        printf("approxInvMassDof[glob_row_offset] = %f\n",
-                                inertial.approxInvMassDof[0]);
                         num_active_constraints++;
                     }
                 } break;
@@ -1954,7 +1950,7 @@ inline void computeInvMass(
         }
 
         // Because we did a backward traversal, we can compute our subtree COM
-        if (body_transform.fixedSubtreeMass < 1e-15f) {
+        if (body_transform.fixedSubtreeMass < MINVAL) {
             body_transform.fixedSubtreeCOM = body_transform.com;
         } else {
             body_transform.fixedSubtreeCOM =
@@ -2136,7 +2132,7 @@ void implicitDamping(Context &ctx,
     if (!damping_req) { return; }
 
     float *M = mem.massMatrix(prop);
-    // Compute M * acc, store into tau
+    // Compute M * acc, store into bias vector as scratch
     float *acc = mem.dqv(prop);
     float *tau = mem.biasVector(prop);
     mulM(prop, mem, acc, tau);

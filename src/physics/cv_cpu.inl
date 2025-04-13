@@ -296,6 +296,11 @@ float s_e(float *grad_out,
           uint32_t dim) {
     float cost = 0.f;
     for (uint32_t i = 0; i < dim; i++) {
+        // Constraint is satisfied
+        if (jar[i] >= 0.f) {
+            grad_out[i] = 0.f;
+            continue;
+        }
         cost += 0.5f * D_e[i] * jar[i] * jar[i];
         grad_out[i] = D_e[i] * jar[i];
     }
@@ -330,6 +335,12 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         float Dm;
     };
 
+    struct LimitStore {
+        float quad0;
+        float quad1;
+        float quad2;
+    };
+
     // Search vector too small
     if (norm(pk, nv) < MINVAL) return 0.f;
     uint32_t nv_bytes = nv * sizeof(float);
@@ -343,10 +354,13 @@ float exactLineSearch(float *pk, float *x_min_a_free,
     float x_min_M_x_min = dot(x_min_a_free, Mx_min_a_free, nv);
     float pMp = dot(pk, Mpk, nv);
     float pMx_free = dot(pk, Mx_min_a_free, nv);
-
     // 2. Cone constraints
     matVecMul<false, true>(Jp_c, cv_sing.J_c, pk, cv_sing.numRowsJc, nv);
+    // 3. Equality constraints
+    matVecMul<false, true>(Jp_e, cv_sing.J_e, pk, cv_sing.numRowsJe, nv);
+    float quadGauss[3] = {0.5f * x_min_M_x_min, pMx_free, 0.5f * pMp};
 
+    // --- Precomputation of constraints ---
     // For each contact, store some information to avoid re-computation
     ContactStore cs[nc / 3];
     for (uint32_t i = 0; i < nc / 3; i++) {
@@ -391,15 +405,25 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         cs[i].VV = Jp_T1 * Jp_T1 + Jp_T2 * Jp_T2;
         cs[i].Dm = mid_weight;
     }
+    LimitStore ls[ne];
+    for (uint32_t i = 0; i < ne; i++) {
+        float Jx = jar_e[i];
+        float Jp = Jp_e[i];
+        float de = D_e[i];
+        ls[i].quad0 = 0.5f * de * Jx * Jx;
+        ls[i].quad1 = de * Jx * Jp;
+        ls[i].quad2 = 0.5f * de * Jp * Jp;
+    }
 
-    // 3. Equality constraints
-    matVecMul<false, true>(Jp_e, cv_sing.J_e, pk, cv_sing.numRowsJe, nv);
-
+    // Line search function: returns phi(a), d_phi(a), d2_phi(a)
     auto phi = [&](float a) {
-        // Process Gauss first
-        float fun = 0.5f * a * a * pMp + a * pMx_free + 0.5f * x_min_M_x_min;
-        float grad = a * pMp + pMx_free;
-        float hess = pMp;
+        float fun = 0.f;
+        float grad = 0.f;
+        float hess = 0.f;
+
+        // Quadratic costs (wrst alpha^0, alpha^1, alpha^2)
+        // process Gauss first
+        float quadTotal[3] = {quadGauss[0], quadGauss[1], quadGauss[2]};
 
         // Then process cones
         for (uint32_t i = 0; i < nc / 3; i++) {
@@ -413,9 +437,9 @@ float exactLineSearch(float *pk, float *x_min_a_free,
             if (T_sqr <= 0) {
                 // Bottom zone
                 if (N < 0) {
-                    fun += a * a * c.quad2 + a * c.quad1 + c.quad0;
-                    grad += 2 * a * c.quad2 + c.quad1;
-                    hess += 2 * c.quad2;
+                    quadTotal[0] += c.quad0;
+                    quadTotal[1] += c.quad1;
+                    quadTotal[2] += c.quad2;
                 }
                 continue;
             }
@@ -426,9 +450,9 @@ float exactLineSearch(float *pk, float *x_min_a_free,
             }
             // Bottom zone
             else if (mu * N + T <= 0 || (T <= 0 && N < 0)) {
-                fun += a * a * c.quad2 + a * c.quad1 + c.quad0;
-                grad += 2 * a * c.quad2 + c.quad1;
-                hess += 2 * c.quad2;
+                quadTotal[0] += c.quad0;
+                quadTotal[1] += c.quad1;
+                quadTotal[2] += c.quad2;
             }
             // Middle zone
             else {
@@ -443,14 +467,20 @@ float exactLineSearch(float *pk, float *x_min_a_free,
 
         // Finally process equality constraints
         for (uint32_t i = 0; i < ne; i++) {
-            float orig = jar_e[i];
-            float dj = Jp_e[i];
-            float de = D_e[i];
-            float N_search = orig + a * dj;
-            fun += 0.5f * de * N_search * N_search;
-            grad += de * (orig * dj + a * dj * dj);
-            hess += de * dj * dj;
+            LimitStore ls_i = ls[i];
+            float jx = jar_e[i];
+            float jp = Jp_e[i];
+            float N_search = jx + a * jp;
+            // Active limit
+            if (N_search <= 0.f) {
+                quadTotal[0] += ls_i.quad0;
+                quadTotal[1] += ls_i.quad1;
+                quadTotal[2] += ls_i.quad2;
+            }
         }
+        fun += a * a * quadTotal[2] + a * quadTotal[1] + quadTotal[0];
+        grad += 2 * a * quadTotal[2] + quadTotal[1];
+        hess += 2 * quadTotal[2];
         return Evals{fun, grad, hess};
     };
 
