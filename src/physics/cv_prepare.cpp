@@ -1229,6 +1229,9 @@ inline void exportCPUSolverState(
         Contact, ContactTmpState>(world_id);
 
     CountT num_contacts = state_mgr->numRows<Contact>(world_id);
+
+    printf("num_contacts = %u\n", num_contacts);
+
     CountT total_contact_pts = 0;
 
     for (int i = 0; i < num_contacts; ++i) {
