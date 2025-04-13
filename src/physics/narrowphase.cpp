@@ -410,7 +410,7 @@ std::pair<bool, SphereContact> sphereSphereContact(
     SphereContact contact {
         .normal = normal,
         .pt = contact_pt,
-        .depth = d,
+        .depth = -d,
     };
     return { true, contact };
 }
