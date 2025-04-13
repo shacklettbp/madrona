@@ -39,7 +39,6 @@ void nonlinearCG(Context &ctx,
 void fullMSolveMul(Context &ctx, float *x, bool solve);
 
 float obj(float *grad_out,
-          float *x,
           float *x_min_a_free,
           float *Mx_min_a_free,
           float *D_c,

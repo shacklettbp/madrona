@@ -118,8 +118,8 @@ inline void nonlinearCG(Context &ctx,
     sclAdd(jar_e, a_ref_e, -1.f, ne);
 
     // f(x0) and df(x0), M^{-1}df(x0)
-    float fun = obj(g, x, x_min_a_free, Mx_min_a_free,
-                    D_c, D_e, jar_c, jar_e, cv_sing);
+    float fun = obj(g, x_min_a_free, Mx_min_a_free, D_c,
+                    D_e, jar_c, jar_e, cv_sing);
     memcpy(M_grad, g, nv_bytes);
     fullMSolveMul(ctx, M_grad, true);
     // p = -M_grad
@@ -151,8 +151,8 @@ inline void nonlinearCG(Context &ctx,
         float den = fmaxf(dot(g, M_grad, nv), MINVAL);
 
         // Convergence check
-        float fun_new = obj(g, x, x_min_a_free, Mx_min_a_free,
-                            D_c, D_e, jar_c, jar_e, cv_sing);
+        float fun_new = obj(g, x_min_a_free, Mx_min_a_free, D_c,
+                            D_e, jar_c, jar_e, cv_sing);
         if (scale * (fun - fun_new) < tol) break;
         if (scale * norm(g, nv) < tol) break;
 
@@ -203,7 +203,6 @@ inline void fullMSolveMul(Context &ctx,
 }
 
 inline float obj(float *grad_out,
-                 float *x,
                  float *x_min_a_free,
                  float *Mx_min_a_free,
                  float *D_c,
@@ -436,7 +435,6 @@ float exactLineSearch(float *pk, float *x_min_a_free,
             float mu = cv_sing.mu[3 * i];
             float N = c.U0 + a * c.V0;
             float T_sqr = c.UU + a * (2 * c.UV + a * c.VV);
-            float T = sqrtf(T_sqr);
 
             // No tangent force (just top or bottom)
             if (T_sqr <= 0) {
@@ -450,11 +448,12 @@ float exactLineSearch(float *pk, float *x_min_a_free,
             }
 
             // Proceed as normal. Top zone
-            if (N >= mu * T || (T <= 0 && N >= 0)) {
+            float T = sqrtf(T_sqr);
+            if (N >= mu * T) {
                 continue;
             }
             // Bottom zone
-            else if (mu * N + T <= 0 || (T <= 0 && N < 0)) {
+            else if (mu * N + T <= 0) {
                 quadTotal[0] += c.quad0;
                 quadTotal[1] += c.quad1;
                 quadTotal[2] += c.quad2;

@@ -2579,7 +2579,7 @@ void solveCPU(Context &ctx,
     uint32_t ls_iters = 50;
 
     // Set initial guess to be previous acceleration
-    memcpy(x0, cv_sing.freeAcc, sizeof(float) * cv_sing.totalNumDofs);
+    memcpy(x0, cv_sing.currAcc, sizeof(float) * cv_sing.totalNumDofs);
     nonlinearCG(ctx, a_solve, x0, acc_ref_c, acc_ref_e, D_c, D_e, tol, ls_tol,
         adaptive_ls, max_iter, ls_iters, cv_sing);
     copyResult(ctx, a_solve);
