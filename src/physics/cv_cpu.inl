@@ -339,6 +339,7 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         float quad0;
         float quad1;
         float quad2;
+        float Jx;
     };
 
     // Search vector too small
@@ -413,9 +414,11 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         ls[i].quad0 = 0.5f * de * Jx * Jx;
         ls[i].quad1 = de * Jx * Jp;
         ls[i].quad2 = 0.5f * de * Jp * Jp;
+        ls[i].Jx = Jx;
     }
 
     // Line search function: returns phi(a), d_phi(a), d2_phi(a)
+    float quadTotal[3];
     auto phi = [&](float a) {
         float fun = 0.f;
         float grad = 0.f;
@@ -423,7 +426,9 @@ float exactLineSearch(float *pk, float *x_min_a_free,
 
         // Quadratic costs (wrst alpha^0, alpha^1, alpha^2)
         // process Gauss first
-        float quadTotal[3] = {quadGauss[0], quadGauss[1], quadGauss[2]};
+        quadTotal[0] = quadGauss[0];
+        quadTotal[1] = quadGauss[1];
+        quadTotal[2] = quadGauss[2];
 
         // Then process cones
         for (uint32_t i = 0; i < nc / 3; i++) {
@@ -468,7 +473,7 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         // Finally process equality constraints
         for (uint32_t i = 0; i < ne; i++) {
             LimitStore ls_i = ls[i];
-            float jx = jar_e[i];
+            float jx = ls_i.Jx;
             float jp = Jp_e[i];
             float N_search = jx + a * jp;
             // Active limit
