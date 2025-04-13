@@ -160,6 +160,7 @@ inline void nonlinearCG(Context &ctx,
         memcpy(M_grad_new, g, nv_bytes);
         fullMSolveMul(ctx, M_grad_new, true);
         sclAdd(M_grad, M_grad_new, -1, nv);
+        // Now holds (M_grad - Mgrad_new)
         vecScale(M_grad, -1, nv);
         float beta = dot(g, M_grad, nv) / den;
         beta = fmaxf(0.f, beta);
@@ -170,7 +171,7 @@ inline void nonlinearCG(Context &ctx,
         fun = fun_new;
         memcpy(M_grad, M_grad_new, nv_bytes);
     }
-    // printf("CG Iterations %d\n", i);
+    printf("CG Iterations %d\n", i);
     memcpy(res, x, nv_bytes);
 }
 
@@ -260,7 +261,7 @@ inline float s_c(float *grad_out, float *jar, float *D_c, float *mus,
         float T1 = jar_T1 * mu1;
         float T2 = jar_T2 * mu2;
         float T = sqrtf(T1 * T1 + T2 * T2);
-        float mid_weight = 1.f / (mu * mu * (1 + mu * mu));
+        float Dm = Dn / (mu * mu * (1 + mu * mu));
 
         // Top zone
         if (N >= mu * T || (T <= 0 && N >= 0)) {
@@ -279,8 +280,9 @@ inline float s_c(float *grad_out, float *jar, float *D_c, float *mus,
         }
         // Middle zone
         else {
-            cost += 0.5f * Dn * mid_weight * (N - mu * T) * (N - mu * T);
-            float tmp = Dn * mid_weight * (N - mu * T) * mu;
+            float NmT = N - mu * T;
+            cost += 0.5f * Dm * NmT * NmT;
+            float tmp = Dm * NmT * mu;
             grad_out[3 * i] = tmp;
             grad_out[3 * i + 1] = -(tmp / T) * T1 * mus[3 * i + 1];
             grad_out[3 * i + 2] = -(tmp / T) * T2 * mus[3 * i + 2];
@@ -315,8 +317,10 @@ float exactLineSearch(float *pk, float *x_min_a_free,
                       uint32_t nv, float ls_tol, uint32_t ls_iters,
                       Context &ctx, CVSolveData &cv_sing) {
     using namespace cpu_utils;
+    uint32_t iter = 0;
 
     struct Evals {
+        float alpha; // useful to save
         float fun;
         float grad;
         float hess;
@@ -416,9 +420,10 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         ls[i].Jx = Jx;
     }
 
-    // Line search function: returns phi(a), d_phi(a), d2_phi(a)
+    // Line search function: updates with phi(a), d_phi(a), d2_phi(a)
     float quadTotal[3];
-    auto phi = [&](float a) {
+    auto phi = [&](Evals *evals) {
+        float a = evals->alpha;
         float fun = 0.f;
         float grad = 0.f;
         float hess = 0.f;
@@ -444,28 +449,28 @@ float exactLineSearch(float *pk, float *x_min_a_free,
                     quadTotal[1] += c.quad1;
                     quadTotal[2] += c.quad2;
                 }
-                continue;
             }
-
-            // Proceed as normal. Top zone
-            float T = sqrtf(T_sqr);
-            if (N >= mu * T) {
-                continue;
-            }
-            // Bottom zone
-            else if (mu * N + T <= 0) {
-                quadTotal[0] += c.quad0;
-                quadTotal[1] += c.quad1;
-                quadTotal[2] += c.quad2;
-            }
-            // Middle zone
             else {
-                float N1 = c.V0;
-                float T1 = (c.UV + a * c.VV) / T;
-                float T2 = c.VV / T - (c.UV + a * c.VV) * T1 / (T*T);
-                fun += 0.5f*c.Dm*(N-mu*T)*(N-mu*T);
-                grad += c.Dm*(N-mu*T)*(N1-mu*T1);
-                hess += c.Dm*((N1-mu*T1)*(N1-mu*T1) + (N-mu*T)*(-mu*T2));
+                // Proceed as normal. Top zone
+                float T = sqrtf(T_sqr);
+                if (N >= mu * T) {
+                    // nothing
+                }
+                // Bottom zone
+                else if (mu * N + T <= 0) {
+                    quadTotal[0] += c.quad0;
+                    quadTotal[1] += c.quad1;
+                    quadTotal[2] += c.quad2;
+                }
+                // Middle zone
+                else {
+                    float N1 = c.V0;
+                    float T1 = (c.UV + a * c.VV) / T;
+                    float T2 = c.VV / T - (c.UV + a * c.VV) * T1 / (T*T);
+                    fun += 0.5f*c.Dm*(N-mu*T)*(N-mu*T);
+                    grad += c.Dm*(N-mu*T)*(N1-mu*T1);
+                    hess += c.Dm*((N1-mu*T1)*(N1-mu*T1) + (N-mu*T)*(-mu*T2));
+                }
             }
         }
 
@@ -476,83 +481,126 @@ float exactLineSearch(float *pk, float *x_min_a_free,
             float jp = Jp_e[i];
             float N_search = jx + a * jp;
             // Active limit
-            if (N_search <= 0.f) {
+            if (N_search < 0.f) {
                 quadTotal[0] += ls_i.quad0;
                 quadTotal[1] += ls_i.quad1;
                 quadTotal[2] += ls_i.quad2;
             }
         }
+
         fun += a * a * quadTotal[2] + a * quadTotal[1] + quadTotal[0];
         grad += 2 * a * quadTotal[2] + quadTotal[1];
         hess += 2 * quadTotal[2];
-        return Evals{fun, grad, hess};
+
+        evals->fun = fun;
+        evals->grad = grad;
+        evals->hess = hess;
+        iter++;
     };
 
-    float alpha = 0.f;
-    Evals evals = phi(alpha);
+    auto updateBracket = [&](Evals *p, Evals candidates[3], Evals *pnext) {
+        int flag = 0;
+        for (int i = 0; i < 3; i++) {
+            if (p->grad < 0 && candidates[i].grad < 0
+                && p->grad < candidates[i].grad) {
+                *p = candidates[i];
+                flag = 1;
+            }
+            else if (p->grad > 0 && candidates[i].grad > 0 &&
+                     p->grad > candidates[i].grad) {
+                *p = candidates[i];
+                flag = 2;
+            }
+        }
 
-    float alpha1 = alpha - evals.grad / evals.hess; // Newton step
-    Evals evals_1 = phi(alpha1);
-    if (evals.fun < evals_1.fun) {
-        alpha1 = alpha;
+        if (flag) {
+            pnext->alpha = p->alpha - p->grad / p->hess;
+            phi(pnext);
+        }
+        return flag;
+    };
+
+    Evals p0, p1, p2, pmid, p1next, p2next;
+    p0.alpha = 0.f;
+    phi(&p0);
+
+    p1.alpha = p0.alpha - p0.grad / p0.hess;
+    phi(&p1);
+    if (p0.fun < p1.fun) {
+        p1 = p0;
     }
 
-    evals = phi(alpha1);
     // Initial convergence
-    if (fabsf(evals.grad) < ls_tol) {
-        return alpha1;
+    if (fabsf(p1.grad) < ls_tol) {
+        return p1.alpha;
     }
 
     // Opposing direction of gradient at alpha1
-    float a_dir = (evals.grad < 0.f) ? 1.f : -1.f;
-    uint32_t i = 0;
-    for (; i < ls_iters; i++) {
-        evals = phi(alpha1);
-        // gradient moves in the opposite direction as alpha1, start bracketing
-        if (evals.grad * a_dir > -1.f * ls_tol) { break; }
-        // Converged
-        if (fabsf(evals.grad) < ls_tol) { return alpha1; }
+    float dir = p1.grad < 0.f ? 1.f : -1.f;
+
+    // One-sided search
+    while (p1.grad * dir <= -ls_tol && iter < ls_iters) {
+        p2 = p1;
 
         // Newton step
-        alpha1 -= evals.grad / evals.hess;
+        p1.alpha -= p1.grad / p1.hess;
+        phi(&p1);
+
+        // Check for convergence
+        if (fabs(p1.grad) < ls_tol) {
+            return p1.alpha;
+        }
     }
-    if (i == ls_iters) {
-        // Failed to converge
-        return alpha1;
+
+    // Failed to bracket
+    if (iter == ls_iters) {
+        return p1.alpha;
     }
 
     // Bracketing to find where d_phi equals zero
-    float alpha_low = alpha1;
-    float alpha_high = alpha1 - evals.grad / evals.hess;
-    evals = phi(alpha_low);
-    if (evals.grad > 0.f) {
-        float tmp = alpha_low;
-        alpha_low = alpha_high;
-        alpha_high = tmp;
+    p2next = p1;
+    p1next.alpha = p1.alpha - p1.grad / p1.hess;
+    phi(&p1next);
+
+    // Bracketed search
+    while (iter < ls_iters) {
+        // midpoint evaluation
+        pmid.alpha = 0.5f * (p1.alpha + p2.alpha);
+        phi(&pmid);
+
+        Evals candidates[3] = {p1next, p2next, pmid};
+        // check candidates for convergence
+        float best_cost = 0;
+        int best_ind = -1;
+        for (int i = 0; i < 3; i++) {
+            if (fabsf(candidates[i].grad) < ls_tol &&
+                (best_ind == -1 || candidates[i].fun < best_cost)) {
+            best_cost = candidates[i].fun;
+            best_ind = i;
+          }
+        }
+        if (best_ind >= 0) {
+            return candidates[best_ind].alpha;
+        }
+
+        // Update brackets
+        int b1 = updateBracket(&p1, candidates, &p1next);
+        int b2 = updateBracket(&p2, candidates, &p2next);
+        // use midpoint if can't update
+        if (!b1 && !b2) {
+          return pmid.alpha;
+        }
     }
 
-    uint32_t ib = 0;
-    float alpha_mid = alpha_low;
-    for (; ib < ls_iters; ib++) {
-        alpha_mid = 0.5f * (alpha_low + alpha_high);
-        evals = phi(alpha_mid);
-        if (fabsf(evals.grad) < ls_tol) {
-            return alpha_mid;
-        }
-        // Narrow the bracket
-        if (evals.grad > 0.f) {
-            alpha_high = alpha_mid;
-        } else {
-            alpha_low = alpha_mid;
-        }
 
-        // Bracketing is small
-        if (fabsf(alpha_high - alpha_low) < ls_tol) {
-            return alpha_mid;
-        }
+    // choose bracket with best cost
+    if (p1.fun <= p2.fun && p1.fun < p0.fun) {
+        return p1.alpha;
     }
-    // Failed to converge
-    return alpha_mid;
+    if (p2.fun <= p1.fun && p2.fun < p0.fun) {
+        return p2.alpha;
+    }
+    return 0;
 }
 
 }
