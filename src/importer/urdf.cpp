@@ -1385,16 +1385,10 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
                 .relPositionChild = joint_to_child_com,
                 .relParentRotation = parent_to_child_rot,
                 // joint.axis is already in the child frame.
-                .hingeAxis = joint.second.axis
+                .hingeAxis = joint.second.axis,
+                .damping = joint.second.dynamics.damping,
+                .frictionLoss = joint.second.dynamics.friction,
             };
-
-#if 0
-            printf("(%d) URDF relPositionParent = %f %f %f\n",
-                    cfg.numConnections - 1,
-                    hinge.relPositionParent.x,
-                    hinge.relPositionParent.y,
-                    hinge.relPositionParent.z);
-#endif
 
             child.parentCom = parent_com;
             child.parentToJoint = parent_to_joint;

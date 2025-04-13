@@ -449,7 +449,9 @@ static inline void joinBodiesGeneral(
         Vector3 rel_position_parent,
         Vector3 rel_position_child,
         Quat rel_parent_rotation,
-        Vector3 axis = Vector3 { 0.f, 0.f, 0.f })
+        Vector3 axis = Vector3 { 0.f, 0.f, 0.f },
+        float damping = 0.f,
+        float friction_loss = 0.f)
 {
     DofObjectGroup parent_info = ctx.get<DofObjectGroup>(parent_physics_entity);
     DofObjectGroup child_info = ctx.get<DofObjectGroup>(child_physics_entity);
@@ -469,6 +471,8 @@ static inline void joinBodiesGeneral(
         .relPositionParent = rel_position_parent,
         .relPositionLocal = rel_position_child,
         .parentToChildRot = rel_parent_rotation,
+        .damping = damping,
+        .frictionLoss = friction_loss,
     };
     
     // You need to disable all the colliders between these two
@@ -493,7 +497,9 @@ void joinBodies(
                       hinge_info.relPositionParent,
                       hinge_info.relPositionChild,
                       hinge_info.relParentRotation,
-                      hinge_info.hingeAxis);
+                      hinge_info.hingeAxis,
+                      hinge_info.damping,
+                      hinge_info.frictionLoss);
 }
 
 void joinBodies(

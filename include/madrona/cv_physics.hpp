@@ -78,6 +78,10 @@ struct BodyHierarchy {
     math::Vector3 relPositionParent;
     math::Vector3 relPositionLocal;
     math::Quat parentToChildRot;
+
+    // For now, we are sticking these guys here
+    float damping;
+    float frictionLoss;
 };
 
 struct BodyInertial {
@@ -502,6 +506,10 @@ struct JointHinge {
 
     // In child's basis
     math::Vector3 hingeAxis;
+
+    // TODO: For now, we only support damping / friction loss for hinge
+    float damping;
+    float frictionLoss;
 };
 
 void joinBodies(
