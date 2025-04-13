@@ -355,11 +355,11 @@ float exactLineSearch(float *pk, float *x_min_a_free,
     float x_min_M_x_min = dot(x_min_a_free, Mx_min_a_free, nv);
     float pMp = dot(pk, Mpk, nv);
     float pMx_free = dot(pk, Mx_min_a_free, nv);
+    float quadGauss[3] = {0.5f * x_min_M_x_min, pMx_free, 0.5f * pMp};
     // 2. Cone constraints
     matVecMul<false, true>(Jp_c, cv_sing.J_c, pk, cv_sing.numRowsJc, nv);
     // 3. Equality constraints
     matVecMul<false, true>(Jp_e, cv_sing.J_e, pk, cv_sing.numRowsJe, nv);
-    float quadGauss[3] = {0.5f * x_min_M_x_min, pMx_free, 0.5f * pMp};
 
     // --- Precomputation of constraints ---
     // For each contact, store some information to avoid re-computation

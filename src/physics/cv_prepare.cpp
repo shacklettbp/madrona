@@ -848,7 +848,9 @@ inline void recursiveNewtonEuler(
 
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     BodyOffsets* offsets = mem.offsets(prop);
+    BodyInertial* body_inertials = mem.inertials(prop);
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
+    int32_t *dof_to_body = mem.dofToBody(prop);
     uint32_t* is_static = mem.isStatic(prop);
     float* qvs = mem.qv(prop);
     float* dqvs = mem.dqv(prop);
@@ -1016,25 +1018,24 @@ inline void recursiveNewtonEuler(
             }
         }
 
+        float *qfrc;
         if (kComputeWithQDDot) {
-            float *tau = mem.f(prop);
-            int32_t *dof_to_body = mem.dofToBody(prop);
+            qfrc = mem.f(prop);
 
             // Then add the internal forces, mapped to generalized forces
             float *S_ptr = mem.phiFull(prop);
             for (int32_t i = 0; i < prop.qvDim; ++i) {
                 SpatialVector f_i = spatialVectors[dof_to_body[i]].sForce;
                 float *S_i = S_ptr + 6 * i;
-                tau[i] = 0.f;
+                qfrc[i] = 0.f;
                 for (int32_t j = 0; j < 6; ++j) {
-                    tau[i] += S_i[j] * f_i[j];
+                    qfrc[i] += S_i[j] * f_i[j];
                 }
             }
         } else {
             // First set bias force to external force
-            float *tau = mem.biasVector(prop);
-            int32_t *dof_to_body = mem.dofToBody(prop);
-            memcpy(tau, mem.f(prop), prop.qvDim * sizeof(float));
+            qfrc = mem.biasVector(prop);
+            memcpy(qfrc, mem.f(prop), prop.qvDim * sizeof(float));
 
             // Then add the internal forces, mapped to generalized forces
             float *S_ptr = mem.phiFull(prop);
@@ -1042,12 +1043,21 @@ inline void recursiveNewtonEuler(
                 SpatialVector f_i = spatialVectors[dof_to_body[i]].sForce;
                 float *S_i = S_ptr + 6 * i;
                 for (int32_t j = 0; j < 6; ++j) {
-                    tau[i] += S_i[j] * f_i[j];
+                    qfrc[i] += S_i[j] * f_i[j];
                 }
+            }
+        }
+
+        // Lastly, *add* explicit damping/passive forces here
+        for (uint32_t i = 0; i < prop.qvDim; ++i) {
+            float damping = body_inertials[dof_to_body[i]].damping;
+            if (damping != 0) {
+                qfrc[i] += damping * qvs[i];
             }
         }
     }
 }
+
 
 // Filter contacts and build contact reference frames
 inline void processContacts(Context &ctx,
@@ -1430,7 +1440,7 @@ inline void exportCPUSolverState(
                         residuals[glob_row_offset] = limit.hinge.constraintViolation(q[0]);
                         diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
                         // printf("approxInvMassDof[glob_row_offset] = %f\n",
-                                // inertial.approxInvMassDof[0]);
+                        //         inertial.approxInvMassDof[0]);
                         num_active_constraints++;
                     }
                 } break;
