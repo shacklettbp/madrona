@@ -1084,9 +1084,14 @@ inline void processContacts(Context &ctx,
     bool ref_static = mem_ref.isStatic(prop_ref)[ref_body_idx];
     bool alt_static = mem_alt.isStatic(prop_alt)[alt_body_idx];
     if (ref_static && alt_static) {
-        // contact.numPoints = 0;
-        // return;
+        contact.numPoints = 0;
+        return;
     }
+
+    // Get friction coefficient
+    float mu_ref = mem_ref.mus(prop_ref)[ref_body_idx];
+    float mu_alt = mem_alt.mus(prop_alt)[alt_body_idx];
+    float mu = fminf(mu_ref, mu_alt);
 
     // Filter out parent-child contacts and contacts between the same body
     //  but keep static-dynamic contacts
@@ -1108,8 +1113,8 @@ inline void processContacts(Context &ctx,
         if(offset_ref.parentWithDof == alt_body_idx ||
             offset_alt.parentWithDof == ref_body_idx ||
             offset_ref.parentWithDof == offset_alt.parentWithDof) {
-            // contact.numPoints = 0;
-            // return;
+            contact.numPoints = 0;
+            return;
         }
     }
 
@@ -1127,11 +1132,6 @@ inline void processContacts(Context &ctx,
     tmp_state.C[0] = n;
     tmp_state.C[1] = t;
     tmp_state.C[2] = s;
-
-    // Get friction coefficient
-    float mu_ref = mem_ref.mus(prop_ref)[ref_body_idx];
-    float mu_alt = mem_alt.mus(prop_alt)[alt_body_idx];
-    float mu = fminf(mu_ref, mu_alt);
     tmp_state.mu = mu;
 }
 
