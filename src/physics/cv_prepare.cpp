@@ -484,12 +484,11 @@ void computeSpatialInertiasAndPhi(Context &ctx,
 // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
 //  where e_{bi} = 1 if body i is an ancestor of b
 //  C^T projects into the contact space
-inline float * computeContactJacobian(BodyGroupProperties &p,
-                                      BodyGroupMemory &m,
+inline float * computeContactJacobian(BodyGroupProperties& p,
+                                      BodyGroupMemory& m,
                                       uint32_t body_idx,
-                                      Mat3x3 &C,
-                                      Vector3 &origin,
-                                      float *J,
+                                      Vector3& origin,
+                                      float* J,
                                       uint32_t body_dof_offset,
                                       uint32_t jac_row,
                                       uint32_t j_num_rows,
@@ -519,23 +518,12 @@ inline float * computeContactJacobian(BodyGroupProperties &p,
 
             float *S_col = S + 3 * i;
             for(CountT j = 0; j < 3; ++j) {
-                J_col[j] = S_col[j];
+                J_col[j] += coeff * S_col[j];
             }
         }
 
         curr_idx = cur_offset.parent;
     }
-
-    // Multiply by C^T to project into contact space
-    for (CountT i = 0; i < p.qvDim; ++i) {
-        float *J_col = J + j_num_rows * (body_dof_offset + i) + jac_row;
-        Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
-        J_col_vec = C.transpose() * J_col_vec;
-        J_col[0] = coeff * J_col_vec.x;
-        J_col[1] = coeff * J_col_vec.y;
-        J_col[2] = coeff * J_col_vec.z;
-    }
-
     return J;
 }
 
@@ -1315,20 +1303,31 @@ inline void exportCPUSolverState(
             float inv_weight_trans = ref_inertial.approxInvMassTrans +
                 alt_inertial.approxInvMassTrans;
 
+            Mat3x3 C = tmp_state.C;
+
             // Each of the contact points
             for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
                 Vector3 contact_pt = contact.points[pt_idx].xyz();
 
                 // Compute the Jacobians for each body at the contact point
                 computeContactJacobian(ref_p,
-                    ref_m, ref_link.bodyIdx,  tmp_state.C, contact_pt, J_c,
-                    block_start[ref_p.tmp.grpIndex], jac_row, J_rows, -1.f,
-                    (ct_idx == 0 && pt_idx == 0));
+                                       ref_m, ref_link.bodyIdx,  contact_pt, J_c, block_start[ref_p.tmp.grpIndex],
+                                       jac_row, J_rows, -1.f, (ct_idx == 0 && pt_idx == 0));
 
                 computeContactJacobian(alt_p,
-                    alt_m, alt_link.bodyIdx, tmp_state.C, contact_pt, J_c,
-                    block_start[alt_p.tmp.grpIndex], jac_row, J_rows, 1.f,
-                    (ct_idx == 0 && pt_idx == 0));
+                                       alt_m, alt_link.bodyIdx, contact_pt, J_c, block_start[alt_p.tmp.grpIndex],
+                                       jac_row, J_rows, 1.f, (ct_idx == 0 && pt_idx == 0));
+
+                // Multiply by C^T to project into contact space
+                for (CountT i = 0; i < J_cols; ++i) {
+                    float *J_col = J_c + J_rows * i + jac_row;
+                    Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
+                    J_col_vec = C.transpose() * J_col_vec;
+                    J_col[0] = J_col_vec.x;
+                    J_col[1] = J_col_vec.y;
+                    J_col[2] = J_col_vec.z;
+                }
+
 
                 // Compute the diagonal approximation
                 diagApprox_c[jac_row] = diagApprox_c[jac_row + 1] =
