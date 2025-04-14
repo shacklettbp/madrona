@@ -1084,8 +1084,8 @@ inline void processContacts(Context &ctx,
     bool ref_static = mem_ref.isStatic(prop_ref)[ref_body_idx];
     bool alt_static = mem_alt.isStatic(prop_alt)[alt_body_idx];
     if (ref_static && alt_static) {
-        contact.numPoints = 0;
-        return;
+        // contact.numPoints = 0;
+        // return;
     }
 
     // Filter out parent-child contacts and contacts between the same body
@@ -1095,19 +1095,21 @@ inline void processContacts(Context &ctx,
         BodyOffsets offset_ref = offsets[ref_body_idx];
         BodyOffsets offset_alt = offsets[alt_body_idx];
         // If the body has no DOFs, we should check the parent that does
-        if (BodyOffsets::getDofTypeDim(offset_ref.dofType) == 0) {
+        if (BodyOffsets::getDofTypeDim(offset_ref.dofType) == 0
+            && offset_ref.parentWithDof != 0xFF) {
             ref_body_idx = offset_ref.parentWithDof;
             offset_ref = offsets[ref_body_idx];
         }
-        if (BodyOffsets::getDofTypeDim(offset_alt.dofType) == 0) {
+        if (BodyOffsets::getDofTypeDim(offset_alt.dofType) == 0
+            && offset_alt.parentWithDof != 0xFF) {
             alt_body_idx = offset_alt.parentWithDof;
             offset_alt = offsets[alt_body_idx];
         }
         if(offset_ref.parentWithDof == alt_body_idx ||
             offset_alt.parentWithDof == ref_body_idx ||
             offset_ref.parentWithDof == offset_alt.parentWithDof) {
-            contact.numPoints = 0;
-            return;
+            // contact.numPoints = 0;
+            // return;
         }
     }
 
