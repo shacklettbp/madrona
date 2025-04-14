@@ -6,6 +6,49 @@
 namespace madrona::phys::cv {
 namespace cpu_solver {
 
+inline float getImpedance(const float* solimp, float pos) {
+    float imp;
+    // flat function
+    if (solimp[0] == solimp[1] || solimp[2] <= MINVAL) {
+        imp = 0.5f * (solimp[0] + solimp[1]);
+        return imp;
+    }
+
+    // x = abs((pos-margin) / width)
+    float x = pos / solimp[2];
+    if (x < 0) {
+        x = -x;
+    }
+
+    // fully saturated
+    if (x >= 1 || x <= 0) {
+        imp = x >= 1 ? solimp[1] : solimp[0];
+        return imp;
+    }
+
+    // linear
+    float y;
+    if (solimp[4] == 1) {
+        y = x;
+    }
+
+      // y(x) = a*x^p if x<=midpoint
+    else if (x <= solimp[3]) {
+        float a = 1/powf(solimp[3], solimp[4]-1);
+        y = a*powf(x, solimp[4]);
+    }
+
+    // y(x) = 1-b*(1-x)^p is x>midpoint
+    else {
+        float b = 1/powf(1-solimp[3], solimp[4]-1);
+        y = 1-b*powf(1-x, solimp[4]);
+      }
+
+    // scale
+    imp = solimp[0] + y*(solimp[1]-solimp[0]);
+    return imp;
+}
+
 inline void computeAccRef(float *a_ref_res,
                           float *R_res,
                           float *v,
@@ -23,6 +66,7 @@ inline void computeAccRef(float *a_ref_res,
           width = 0.001f,
           mid = 0.5f,
           power = 2.f;
+    float solimp[5] = {d_min, d_max, width, mid, power};
 
     float k = 1.f / (d_max * d_max * time_const * time_const
         * damp_ratio * damp_ratio);
@@ -34,21 +78,9 @@ inline void computeAccRef(float *a_ref_res,
 
     // Then compute -k * imp * r
     for (uint32_t i = 0; i < num_rows_j; i++) {
-        float imp_x = fabs(r[i]) / width;
-        float imp_a = (1.f / powf(mid, power-1.f)) * powf(imp_x, power);
-        float imp_b = 1.f - (1.f / powf(1.f - mid, power - 1)) *
-                      powf(1.f - imp_x, power);
-
-        float imp_y = (imp_x < mid) ? imp_a : imp_b;
-        float imp = d_min + imp_y * (d_max - d_min);
-        if (imp < d_min)
-            imp = d_min;
-        else if (imp > d_max)
-            imp = d_max;
-        imp = (imp_x > 1.f) ? d_max : imp;
-
+        float imp = getImpedance(solimp, r[i]);
         a_ref_res[i] -= k * imp * r[i];
-        R_res[i] = ((1 - imp) / imp) * diag_approx[i];
+        R_res[i] = fmaxf(MINVAL, (1.f - imp) * diag_approx[i] / imp);
     }
 }
 
@@ -61,10 +93,11 @@ inline void adjustContactRegularization(float *R,
     for (uint32_t i = 0; i < dim; i += con_dim) {
         // Impedance of tangential components: R[1] = R[0] / imp_ratio
         R[i + 1] = R[i] / imp_ratio;
+        float friction0 = mus[i + 1];
         // Regularized cone mu is mu[1] * sqrt(R[1] / R[0])
-        mus[i] = mus[i + 1] * sqrtf(R[i+1] / R[i]);
+        mus[i] = friction0 * sqrtf(R[i+1] / R[i]);
         for (uint32_t j = 2; j < con_dim; j++) {
-            R[i + j] = R[i + 1] * mus[i + 1] * mus[i + 1] / (
+            R[i + j] = R[i + 1] * friction0 * friction0 / (
                     mus[i + j] * mus[i + j]);
         }
     }
@@ -171,7 +204,7 @@ inline void nonlinearCG(Context &ctx,
         fun = fun_new;
         memcpy(M_grad, M_grad_new, nv_bytes);
     }
-    printf("CG Iterations %d\n", i);
+    // printf("CG Iterations %d\n", i);
     memcpy(res, x, nv_bytes);
 }
 
@@ -244,6 +277,7 @@ inline float s_c(float *grad_out, float *jar, float *D_c, float *mus,
                  uint32_t dim)
 {
     float cost = 0.f;
+    memset(grad_out, 0, dim * sizeof(float));
     // Loop through each contact
     for (uint32_t i = 0; i < dim / 3; i++) {
         // Fetch data
@@ -261,13 +295,9 @@ inline float s_c(float *grad_out, float *jar, float *D_c, float *mus,
         float T1 = jar_T1 * mu1;
         float T2 = jar_T2 * mu2;
         float T = sqrtf(T1 * T1 + T2 * T2);
-        float Dm = Dn / (mu * mu * (1 + mu * mu));
 
         // Top zone
         if (N >= mu * T || (T <= 0 && N >= 0)) {
-            grad_out[3 * i] = 0.f;
-            grad_out[3 * i + 1] = 0.f;
-            grad_out[3 * i + 2] = 0.f;
         }
         // Bottom zone
         else if (mu * N + T <= 0 || (T <= 0 && N < 0)) {
@@ -280,6 +310,7 @@ inline float s_c(float *grad_out, float *jar, float *D_c, float *mus,
         }
         // Middle zone
         else {
+            float Dm = Dn / (mu * mu * (1 + mu * mu));
             float NmT = N - mu * T;
             cost += 0.5f * Dm * NmT * NmT;
             float tmp = Dm * NmT * mu;
@@ -553,7 +584,7 @@ float exactLineSearch(float *pk, float *x_min_a_free,
     }
 
     // Failed to bracket
-    if (iter == ls_iters) {
+    if (iter >= ls_iters) {
         return p1.alpha;
     }
 
