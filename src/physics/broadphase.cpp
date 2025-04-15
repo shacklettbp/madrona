@@ -988,6 +988,9 @@ inline void findIntersectingEntry(
 
     ObjectID a_obj = ctx.getDirect<ObjectID>(RGDCols::ObjectID, a_loc);
 
+    uint32_t cv_a_is_static = ctx.getDirect<RigidBodyStatic>(
+            RGDCols::RigidBodyStatic, a_loc).isStatic;
+
     CountT a_num_prims = obj_mgr.rigidBodyPrimitiveCounts[a_obj.idx];
 
     bvh.findLeafIntersecting(leaf_id, [&](Entity intersecting_entity) {
@@ -1013,6 +1016,14 @@ inline void findIntersectingEntry(
             // will check transformed AABBs.
             
             ObjectID b_obj = ctx.getDirect<ObjectID>(RGDCols::ObjectID, b_loc);
+
+            uint32_t cv_b_is_static = ctx.getDirect<RigidBodyStatic>(
+                    RGDCols::RigidBodyStatic, b_loc).isStatic;
+
+            if (cv_a_is_static && cv_b_is_static) {
+                return;
+            }
+
             CountT b_num_prims =
                 obj_mgr.rigidBodyPrimitiveCounts[b_obj.idx];
 

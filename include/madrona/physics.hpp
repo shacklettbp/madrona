@@ -92,6 +92,10 @@ struct DisabledColliders {
     Entity colliders[kMaxDisabledColliders];
 };
 
+struct RigidBodyStatic {
+    uint32_t isStatic;
+};
+
 struct RigidBody : Bundle<
     base::ObjectInstance,
     ResponseType,
@@ -100,6 +104,7 @@ struct RigidBody : Bundle<
     ExternalForce,
     ExternalTorque,
     DisabledColliders,
+    RigidBodyStatic,
     SolverBundleAlias
 > {};
 

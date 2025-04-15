@@ -371,6 +371,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<ExternalTorque>();
     registry.registerComponent<DisabledColliders>();
     registry.registerComponent<DummyBundleComp>();
+    registry.registerComponent<RigidBodyStatic>();
 
     registry.registerSingleton<broadphase::BVH>();
 

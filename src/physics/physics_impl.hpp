@@ -148,7 +148,9 @@ namespace RGDCols {
     constexpr inline CountT Velocity = 8;
     constexpr inline CountT ExternalForce = 9;
     constexpr inline CountT ExternalTorque = 10;
-    constexpr inline CountT SolverBase = 11;
+    constexpr inline CountT DisableColliders = 11;
+    constexpr inline CountT RigidBodyStatic = 12;
+    constexpr inline CountT SolverBase = 13;
 
     constexpr inline CountT BroadphaseObjectTemporary = 2;
     constexpr inline CountT CandidateCollision = 2;

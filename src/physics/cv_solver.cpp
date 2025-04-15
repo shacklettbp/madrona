@@ -1162,6 +1162,8 @@ void GaussMinimizationNode::calculateSolverDims(
             Contact, ContactConstraint>(world_id);
         CountT num_contacts = state_mgr->numRows<Contact>(world_id);
 
+        printf("num_contacts = %u\n", num_contacts);
+
         uint32_t total_num_contact_pts = warpSumPred<uint32_t>(
             [&](uint32_t iter) {
                 return contacts[iter].numPoints;

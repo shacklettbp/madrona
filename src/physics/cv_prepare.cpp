@@ -1579,6 +1579,18 @@ inline void computeExpandedParent(Context &ctx,
     }
 }
 
+inline void setRigidBodyStatic(Context &ctx, 
+                               RigidBodyStatic &rb_is_static,
+                               LinkParentDofObject link)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
+
+    uint32_t is_static = m.isStatic(p)[link.bodyIdx];
+
+    rb_is_static.isStatic = is_static;
+}
+
 // Reset masses to original values, adjust with global scale
 inline void resetMasses(BodyGroupMemory &m,
                         BodyGroupProperties &p) {
@@ -2377,6 +2389,12 @@ TaskGraphNodeID setupCVResetTasks(
          tasks::initHierarchies,
             InitBodyGroup
          >>({cur_node});
+
+    cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::setRigidBodyStatic,
+            RigidBodyStatic,
+            LinkParentDofObject
+        >>({cur_node});
 
 #if 0
     cur_node = builder.addToGraph<
