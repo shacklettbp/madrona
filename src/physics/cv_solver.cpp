@@ -79,7 +79,6 @@ struct GaussMinimizationNode : NodeBase {
     void computeContactJacobian(BodyGroupProperties &prop,
                                 BodyGroupMemory &mem,
                                 uint32_t body_idx,
-                                Mat3x3 &C,
                                 Vector3 &origin,
                                 float *J,
                                 uint32_t body_dof_offset,
@@ -1614,7 +1613,6 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                                     c_info.pRef,
                                     c_info.mRef,
                                     c_info.refBodyIndex,
-                                    c_info.tmpState.C,
                                     contact_pt,
                                     j_c,
                                     c_info.pRef.tmp.qvOffset,
@@ -1630,7 +1628,6 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                                     c_info.pAlt,
                                     c_info.mAlt,
                                     c_info.altBodyIndex,
-                                    c_info.tmpState.C,
                                     contact_pt,
                                     j_c,
                                     c_info.pAlt.tmp.qvOffset,
@@ -1639,6 +1636,21 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                                     curr_sd->numRowsJc,
                                     1.f,
                                     false);//(ct_idx == 0 && pt_idx == 0));
+                        }
+
+                        {
+                            Mat3x3 C = c_info.tmpState.C;
+                            // Multiply by C^T to project into contact space
+                            for (CountT i = 0; i < curr_sd->numColsJc; ++i) {
+                                float *J_col = j_c +
+                                        curr_sd->numRowsJc * i + curr_jacc_row;
+                                Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
+                                J_col_vec = C.transpose() * J_col_vec;
+                                J_col[0] = J_col_vec.x;
+                                J_col[1] = J_col_vec.y;
+                                J_col[2] = J_col_vec.z;
+                            }
+
                         }
 
                         { // Compute the diagonal approximation
@@ -1765,7 +1777,6 @@ void GaussMinimizationNode::computeContactJacobian(
         BodyGroupProperties &prop,
         BodyGroupMemory &mem,
         uint32_t body_idx,
-        Mat3x3 &C,
         Vector3 &origin,
         float *J,
         uint32_t body_dof_offset,
@@ -1798,24 +1809,11 @@ void GaussMinimizationNode::computeContactJacobian(
 
             #pragma unroll
             for(CountT j = 0; j < 3; ++j) {
-                J_col[j] = S_col[j];
+                J_col[j] += coeff * S_col[j];
             }
         }
 
         curr_idx = offsets.parent;
-    }
-
-    // Multiply by C^T to project into contact space
-    for (CountT i = 0; i < prop.qvDim; ++i) {
-        float *J_col = J +
-                j_num_rows * (body_dof_offset + i) +
-                jac_row;
-
-        Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
-        J_col_vec = C.transpose() * J_col_vec;
-        J_col[0] = coeff * J_col_vec.x;
-        J_col[1] = coeff * J_col_vec.y;
-        J_col[2] = coeff * J_col_vec.z;
     }
 
 #if 0
