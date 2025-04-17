@@ -836,7 +836,7 @@ inline void recursiveNewtonEuler(
 
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     BodyOffsets* offsets = mem.offsets(prop);
-    BodyInertial* body_inertials = mem.inertials(prop);
+    BodyHierarchy* hiers = mem.hierarchies(prop);
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
     int32_t *dof_to_body = mem.dofToBody(prop);
     uint32_t* is_static = mem.isStatic(prop);
@@ -1038,7 +1038,7 @@ inline void recursiveNewtonEuler(
 
         // Lastly, *add* explicit damping/passive forces here
         for (uint32_t i = 0; i < prop.qvDim; ++i) {
-            float damping = body_inertials[dof_to_body[i]].damping;
+            float damping = hiers[dof_to_body[i]].damping;
             if (damping != 0) {
                 qfrc[i] += damping * qvs[i];
             }
@@ -2141,15 +2141,15 @@ void implicitDamping(Context &ctx,
                      BodyGroupProperties &prop,
                      BodyGroupMemory &mem)
 {
-    BodyInertial *body_inertials = mem.inertials(prop);
+    BodyHierarchy *hiers = mem.hierarchies(prop);
     int32_t *dof_to_body = mem.dofToBody(prop);
     uint32_t total_dofs = prop.qvDim;
 
     // Check if damping is required
     bool damping_req = false;
     for (int i = 0; i < prop.numBodies; ++i) {
-        BodyInertial &inertial = body_inertials[i];
-        if (inertial.damping != 0.f) {
+        BodyHierarchy &hier = hiers[i];
+        if (hier.damping != 0.f) {
             damping_req = true;
             break;
         }
@@ -2168,7 +2168,7 @@ void implicitDamping(Context &ctx,
         return M[row + total_dofs * col];
     };
     for (int32_t i = 0; i < total_dofs; ++i) {
-        qM(i, i) += h * body_inertials[dof_to_body[i]].damping;
+        qM(i, i) += h * hiers[dof_to_body[i]].damping;
     }
     // LTDL factor (M + hB), then solve for damped acceleration
     factorM(prop, mem);
