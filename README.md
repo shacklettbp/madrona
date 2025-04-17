@@ -73,7 +73,7 @@ Dependencies
 
 ### GPU-Backend Dependencies
 * Volta or newer NVIDIA GPU
-* CUDA 12.1 or newer (+ appropriate NVIDIA drivers)
+* CUDA Toolkit 12.4 or 12.8 or newer (+ appropriate NVIDIA drivers). CUDA 12.5 and 12.6 do not work due to CUDA bugs.
 * **Linux** (CUDA on Windows lacks certain unified memory features that Madrona requires)
 
 These dependencies are needed for the GPU backend. If they are not present, Madrona's GPU backend will be disabled, but you can still use the CPU backend.
