@@ -4,22 +4,27 @@
 
 #ifdef CV_COUNT_GPU_CLOCKS
 extern "C" {
-madrona::AtomicU64 cvinertias = 0;
-madrona::AtomicU64 cvrne = 0;
-madrona::AtomicU64 cvcrb = 0;
-madrona::AtomicU64 cvinvMass = 0;
-madrona::AtomicU64 cvprocessContacts = 0;
-madrona::AtomicU64 cvconvert = 0;
-madrona::AtomicU64 cvdestroy = 0;
-madrona::AtomicU64 cvinit = 0;
-madrona::AtomicU64 cvintg = 0;
-madrona::AtomicU64 cvfk = 0;
-madrona::AtomicU64 cvnarrowphase = 0;
-madrona::AtomicU64 cvallocScratch = 0;
-madrona::AtomicU64 cvprepSolver = 0;
-madrona::AtomicU64 cvcontAccRef = 0;
-madrona::AtomicU64 cveqAccRef = 0;
-madrona::AtomicU64 cvcg = 0;
+DEFINE_STAGE_VARS(com);
+DEFINE_STAGE_VARS(inertias);
+DEFINE_STAGE_VARS(rne);
+DEFINE_STAGE_VARS(crb);
+DEFINE_STAGE_VARS(invMass);
+DEFINE_STAGE_VARS(processContacts);
+DEFINE_STAGE_VARS(convert);
+DEFINE_STAGE_VARS(destroy);
+DEFINE_STAGE_VARS(init);
+DEFINE_STAGE_VARS(damp);
+DEFINE_STAGE_VARS(intg);
+DEFINE_STAGE_VARS(fk);
+DEFINE_STAGE_VARS(narrowphase);
+DEFINE_STAGE_VARS(broadphase1);
+DEFINE_STAGE_VARS(broadphase2);
+DEFINE_STAGE_VARS(allocScratch);
+DEFINE_STAGE_VARS(prepSolver);
+DEFINE_STAGE_VARS(contAccRef);
+DEFINE_STAGE_VARS(eqAccRef);
+DEFINE_STAGE_VARS(cg);
+DEFINE_STAGE_VARS(lineSearch);
 }
 #endif
 
@@ -28,10 +33,12 @@ namespace madrona::phys::cv {
 namespace tasks {
 #ifdef CV_COUNT_GPU_CLOCKS
 inline void reportPhysicsClocks(Context &ctx,
-                                PhysicsSystemState &)
+                                PhysicsSystemState &state)
 {
     uint64_t total_clocks = 0;
     uint64_t count = 0;
+
+    uint64_t cvNumFrames = state.cvNumFrames;
 
     #define CV_PREP_TOTAL(name) total_clocks += cv##name .load< sync::relaxed >(); \
                                 count++;
@@ -40,6 +47,19 @@ inline void reportPhysicsClocks(Context &ctx,
                                         (double)(cv##name .load< sync::relaxed >()) / (double)total_clocks); \
                                   cv##name .store< sync::relaxed >(0);
 
+    cvNumFrames++;
+
+    #define CV_RUNNING_AVG(name) cv##name##_avg += (uint64_t) \
+        ((double)(cv##name .load<sync::relaxed>() - cv##name##_avg) / (double)cvNumFrames); \
+        total_clocks += cv##name##_avg; \
+        count++;
+
+    #define CV_REPORT_AVG_CLOCK(name) printf("\t- " #name " = %lu (%lf)\n", cv##name##_avg,\
+                                        (double)(cv##name##_avg) / (double)total_clocks); \
+                                  cv##name .store< sync::relaxed >(0);
+
+
+
     if (ctx.worldID().idx != 0) {
         return;
     }
@@ -47,47 +67,49 @@ inline void reportPhysicsClocks(Context &ctx,
     if (threadIdx.x == 0 && ctx.worldID().idx == 0) {
         printf("Reporting physics clocks:\n");
 
-        CV_PREP_TOTAL(com);
-        CV_PREP_TOTAL(inertias);
-        CV_PREP_TOTAL(rne);
-        CV_PREP_TOTAL(crb);
-        CV_PREP_TOTAL(invMass);
-        CV_PREP_TOTAL(processContacts);
-        CV_PREP_TOTAL(convert);
-        CV_PREP_TOTAL(destroy);
-        CV_PREP_TOTAL(init);
-        CV_PREP_TOTAL(intg);
-        CV_PREP_TOTAL(fk);
-        CV_PREP_TOTAL(narrowphase);
-        CV_PREP_TOTAL(broadphase1);
-        CV_PREP_TOTAL(broadphase2);
-        CV_PREP_TOTAL(allocScratch);
-        CV_PREP_TOTAL(prepSolver);
-        CV_PREP_TOTAL(contAccRef);
-        CV_PREP_TOTAL(eqAccRef);
-        CV_PREP_TOTAL(cg);
-        CV_PREP_TOTAL(lineSearch);
+        CV_RUNNING_AVG(com);
+        CV_RUNNING_AVG(inertias);
+        CV_RUNNING_AVG(rne);
+        CV_RUNNING_AVG(crb);
+        CV_RUNNING_AVG(invMass);
+        CV_RUNNING_AVG(processContacts);
+        CV_RUNNING_AVG(convert);
+        CV_RUNNING_AVG(destroy);
+        CV_RUNNING_AVG(init);
+        CV_RUNNING_AVG(damp);
+        CV_RUNNING_AVG(intg);
+        CV_RUNNING_AVG(fk);
+        CV_RUNNING_AVG(narrowphase);
+        CV_RUNNING_AVG(broadphase1);
+        CV_RUNNING_AVG(broadphase2);
+        CV_RUNNING_AVG(allocScratch);
+        CV_RUNNING_AVG(prepSolver);
+        CV_RUNNING_AVG(contAccRef);
+        CV_RUNNING_AVG(eqAccRef);
+        CV_RUNNING_AVG(cg);
+        CV_RUNNING_AVG(lineSearch);
 
-        CV_REPORT_CLOCK(com);
-        CV_REPORT_CLOCK(inertias);
-        CV_REPORT_CLOCK(rne);
-        CV_REPORT_CLOCK(crb);
-        CV_REPORT_CLOCK(invMass);
-        CV_REPORT_CLOCK(processContacts);
-        CV_REPORT_CLOCK(convert);
-        CV_REPORT_CLOCK(destroy);
-        CV_REPORT_CLOCK(init);
-        CV_REPORT_CLOCK(intg);
-        CV_REPORT_CLOCK(fk);
-        CV_REPORT_CLOCK(narrowphase);
-        CV_REPORT_CLOCK(broadphase1);
-        CV_REPORT_CLOCK(broadphase2);
-        CV_REPORT_CLOCK(allocScratch);
-        CV_REPORT_CLOCK(prepSolver);
-        CV_REPORT_CLOCK(contAccRef);
-        CV_REPORT_CLOCK(eqAccRef);
-        CV_REPORT_CLOCK(cg);
-        CV_REPORT_CLOCK(lineSearch);
+        CV_REPORT_AVG_CLOCK(com);
+        CV_REPORT_AVG_CLOCK(inertias);
+        CV_REPORT_AVG_CLOCK(rne);
+        CV_REPORT_AVG_CLOCK(crb);
+        CV_REPORT_AVG_CLOCK(invMass);
+        CV_REPORT_AVG_CLOCK(processContacts);
+        CV_REPORT_AVG_CLOCK(convert);
+        CV_REPORT_AVG_CLOCK(destroy);
+        CV_REPORT_AVG_CLOCK(init);
+        CV_REPORT_AVG_CLOCK(damp);
+        CV_REPORT_AVG_CLOCK(intg);
+        CV_REPORT_AVG_CLOCK(fk);
+        CV_REPORT_AVG_CLOCK(narrowphase);
+        CV_REPORT_AVG_CLOCK(broadphase1);
+        CV_REPORT_AVG_CLOCK(broadphase2);
+        CV_REPORT_AVG_CLOCK(allocScratch);
+        CV_REPORT_AVG_CLOCK(prepSolver);
+        CV_REPORT_AVG_CLOCK(contAccRef);
+        CV_REPORT_AVG_CLOCK(eqAccRef);
+        CV_REPORT_AVG_CLOCK(cg);
+        CV_REPORT_AVG_CLOCK(lineSearch);
     }
 }
 #endif
@@ -207,6 +229,7 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     ctx.singleton<CVSolveData>().scratchAllocatedBytes = 0;
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
     ctx.singleton<CVSolveData>().enablePhysics = 1;
+    ctx.singleton<PhysicsSystemState>().cvNumFrames = 0;
 }
 
 void registerTypes(ECSRegistry &registry)
