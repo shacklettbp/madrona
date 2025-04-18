@@ -2512,9 +2512,11 @@ void solveCPU(Context &ctx,
 {
 
     using namespace cpu_solver;
-    uint32_t dim_c = cv_sing.numRowsJc;
-    uint32_t dim_e = cv_sing.numRowsJe;
-    uint32_t num_constraints = dim_c + dim_e;
+    uint32_t nc = cv_sing.numRowsJc;
+    uint32_t ne = cv_sing.numRowsJe;
+    uint32_t nf = cv_sing.numRowsJf;
+    uint32_t nv = cv_sing.totalNumDofs;
+    uint32_t num_constraints = nc + ne;
 
     // No constraints, done
     if (num_constraints == 0) { copyResult(ctx, cv_sing.freeAcc); }
@@ -2551,39 +2553,51 @@ void solveCPU(Context &ctx,
     }
 
     //Allocate memory for reference acceleration, impedance, and residuals
-    uint32_t req_floats = 4 * dim_c + 3 * dim_e + 2 * cv_sing.totalNumDofs;
+    uint32_t req_floats = 4 * nc + 3 * ne + 3 * nf + 2 * nv;
     float *solve_scratch = (float *)ctx.tmpAlloc(req_floats * sizeof(float));
+    // Contact
     float *acc_ref_c = solve_scratch;
-    float *acc_ref_e = acc_ref_c + dim_c;
-    float *R_c = acc_ref_e + dim_e;
-    float *R_e = R_c + dim_c;
-    float *D_c = R_e + dim_e;
-    float *D_e = D_c + dim_c;
-    float *r_con = D_e + dim_c;
-    float *a_solve = r_con + dim_c;
-    float *x0 = a_solve + cv_sing.totalNumDofs;
+    float *R_c = acc_ref_c + nc;
+    float *D_c = R_c + nc;
+    float *res_c = D_c + nc;
+    // Limit
+    float *acc_ref_e = res_c + nc;
+    float *R_e = acc_ref_e + ne;
+    float *D_e = R_e + ne;
+    // Friction
+    float *acc_ref_f = D_e + ne;
+    float *R_f = acc_ref_f + nf;
+    float *res_f = R_f + nf;
+
+    float *a_solve = res_f + nf;
+    float *x0 = a_solve + nv;
 
     // Set residuals for contact constraints
-    memset(r_con, 0, sizeof(float) * dim_c);
+    memset(res_c, 0, sizeof(float) * nc);
     for (uint32_t i = 0; i < cv_sing.numContactPts; i++) {
-        r_con[i * 3] = -cv_sing.penetrations[i];
+        res_c[i * 3] = -cv_sing.penetrations[i];
     }
+    // For friction loss, residuals is just zero
+    memset(res_f, 0, sizeof(float) * nf);
 
     // Compute reference accelerations
     computeAccRef(acc_ref_c, R_c, cv_sing.vel, cv_sing.J_c,
-                  cv_sing.numRowsJc, cv_sing.numColsJc, r_con,
+                  nc, nv, res_c,
                   cv_sing.diagApprox_c, cv_sing.h);
     computeAccRef(acc_ref_e, R_e, cv_sing.vel, cv_sing.J_e,
-                  cv_sing.numRowsJe, cv_sing.numColsJe, cv_sing.eqResiduals,
+                  ne, nv, cv_sing.eqResiduals,
                   cv_sing.diagApprox_e, cv_sing.h);
+    computeAccRef(acc_ref_f, R_f, cv_sing.vel, cv_sing.J_f,
+                  nf, nv, res_f,
+                  cv_sing.diagApprox_f, cv_sing.h);
 
     adjustContactRegularization(R_c, cv_sing.mu, cv_sing.muDim);
 
     // Constraint mass
-    for (uint32_t i = 0; i < dim_c; i++) {
+    for (uint32_t i = 0; i < nc; i++) {
         D_c[i] = 1 / R_c[i];
     }
-    for (uint32_t i = 0; i < dim_e; i++) {
+    for (uint32_t i = 0; i < ne; i++) {
         D_e[i] = 1 / R_e[i];
     }
 
@@ -2595,7 +2609,8 @@ void solveCPU(Context &ctx,
 
     // Set initial guess to be previous acceleration
     memcpy(x0, cv_sing.currAcc, sizeof(float) * cv_sing.totalNumDofs);
-    nonlinearCG(ctx, a_solve, x0, acc_ref_c, acc_ref_e, D_c, D_e, tol, ls_tol,
+    nonlinearCG(ctx, a_solve, x0, acc_ref_c, acc_ref_e, acc_ref_f,
+        D_c, D_e, R_f, tol, ls_tol,
         adaptive_ls, max_iter, ls_iters, cv_sing);
     copyResult(ctx, a_solve);
 }

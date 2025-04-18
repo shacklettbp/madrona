@@ -142,12 +142,15 @@ struct CVSolveData {
     float *currAcc;
     float *J_c;
     float *J_e;
+    float *J_f;
     float *mu;
     float *penetrations;
     float *eqResiduals;
     // Diagonal approximations of A = J * M^-1 * J^T
     float *diagApprox_c;
     float *diagApprox_e;
+    float *diagApprox_f;
+    float *floss;
 
     uint32_t massDim;
     uint32_t freeAccDim;
@@ -158,6 +161,8 @@ struct CVSolveData {
 
     uint32_t numRowsJe;
     uint32_t numColsJe;
+
+    uint32_t numRowsJf;
 
     uint32_t muDim;
     uint32_t penetrationsDim;

@@ -108,8 +108,10 @@ inline void nonlinearCG(Context &ctx,
                         float *x0,
                         float *a_ref_c,
                         float *a_ref_e,
+                        float *a_ref_f,
                         float *D_c,
                         float *D_e,
+                        float *R_f,
                         float tol,
                         float ls_tol,
                         bool adaptive_ls,
@@ -122,6 +124,7 @@ inline void nonlinearCG(Context &ctx,
     uint32_t nv_bytes = nv * sizeof(float);
     uint32_t nc = cv_sing.numRowsJc;
     uint32_t ne = cv_sing.numRowsJe;
+    uint32_t nf = cv_sing.numRowsJf;
     float scale = 1.f / cv_sing.totalMass;
 
     float x[nv];
@@ -135,8 +138,10 @@ inline void nonlinearCG(Context &ctx,
 
     float jar_c[nc]; // J_c x - a_ref_c
     float jar_e[ne]; // J_e x - a_ref_e
+    float jar_f[nf]; // J_f x - a_ref_f
     float jp_c[nc]; // J_c p
     float jp_e[ne]; // J_e p
+    float jp_f[nf]; // J_f p
 
     // Load initial guess, compute some values
     memcpy(x, x0, nv_bytes);
@@ -149,10 +154,12 @@ inline void nonlinearCG(Context &ctx,
     sclAdd(jar_c, a_ref_c, -1.f, nc);
     matVecMul<false, true>(jar_e, cv_sing.J_e, x, ne, nv);
     sclAdd(jar_e, a_ref_e, -1.f, ne);
+    matVecMul<false, true>(jar_f, cv_sing.J_f, x, nf, nv);
+    sclAdd(jar_f, a_ref_f, -1.f, nf);
 
     // f(x0) and df(x0), M^{-1}df(x0)
-    float fun = obj(g, x_min_a_free, Mx_min_a_free, D_c,
-                    D_e, jar_c, jar_e, cv_sing);
+    float fun = obj(g, x_min_a_free, Mx_min_a_free, D_c, D_e, R_f,
+        jar_c, jar_e, jar_f, cv_sing);
     memcpy(M_grad, g, nv_bytes);
     fullMSolveMul(ctx, M_grad, true);
     // p = -M_grad
@@ -168,9 +175,9 @@ inline void nonlinearCG(Context &ctx,
             ada_ls_tol = ls_tol;
         }
         float alpha = exactLineSearch(p, x_min_a_free, Mx_min_a_free, Mpk,
-                                      D_c, D_e, jar_c, jar_e, jp_c, jp_e,
-                                      nc, ne, nv, ada_ls_tol, ls_iters,
-                                      ctx, cv_sing);
+                                      D_c, D_e, R_f, jar_c, jar_e, jar_f,
+                                      jp_c, jp_e, jp_f, nc, ne, nf, nv,
+                                      ada_ls_tol, ls_iters, ctx, cv_sing);
         if (alpha == 0.f) break;
 
         // Update x
@@ -184,8 +191,8 @@ inline void nonlinearCG(Context &ctx,
         float den = fmaxf(dot(g, M_grad, nv), MINVAL);
 
         // Convergence check
-        float fun_new = obj(g, x_min_a_free, Mx_min_a_free, D_c,
-                            D_e, jar_c, jar_e, cv_sing);
+        float fun_new = obj(g, x_min_a_free, Mx_min_a_free, D_c, D_e, R_f,
+            jar_c, jar_e, jar_f, cv_sing);
         if (scale * (fun - fun_new) < tol) break;
         if (scale * norm(g, nv) < tol) break;
 
@@ -204,7 +211,7 @@ inline void nonlinearCG(Context &ctx,
         fun = fun_new;
         memcpy(M_grad, M_grad_new, nv_bytes);
     }
-    // printf("CG Iterations %d\n", i);
+    printf("CG Iterations %d\n", i);
     memcpy(res, x, nv_bytes);
 }
 
@@ -241,8 +248,10 @@ inline float obj(float *grad_out,
                  float *Mx_min_a_free,
                  float *D_c,
                  float *D_e,
+                 float *R_f,
                  float *jar_c,
                  float *jar_e,
+                 float *jar_f,
                  CVSolveData &cv_sing)
 {
     using namespace cpu_utils;
@@ -261,14 +270,22 @@ inline float obj(float *grad_out,
     float grad_c[nc];
     cost += s_c(grad_c, jar_c, D_c, cv_sing.mu, nc);
     // J.T @ grad_c
-    matVecMul<true, false>(grad_out, cv_sing.J_c, grad_c, cv_sing.numRowsJc, cv_sing.numColsJc);
+    matVecMul<true, false>(grad_out, cv_sing.J_c, grad_c, nc, nv);
 
     // Equation constraints
     uint32_t ne = cv_sing.numRowsJe;
     float grad_e[ne];
     cost += s_e(grad_e, jar_e, D_e, ne);
     // J.T @ grad_e
-    matVecMul<true, false>(grad_out, cv_sing.J_e, grad_e, cv_sing.numRowsJe, cv_sing.numColsJe);
+    matVecMul<true, false>(grad_out, cv_sing.J_e, grad_e, ne, nv);
+
+    // Frictional constraints
+    uint32_t nf = cv_sing.numRowsJf;
+    float grad_f[nf];
+    cost += s_f(grad_f, jar_f, R_f, cv_sing.floss, nf);
+    // J.T @ grad_f
+    matVecMul<true, false>(grad_out, cv_sing.J_f, grad_f, nf, nv);
+
 
     return cost;
 }
@@ -339,12 +356,37 @@ float s_e(float *grad_out,
     return cost;
 }
 
+float s_f(float *grad_out,
+          float *jar,
+          float *R_f,
+          float *floss,
+          uint32_t dim) {
+    float cost = 0.f;
+    for (uint32_t i = 0; i < dim; i++) {
+        // linear negative
+        if (jar[i] <= -R_f[i]*floss[i]) {
+            cost += -0.5f * R_f[i] * floss[i]*floss[i] - floss[i]*jar[i];
+            grad_out[i] = -floss[i];
+        }
+        // linear positive
+        else if (jar[i] >= R_f[i]*floss[i]) {
+            cost += -0.5f * R_f[i] * floss[i]*floss[i] + floss[i]*jar[i];
+            grad_out[i] = floss[i];
+        }
+        // quadratic
+        else {
+            cost += 0.5f * (1.f / R_f[i]) * jar[i]*jar[i];
+        }
+    }
+    return cost;
+}
+
 float exactLineSearch(float *pk, float *x_min_a_free,
                       float *Mx_min_a_free, float *Mpk,
-                      float *D_c, float *D_e,
-                      float *jar_c, float *jar_e,
-                      float *Jp_c, float *Jp_e,
-                      uint32_t nc, uint32_t ne,
+                      float *D_c, float *D_e, float *R_f,
+                      float *jar_c, float *jar_e, float *jar_f,
+                      float *Jp_c, float *Jp_e, float *Jp_f,
+                      uint32_t nc, uint32_t ne, uint32_t nf,
                       uint32_t nv, float ls_tol, uint32_t ls_iters,
                       Context &ctx, CVSolveData &cv_sing) {
     using namespace cpu_utils;
@@ -376,6 +418,15 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         float Jx;
     };
 
+    struct FrictionStore {
+        float quad0;
+        float quad1;
+        float quad2;
+        float Rf;
+        float floss;
+        float Jx;
+    };
+
     // Search vector too small
     if (norm(pk, nv) < MINVAL) return 0.f;
     uint32_t nv_bytes = nv * sizeof(float);
@@ -394,6 +445,8 @@ float exactLineSearch(float *pk, float *x_min_a_free,
     matVecMul<false, true>(Jp_c, cv_sing.J_c, pk, cv_sing.numRowsJc, nv);
     // 3. Equality constraints
     matVecMul<false, true>(Jp_e, cv_sing.J_e, pk, cv_sing.numRowsJe, nv);
+    // 4. Friction loss
+    matVecMul<false, true>(Jp_f, cv_sing.J_f, pk, cv_sing.numRowsJf, nv);
 
     // --- Precomputation of constraints ---
     // For each contact, store some information to avoid re-computation
@@ -440,6 +493,7 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         cs[i].VV = Jp_T1 * Jp_T1 + Jp_T2 * Jp_T2;
         cs[i].Dm = mid_weight;
     }
+
     LimitStore ls[ne];
     for (uint32_t i = 0; i < ne; i++) {
         float Jx = jar_e[i];
@@ -449,6 +503,19 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         ls[i].quad1 = de * Jx * Jp;
         ls[i].quad2 = 0.5f * de * Jp * Jp;
         ls[i].Jx = Jx;
+    }
+
+    FrictionStore ls_f[nf];
+    for (uint32_t i = 0; i < nf; i++) {
+        float Jx = jar_f[i];
+        float Jp = Jp_f[i];
+        float df = 1.f / R_f[i];
+        ls_f[i].quad0 = 0.5f * df * Jx * Jx;
+        ls_f[i].quad1 = df * Jx * Jp;
+        ls_f[i].quad2 = 0.5f * df * Jp * Jp;
+        ls_f[i].floss = cv_sing.floss[i];
+        ls_f[i].Rf = R_f[i];
+        ls_f[i].Jx = Jx;
     }
 
     // Line search function: updates with phi(a), d_phi(a), d2_phi(a)
@@ -505,7 +572,7 @@ float exactLineSearch(float *pk, float *x_min_a_free,
             }
         }
 
-        // Finally process equality constraints
+        // process equality constraints
         for (uint32_t i = 0; i < ne; i++) {
             LimitStore ls_i = ls[i];
             float jx = ls_i.Jx;
@@ -519,6 +586,30 @@ float exactLineSearch(float *pk, float *x_min_a_free,
             }
         }
 
+        // process friction loss constraints
+        for (uint32_t i = 0; i < nf; i++) {
+            FrictionStore ls_i = ls_f[i];
+            float jx = ls_i.Jx;
+            float jp = Jp_e[i];
+            float N_search = jx + a * jp;
+            // Quadratic
+            if (-ls_i.Rf < N_search && N_search < ls_i.Rf) {
+                quadTotal[0] += ls_i.quad0;
+                quadTotal[1] += ls_i.quad1;
+                quadTotal[2] += ls_i.quad2;
+            }
+
+            else if (N_search <= -ls_i.Rf) {
+                quadTotal[0] += -ls_i.floss * (0.5f * ls_i.Rf + jx);
+                quadTotal[1] += -ls_i.floss * jp;
+            }
+            else {
+                quadTotal[0] += -ls_i.floss * (0.5f * ls_i.Rf - jx);
+                quadTotal[1] += ls_i.floss * jp;
+            }
+        }
+
+        // Evaluate quadratic at alpha=a
         fun += a * a * quadTotal[2] + a * quadTotal[1] + quadTotal[0];
         grad += 2 * a * quadTotal[2] + quadTotal[1];
         hess += 2 * quadTotal[2];

@@ -167,6 +167,10 @@ struct BodyGroupProperties {
 
     float gravityCoeff;
 
+    // Joint dynamics
+    bool reqDamping;
+    uint32_t numFrictionDofs;
+
     struct {
         uint32_t bodyCounter;
 
@@ -289,6 +293,7 @@ struct BodyGroupMemory {
     inline float * dqv(BodyGroupProperties);
     inline float * f(BodyGroupProperties);
     inline float * mus(BodyGroupProperties);
+    inline float * damping(BodyGroupProperties);
     inline BodyLimitConstraint * limits(BodyGroupProperties);
     inline BodyInertial * inertials(BodyGroupProperties);
     inline int32_t * expandedParent(BodyGroupProperties);
