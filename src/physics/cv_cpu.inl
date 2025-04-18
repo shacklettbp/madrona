@@ -376,6 +376,7 @@ float s_f(float *grad_out,
         // quadratic
         else {
             cost += 0.5f * (1.f / R_f[i]) * jar[i]*jar[i];
+            grad_out[i] = (1.f / R_f[i]) * jar[i];
         }
     }
     return cost;

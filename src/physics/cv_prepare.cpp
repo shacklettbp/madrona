@@ -1513,6 +1513,7 @@ inline void exportCPUSolverState(
         }
         assert(processed == total_friction_dofs);
         cv_sing.J_f = J_f;
+        cv_sing.numRowsJf = total_friction_dofs;
         cv_sing.diagApprox_f = diagApprox_f;
         cv_sing.floss = floss_full;
     }
