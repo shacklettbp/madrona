@@ -233,7 +233,6 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
     ctx.singleton<CVSolveData>().enablePhysics = 1;
     ctx.singleton<PhysicsSystemState>().cvNumFrames = 0;
-    ctx.singleton<PhysicsSystemState>().cvNumInitFrames = 0;
 }
 
 void registerTypes(ECSRegistry &registry)
