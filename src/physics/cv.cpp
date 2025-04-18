@@ -39,7 +39,7 @@ inline void reportPhysicsClocks(Context &ctx,
     uint64_t total_clocks = 0;
     uint64_t count = 0;
 
-    uint64_t cvNumFrames = state.cvNumFrames;
+    uint64_t cvNumFrames = 0;
 
     #define CV_PREP_TOTAL(name) total_clocks += cv##name .load< sync::relaxed >(); \
                                 count++;
@@ -58,7 +58,7 @@ inline void reportPhysicsClocks(Context &ctx,
     #define CV_REPORT_AVG_CLOCK(name) double cv##name##_pctg = (double)(cv##name##_avg) / (double)total_clocks; \
         cv##name##_min = std::min(cv##name##_pctg, cv##name##_min); \
         cv##name##_max = std::max(cv##name##_pctg, cv##name##_max); \
-        printf("\t- Average " #name " = %lu (%lf, min=%lf, max=%lf)\n", cv##name##_avg, cv##name##_pctg, cv##name##_min, cv##name##_max); \
+        printf("createStageData(avg=%lf, min=%lf, max=%lf)\n", cv##name##_pctg, cv##name##_min, cv##name##_max); \
         cv##name .store< sync::relaxed >(0);
 
 
@@ -233,6 +233,7 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
     ctx.singleton<CVSolveData>().enablePhysics = 1;
     ctx.singleton<PhysicsSystemState>().cvNumFrames = 0;
+    ctx.singleton<PhysicsSystemState>().cvNumInitFrames = 0;
 }
 
 void registerTypes(ECSRegistry &registry)

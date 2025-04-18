@@ -104,6 +104,7 @@ struct PhysicsSystemState {
     bool createRenderObjects;
 
     uint64_t cvNumFrames;
+    uint64_t cvNumInitFrames;
 };
 
 struct CandidateTemporary : Archetype<CandidateCollision> {};
