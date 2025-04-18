@@ -20,6 +20,7 @@ extern madrona::AtomicU64 cvprocessContacts;
 extern madrona::AtomicU64 cvconvert;
 extern madrona::AtomicU64 cvdestroy;
 extern madrona::AtomicU64 cvinit;
+extern madrona::AtomicU64 cvdamp;
 extern madrona::AtomicU64 cvintg;
 extern madrona::AtomicU64 cvfk;
 extern madrona::AtomicU64 cvnarrowphase;
