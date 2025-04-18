@@ -626,6 +626,9 @@ BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, StringID string_id)
 BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, uint32_t body_idx);
 BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, StringID string_id);
 
+BodyHierarchy & getBodyHierarchy(Context &ctx, Entity body_grp, uint32_t body_idx);
+BodyHierarchy & getBodyHierarchy(Context &ctx, Entity body_grp, StringID string_id);
+
 // Checkpointing
 uint32_t getNumCheckpointBytes(Context &ctx, Entity body_grp);
 

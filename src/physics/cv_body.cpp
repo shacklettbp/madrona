@@ -783,6 +783,20 @@ BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, StringID string_id
     return m.inertials(p)[getBodyIndex(m, p, string_id)];
 }
 
+BodyHierarchy & getBodyHierarchy(Context &ctx, Entity body_grp, uint32_t body_idx)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.hierarchies(p)[body_idx];
+}
+
+BodyHierarchy & getBodyHierarchy(Context &ctx, Entity body_grp, StringID string_id)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.hierarchies(p)[getBodyIndex(m, p, string_id)];
+}
+
 uint32_t getNumCheckpointBytes(Context &ctx, Entity body_grp)
 {
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
