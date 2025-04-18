@@ -836,7 +836,6 @@ inline void recursiveNewtonEuler(
 
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     BodyOffsets* offsets = mem.offsets(prop);
-    BodyHierarchy* hiers = mem.hierarchies(prop);
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
     int32_t *dof_to_body = mem.dofToBody(prop);
     uint32_t* is_static = mem.isStatic(prop);
@@ -1037,11 +1036,9 @@ inline void recursiveNewtonEuler(
         }
 
         // Lastly, *add* explicit damping/passive forces here
+        float *damping = mem.damping(prop);
         for (uint32_t i = 0; i < prop.qvDim; ++i) {
-            float damping = hiers[dof_to_body[i]].damping;
-            if (damping != 0) {
-                qfrc[i] += damping * qvs[i];
-            }
+            qfrc[i] += damping[i] * qvs[i];
         }
     }
 }
@@ -1472,6 +1469,55 @@ inline void exportCPUSolverState(
         cv_sing.numColsJe = total_num_dofs;
     }
 
+    { // Process friction loss dofs
+        // Count number of dofs that require friction loss
+        uint32_t total_friction_dofs = 0;
+        for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
+            BodyGroupProperties &p = all_properties[grp_idx];
+            total_friction_dofs += p.numFrictionDofs;
+        }
+        // This is just 0 or 1 whether the dof requires friction
+        float *J_f = (float *)ctx.tmpAlloc(
+                total_friction_dofs * total_num_dofs * sizeof(float));
+        memset(J_f, 0, total_friction_dofs * total_num_dofs * sizeof(float));
+        auto Jf = [&](int32_t row, int32_t col) -> float& {
+            return J_f[row + total_friction_dofs * col];
+        };
+
+        uint32_t num_friction_bytes = total_friction_dofs * sizeof(float);
+        float *diagApprox_f = (float *)ctx.tmpAlloc(num_friction_bytes);
+        float *floss_full = (float *)ctx.tmpAlloc(num_friction_bytes);
+
+        uint32_t processed = 0;
+        uint32_t dof_idx = 0;
+        for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
+            BodyGroupMemory &m = all_memories[grp_idx];
+            BodyGroupProperties &p = all_properties[grp_idx];
+            BodyInertial *inertials = m.inertials(p);
+            BodyOffsets *offset = m.offsets(p);
+            BodyHierarchy *hiers = m.hierarchies(p);
+            // todo: too many loops
+            for (uint32_t i = 0; i < p.numBodies; ++i) {
+                BodyInertial &inertial = inertials[i];
+                float floss = hiers[i].frictionLoss;
+                for (uint32_t j = 0; j < offset[i].numDofs; ++j) {
+                    if (floss != 0.f) {
+                        Jf(processed, dof_idx) = 1.f;
+                        diagApprox_f[processed] = inertial.approxInvMassDof[j];
+                        floss_full[processed] = floss;
+                        processed++;
+                    }
+                    dof_idx++;
+                }
+            }
+        }
+        assert(processed == total_friction_dofs);
+        cv_sing.J_f = J_f;
+        cv_sing.numRowsJf = total_friction_dofs;
+        cv_sing.diagApprox_f = diagApprox_f;
+        cv_sing.floss = floss_full;
+    }
+
     cv_sing.totalNumDofs = total_num_dofs;
     cv_sing.numContactPts = total_contact_pts;
     cv_sing.h = step_h;
@@ -1604,6 +1650,31 @@ inline void resetMasses(BodyGroupMemory &m,
     }
 }
 
+// Any pre-processing of joint dynamics goes here
+inline void prepareDampingFriction(
+    BodyGroupMemory &m,
+    BodyGroupProperties &p)
+{
+    BodyHierarchy *hiers = m.hierarchies(p);
+    int32_t *dof_to_body = m.dofToBody(p);
+    float *damping = m.damping(p);
+
+    bool req_damping = false;
+    uint32_t num_friction_dofs = 0;
+    for (uint32_t i = 0; i < p.qvDim; ++i) {
+        BodyHierarchy &hier= hiers[dof_to_body[i]];
+        damping[i] = hier.damping;
+        if (hier.damping != 0.f) {
+            req_damping = true;
+        }
+        if (hier.frictionLoss != 0.f) {
+            num_friction_dofs++;
+        }
+    }
+    p.reqDamping = req_damping;
+    p.numFrictionDofs = num_friction_dofs;
+}
+
 void initHierarchies(Context &ctx,
                      InitBodyGroup body_grp)
 {
@@ -1614,6 +1685,7 @@ void initHierarchies(Context &ctx,
 
     computeExpandedParent(ctx, m, p);
     resetMasses(m, p);
+    prepareDampingFriction(m, p);
     forwardKinematics(ctx, m, p);
 }
 
@@ -2141,20 +2213,15 @@ void implicitDamping(Context &ctx,
                      BodyGroupProperties &prop,
                      BodyGroupMemory &mem)
 {
-    BodyHierarchy *hiers = mem.hierarchies(prop);
+    CV_PROF_START(t0, damp);
+
+    BodyInertial *body_inertials = mem.inertials(prop);
     int32_t *dof_to_body = mem.dofToBody(prop);
     uint32_t total_dofs = prop.qvDim;
+    float *damping = mem.damping(prop);
 
     // Check if damping is required
-    bool damping_req = false;
-    for (int i = 0; i < prop.numBodies; ++i) {
-        BodyHierarchy &hier = hiers[i];
-        if (hier.damping != 0.f) {
-            damping_req = true;
-            break;
-        }
-    }
-    if (!damping_req) { return; }
+    if (!prop.reqDamping) { return; }
 
     float *M = mem.massMatrix(prop);
     // Compute M * acc, store into bias vector as scratch
@@ -2168,7 +2235,7 @@ void implicitDamping(Context &ctx,
         return M[row + total_dofs * col];
     };
     for (int32_t i = 0; i < total_dofs; ++i) {
-        qM(i, i) += h * hiers[dof_to_body[i]].damping;
+        qM(i, i) += h * damping[i];
     }
     // LTDL factor (M + hB), then solve for damped acceleration
     factorM(prop, mem);

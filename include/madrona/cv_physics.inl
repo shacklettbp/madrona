@@ -36,7 +36,8 @@ float * BodyGroupMemory::qv(BodyGroupProperties p) { return q(p) + p.qDim; }
 float * BodyGroupMemory::dqv(BodyGroupProperties p) { return qv(p) + p.qvDim; }
 float * BodyGroupMemory::f(BodyGroupProperties p) { return dqv(p) + p.qvDim; }
 float * BodyGroupMemory::mus(BodyGroupProperties p) { return f(p) + p.qvDim; }
-BodyLimitConstraint * BodyGroupMemory::limits(BodyGroupProperties p) { return (BodyLimitConstraint *)(mus(p) + p.numBodies); }
+float * BodyGroupMemory::damping(BodyGroupProperties p) { return mus(p) + p.numBodies; }
+BodyLimitConstraint * BodyGroupMemory::limits(BodyGroupProperties p) { return (BodyLimitConstraint *)(damping(p) + p.qvDim); }
 BodyInertial * BodyGroupMemory::inertials(BodyGroupProperties p) { return (BodyInertial *)(limits(p) + p.numEq); }
 int32_t * BodyGroupMemory::expandedParent(BodyGroupProperties p) { return (int32_t *)(inertials(p) + p.numBodies); }
 int32_t * BodyGroupMemory::dofToBody(BodyGroupProperties p) { return (int32_t *)(expandedParent(p) + p.qvDim); }
@@ -68,6 +69,7 @@ inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
            p.qvDim * sizeof(float) +                // dqv
            p.qvDim * sizeof(float) +                // force
            p.numBodies * sizeof(float) +            // mus
+           p.qvDim * sizeof(float) +                // damping
            p.numEq * sizeof(BodyLimitConstraint) +  // equalities
            p.numBodies * sizeof(BodyInertial) +     // inertias
            p.qvDim * sizeof(int32_t) +              // expanded parent
@@ -96,12 +98,13 @@ inline uint32_t BodyGroupMemory::tmpNumBytes(BodyGroupProperties p)
 
 inline uint32_t BodyGroupMemory::checkpointNumBytes(BodyGroupProperties p)
 {
+    // todo: maybe add damping, floss
     return sizeof(BodyGroupDesc) +
            p.qDim * sizeof(float) +                 // q
            p.qvDim * sizeof(float) +                // qv
            p.qvDim * sizeof(float) +                // dqv
            p.qvDim * sizeof(float) +                // force
-           p.numBodies * sizeof(float) +            // mus
+           p.numBodies * sizeof(float) +            // mus.
            p.numEq * sizeof(BodyLimitConstraint) +  // equalities
            p.numBodies * sizeof(BodyInertial) +     // inertias
            p.qvDim * sizeof(int32_t) +              // expanded parent

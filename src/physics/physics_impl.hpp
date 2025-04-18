@@ -4,33 +4,43 @@
 #include <madrona/physics.hpp>
 
 #ifdef MADRONA_GPU_MODE
-// #define CV_COUNT_GPU_CLOCKS
+#define CV_COUNT_GPU_CLOCKS
 #endif
 
 
 
 #ifdef CV_COUNT_GPU_CLOCKS
+#define DECLARE_STAGE_VARS(name) extern madrona::AtomicU64 cv##name; \
+                                 extern uint64_t cv##name##_avg; \
+                                 extern double cv##name##_min; \
+                                 extern double cv##name##_max;
+#define DEFINE_STAGE_VARS(name) madrona::AtomicU64 cv##name = 0; \
+                                uint64_t cv##name##_avg = 0; \
+                                double cv##name##_min = 99999.0; \
+                                double cv##name##_max = 0.0;
+
 extern "C" {
-extern madrona::AtomicU64 cvcom;
-extern madrona::AtomicU64 cvinertias;
-extern madrona::AtomicU64 cvrne;
-extern madrona::AtomicU64 cvcrb;
-extern madrona::AtomicU64 cvinvMass;
-extern madrona::AtomicU64 cvprocessContacts;
-extern madrona::AtomicU64 cvconvert;
-extern madrona::AtomicU64 cvdestroy;
-extern madrona::AtomicU64 cvinit;
-extern madrona::AtomicU64 cvintg;
-extern madrona::AtomicU64 cvfk;
-extern madrona::AtomicU64 cvnarrowphase;
-extern madrona::AtomicU64 cvbroadphase1;
-extern madrona::AtomicU64 cvbroadphase2;
-extern madrona::AtomicU64 cvallocScratch;
-extern madrona::AtomicU64 cvprepSolver;
-extern madrona::AtomicU64 cvcontAccRef;
-extern madrona::AtomicU64 cveqAccRef;
-extern madrona::AtomicU64 cvcg;
-extern madrona::AtomicU64 cvlineSearch;
+DECLARE_STAGE_VARS(com);
+DECLARE_STAGE_VARS(inertias);
+DECLARE_STAGE_VARS(rne);
+DECLARE_STAGE_VARS(crb);
+DECLARE_STAGE_VARS(invMass);
+DECLARE_STAGE_VARS(processContacts);
+DECLARE_STAGE_VARS(convert);
+DECLARE_STAGE_VARS(destroy);
+DECLARE_STAGE_VARS(init);
+DECLARE_STAGE_VARS(damp);
+DECLARE_STAGE_VARS(intg);
+DECLARE_STAGE_VARS(fk);
+DECLARE_STAGE_VARS(narrowphase);
+DECLARE_STAGE_VARS(broadphase1);
+DECLARE_STAGE_VARS(broadphase2);
+DECLARE_STAGE_VARS(allocScratch);
+DECLARE_STAGE_VARS(prepSolver);
+DECLARE_STAGE_VARS(contAccRef);
+DECLARE_STAGE_VARS(eqAccRef);
+DECLARE_STAGE_VARS(cg);
+DECLARE_STAGE_VARS(lineSearch);
 }
 
 class CVClockHelper {
@@ -92,6 +102,9 @@ struct PhysicsSystemState {
     uint32_t contactArchetypeID;
     uint32_t jointArchetypeID;
     bool createRenderObjects;
+
+    uint64_t cvNumFrames;
+    uint64_t cvNumInitFrames;
 };
 
 struct CandidateTemporary : Archetype<CandidateCollision> {};
