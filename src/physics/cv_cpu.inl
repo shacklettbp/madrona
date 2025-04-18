@@ -211,7 +211,7 @@ inline void nonlinearCG(Context &ctx,
         fun = fun_new;
         memcpy(M_grad, M_grad_new, nv_bytes);
     }
-    printf("CG Iterations %d\n", i);
+    // printf("CG Iterations %d\n", i);
     memcpy(res, x, nv_bytes);
 }
 
