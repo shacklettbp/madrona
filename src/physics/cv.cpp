@@ -1,4 +1,5 @@
 #include "cv.hpp"
+#include <algorithm>
 #include <madrona/sync.hpp>
 #include "physics_impl.hpp"
 
@@ -54,9 +55,11 @@ inline void reportPhysicsClocks(Context &ctx,
         total_clocks += cv##name##_avg; \
         count++;
 
-    #define CV_REPORT_AVG_CLOCK(name) printf("\t- " #name " = %lu (%lf)\n", cv##name##_avg,\
-                                        (double)(cv##name##_avg) / (double)total_clocks); \
-                                  cv##name .store< sync::relaxed >(0);
+    #define CV_REPORT_AVG_CLOCK(name) double cv##name##_pctg = (double)(cv##name##_avg) / (double)total_clocks; \
+        cv##name##_min = std::min(cv##name##_pctg, cv##name##_min); \
+        cv##name##_max = std::max(cv##name##_pctg, cv##name##_max); \
+        printf("\t- Average " #name " = %lu (%lf, min=%lf, max=%lf)\n", cv##name##_avg, cv##name##_pctg, cv##name##_min, cv##name##_max); \
+        cv##name .store< sync::relaxed >(0);
 
 
 

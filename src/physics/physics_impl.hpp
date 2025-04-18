@@ -4,16 +4,20 @@
 #include <madrona/physics.hpp>
 
 #ifdef MADRONA_GPU_MODE
-// #define CV_COUNT_GPU_CLOCKS
+#define CV_COUNT_GPU_CLOCKS
 #endif
 
 
 
 #ifdef CV_COUNT_GPU_CLOCKS
 #define DECLARE_STAGE_VARS(name) extern madrona::AtomicU64 cv##name; \
-                                 extern uint64_t cv##name##_avg;
+                                 extern uint64_t cv##name##_avg; \
+                                 extern double cv##name##_min; \
+                                 extern double cv##name##_max;
 #define DEFINE_STAGE_VARS(name) madrona::AtomicU64 cv##name = 0; \
-                                uint64_t cv##name##_avg = 0;
+                                uint64_t cv##name##_avg = 0; \
+                                double cv##name##_min = 99999.0; \
+                                double cv##name##_max = 0.0;
 
 extern "C" {
 DECLARE_STAGE_VARS(com);
