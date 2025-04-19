@@ -6,6 +6,46 @@
 namespace madrona::phys::cv {
 namespace cpu_solver {
 
+inline float * SolverMemory::x() { return (float *)memPtr; }
+inline float * SolverMemory::g() { return x() + nv; }
+inline float * SolverMemory::M_grad() { return g() + nv; }
+inline float * SolverMemory::M_grad_new() { return M_grad() + nv; }
+inline float * SolverMemory::x_min_a_free() { return M_grad_new() + nv; }
+inline float * SolverMemory::Mx_min_a_free() { return x_min_a_free() + nv; }
+inline float * SolverMemory::p() { return Mx_min_a_free() + nv; }
+inline float * SolverMemory::Mpk() { return p() + nv; }
+inline float * SolverMemory::jar_c() { return Mpk() + nv; }
+inline float * SolverMemory::jar_e() { return jar_c() + nc; }
+inline float * SolverMemory::jar_f() { return jar_e() + ne; }
+inline float * SolverMemory::jp_c() { return jar_f() + nf; }
+inline float * SolverMemory::jp_e() { return jp_c() + nc; }
+inline float * SolverMemory::jp_f() { return jp_e() + ne; }
+inline float * SolverMemory::grad_c() { return jp_f() + nf; }
+inline float * SolverMemory::grad_e() { return grad_c() + nc; }
+inline float * SolverMemory::grad_f() { return grad_e() + ne; }
+inline float * SolverMemory::acc_ref_c() { return grad_f() + nf; }
+inline float * SolverMemory::acc_ref_e() { return acc_ref_c() + nc; }
+inline float * SolverMemory::acc_ref_f() { return acc_ref_e() + ne; }
+inline float * SolverMemory::D_c() { return acc_ref_f() + nf; }
+inline float * SolverMemory::D_e() { return D_c() + nc; }
+inline float * SolverMemory::R_c() { return D_e() + ne; }
+inline float * SolverMemory::R_e() { return R_c() + nc; }
+inline float * SolverMemory::R_f() { return R_e() + ne; }
+inline float * SolverMemory::res_c() { return R_f() + nf; }
+inline float * SolverMemory::res_e() { return res_c() + nc; }
+inline float * SolverMemory::res_f() { return res_e() + ne; }
+inline ContactStore * SolverMemory::cs() { return (ContactStore *) (res_f() + nf); }
+inline LimitStore * SolverMemory::ls() { return (LimitStore *) (cs() + nc / 3); }
+inline FrictionStore * SolverMemory::fs() { return (FrictionStore *) (ls() + ne); }
+inline uint32_t SolverMemory::numReqBytes()
+{
+    return sizeof(float) * (8 * nv + 7 * nc + 7 * ne + 6 * nf) +
+           sizeof(ContactStore) * (nc / 3) +
+           sizeof(LimitStore) * ne +
+           sizeof(FrictionStore) * nf;
+}
+
+
 inline float getImpedance(const float* solimp, float pos) {
     float imp;
     // flat function
@@ -104,14 +144,7 @@ inline void adjustContactRegularization(float *R,
 }
 
 inline void nonlinearCG(Context &ctx,
-                        float *res,
-                        float *x0,
-                        float *a_ref_c,
-                        float *a_ref_e,
-                        float *a_ref_f,
-                        float *D_c,
-                        float *D_e,
-                        float *R_f,
+                        SolverMemory &sm,
                         float tol,
                         float ls_tol,
                         bool adaptive_ls,
@@ -120,31 +153,41 @@ inline void nonlinearCG(Context &ctx,
                         CVSolveData &cv_sing)
 {
     using namespace cpu_utils;
-    uint32_t nv = cv_sing.totalNumDofs;
+    uint32_t nv = sm.nv;
+    uint32_t nc = sm.nc;
+    uint32_t ne = sm.ne;
+    uint32_t nf = sm.nf;
     uint32_t nv_bytes = nv * sizeof(float);
-    uint32_t nc = cv_sing.numRowsJc;
-    uint32_t ne = cv_sing.numRowsJe;
-    uint32_t nf = cv_sing.numRowsJf;
     float scale = 1.f / cv_sing.totalMass;
 
-    float x[nv];
-    float g[nv];
-    float M_grad[nv];
-    float M_grad_new[nv];
-    float x_min_a_free[nv];
-    float Mx_min_a_free[nv];
-    float p[nv];
-    float Mpk[nv];
+    // Ridiculous number of pointers
+    float *x = sm.x();
+    float *g = sm.g();
+    float *M_grad = sm.M_grad();
+    float *M_grad_new = sm.M_grad_new();
+    float *x_min_a_free = sm.x_min_a_free();
+    float *Mx_min_a_free = sm.Mx_min_a_free();
+    float *p = sm.p();
+    float *Mpk = sm.Mpk();
+    float *jar_c = sm.jar_c();
+    float *jar_e = sm.jar_e();
+    float *jar_f = sm.jar_f();
+    float *jp_c = sm.jp_c();
+    float *jp_e = sm.jp_e();
+    float *jp_f = sm.jp_f();
+    float *grad_c = sm.grad_c();
+    float *grad_e = sm.grad_e();
+    float *grad_f = sm.grad_f();
+    float *a_ref_c = sm.acc_ref_c();
+    float *a_ref_e = sm.acc_ref_e();
+    float *a_ref_f = sm.acc_ref_f();
+    float *D_c = sm.D_c();
+    float *D_e = sm.D_e();
+    float *R_f = sm.R_f();
+    ContactStore *cs = sm.cs();
+    LimitStore *ls = sm.ls();
+    FrictionStore *fs = sm.fs();
 
-    float jar_c[nc]; // J_c x - a_ref_c
-    float jar_e[ne]; // J_e x - a_ref_e
-    float jar_f[nf]; // J_f x - a_ref_f
-    float jp_c[nc]; // J_c p
-    float jp_e[ne]; // J_e p
-    float jp_f[nf]; // J_f p
-
-    // Load initial guess, compute some values
-    memcpy(x, x0, nv_bytes);
     // x - a_free and Mx - a_free
     sclAddSet(x_min_a_free, x, cv_sing.freeAcc, -1.f, nv);
     memcpy(Mx_min_a_free, x_min_a_free, nv_bytes);
@@ -159,7 +202,7 @@ inline void nonlinearCG(Context &ctx,
 
     // f(x0) and df(x0), M^{-1}df(x0)
     float fun = obj(g, x_min_a_free, Mx_min_a_free, D_c, D_e, R_f,
-        jar_c, jar_e, jar_f, cv_sing);
+        jar_c, jar_e, jar_f, grad_c, grad_e, grad_f, cv_sing);
     memcpy(M_grad, g, nv_bytes);
     fullMSolveMul(ctx, M_grad, true);
     // p = -M_grad
@@ -176,7 +219,8 @@ inline void nonlinearCG(Context &ctx,
         }
         float alpha = exactLineSearch(p, x_min_a_free, Mx_min_a_free, Mpk,
                                       D_c, D_e, R_f, jar_c, jar_e, jar_f,
-                                      jp_c, jp_e, jp_f, nc, ne, nf, nv,
+                                      jp_c, jp_e, jp_f, cs, ls, fs,
+                                      nc, ne, nf, nv,
                                       ada_ls_tol, ls_iters, ctx, cv_sing);
         if (alpha == 0.f) break;
 
@@ -192,7 +236,7 @@ inline void nonlinearCG(Context &ctx,
 
         // Convergence check
         float fun_new = obj(g, x_min_a_free, Mx_min_a_free, D_c, D_e, R_f,
-            jar_c, jar_e, jar_f, cv_sing);
+            jar_c, jar_e, jar_f, grad_c, grad_e, grad_f, cv_sing);
         if (scale * (fun - fun_new) < tol) break;
         if (scale * norm(g, nv) < tol) break;
 
@@ -212,7 +256,6 @@ inline void nonlinearCG(Context &ctx,
         memcpy(M_grad, M_grad_new, nv_bytes);
     }
     // printf("CG Iterations %d\n", i);
-    memcpy(res, x, nv_bytes);
 }
 
 inline void fullMSolveMul(Context &ctx,
@@ -252,12 +295,19 @@ inline float obj(float *grad_out,
                  float *jar_c,
                  float *jar_e,
                  float *jar_f,
+                 float *grad_c,
+                 float *grad_e,
+                 float *grad_f,
                  CVSolveData &cv_sing)
 {
     using namespace cpu_utils;
     uint32_t nv = cv_sing.totalNumDofs;
+    uint32_t nc = cv_sing.numRowsJc;
+    uint32_t ne = cv_sing.numRowsJe;
+    uint32_t nf = cv_sing.numRowsJf;
     uint32_t nv_bytes = nv * sizeof(float);
 
+    // Reset
     float cost = 0.f;
     memset(grad_out, 0, nv_bytes);
 
@@ -266,26 +316,19 @@ inline float obj(float *grad_out,
     sclAdd(grad_out, Mx_min_a_free, 1, nv);
 
     // Contact constraints
-    uint32_t nc = cv_sing.numRowsJc;
-    float grad_c[nc];
     cost += s_c(grad_c, jar_c, D_c, cv_sing.mu, nc);
     // J.T @ grad_c
     matVecMul<true, false>(grad_out, cv_sing.J_c, grad_c, nc, nv);
 
     // Equation constraints
-    uint32_t ne = cv_sing.numRowsJe;
-    float grad_e[ne];
     cost += s_e(grad_e, jar_e, D_e, ne);
     // J.T @ grad_e
     matVecMul<true, false>(grad_out, cv_sing.J_e, grad_e, ne, nv);
 
     // Frictional constraints
-    uint32_t nf = cv_sing.numRowsJf;
-    float grad_f[nf];
     cost += s_f(grad_f, jar_f, R_f, cv_sing.floss, nf);
     // J.T @ grad_f
     matVecMul<true, false>(grad_out, cv_sing.J_f, grad_f, nf, nv);
-
 
     return cost;
 }
@@ -387,6 +430,7 @@ float exactLineSearch(float *pk, float *x_min_a_free,
                       float *D_c, float *D_e, float *R_f,
                       float *jar_c, float *jar_e, float *jar_f,
                       float *Jp_c, float *Jp_e, float *Jp_f,
+                      ContactStore *cs, LimitStore *ls, FrictionStore *fs,
                       uint32_t nc, uint32_t ne, uint32_t nf,
                       uint32_t nv, float ls_tol, uint32_t ls_iters,
                       Context &ctx, CVSolveData &cv_sing) {
@@ -400,33 +444,6 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         float hess;
     };
 
-    struct ContactStore {
-        float quad0;
-        float quad1;
-        float quad2;
-        float U0;
-        float V0;
-        float UU;
-        float UV;
-        float VV;
-        float Dm;
-    };
-
-    struct LimitStore {
-        float quad0;
-        float quad1;
-        float quad2;
-        float Jx;
-    };
-
-    struct FrictionStore {
-        float quad0;
-        float quad1;
-        float quad2;
-        float Rf;
-        float floss;
-        float Jx;
-    };
 
     // Search vector too small
     if (norm(pk, nv) < MINVAL) return 0.f;
@@ -451,7 +468,6 @@ float exactLineSearch(float *pk, float *x_min_a_free,
 
     // --- Precomputation of constraints ---
     // For each contact, store some information to avoid re-computation
-    ContactStore cs[nc / 3];
     for (uint32_t i = 0; i < nc / 3; i++) {
         // Components of J @ x - a_ref, J @ p
         float Jx_N = jar_c[3 * i];
@@ -494,8 +510,6 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         cs[i].VV = Jp_T1 * Jp_T1 + Jp_T2 * Jp_T2;
         cs[i].Dm = mid_weight;
     }
-
-    LimitStore ls[ne];
     for (uint32_t i = 0; i < ne; i++) {
         float Jx = jar_e[i];
         float Jp = Jp_e[i];
@@ -505,18 +519,16 @@ float exactLineSearch(float *pk, float *x_min_a_free,
         ls[i].quad2 = 0.5f * de * Jp * Jp;
         ls[i].Jx = Jx;
     }
-
-    FrictionStore ls_f[nf];
     for (uint32_t i = 0; i < nf; i++) {
         float Jx = jar_f[i];
         float Jp = Jp_f[i];
         float df = 1.f / R_f[i];
-        ls_f[i].quad0 = 0.5f * df * Jx * Jx;
-        ls_f[i].quad1 = df * Jx * Jp;
-        ls_f[i].quad2 = 0.5f * df * Jp * Jp;
-        ls_f[i].floss = cv_sing.floss[i];
-        ls_f[i].Rf = R_f[i];
-        ls_f[i].Jx = Jx;
+        fs[i].quad0 = 0.5f * df * Jx * Jx;
+        fs[i].quad1 = df * Jx * Jp;
+        fs[i].quad2 = 0.5f * df * Jp * Jp;
+        fs[i].floss = cv_sing.floss[i];
+        fs[i].Rf = R_f[i];
+        fs[i].Jx = Jx;
     }
 
     // Line search function: updates with phi(a), d_phi(a), d2_phi(a)
@@ -589,7 +601,7 @@ float exactLineSearch(float *pk, float *x_min_a_free,
 
         // process friction loss constraints
         for (uint32_t i = 0; i < nf; i++) {
-            FrictionStore ls_i = ls_f[i];
+            FrictionStore ls_i = fs[i];
             float jx = ls_i.Jx;
             float jp = Jp_e[i];
             float N_search = jx + a * jp;

@@ -2553,30 +2553,35 @@ void solveCPU(Context &ctx,
     }
 
     //Allocate memory for reference acceleration, impedance, and residuals
-    uint32_t req_floats = 4 * nc + 3 * ne + 3 * nf + 2 * nv;
-    float *solve_scratch = (float *)ctx.tmpAlloc(req_floats * sizeof(float));
-    // Contact
-    float *acc_ref_c = solve_scratch;
-    float *R_c = acc_ref_c + nc;
-    float *D_c = R_c + nc;
-    float *res_c = D_c + nc;
-    // Limit
-    float *acc_ref_e = res_c + nc;
-    float *R_e = acc_ref_e + ne;
-    float *D_e = R_e + ne;
-    // Friction
-    float *acc_ref_f = D_e + ne;
-    float *R_f = acc_ref_f + nf;
-    float *res_f = R_f + nf;
+    SolverMemory sm = SolverMemory { .nv = nv, .nc = nc, .ne = ne, .nf = nf };
+    uint32_t num_bytes = sm.numReqBytes();
+    uint32_t num_elems = (num_bytes + sizeof(SolverScratch256b) - 1) /
+        sizeof(SolverScratch256b);
+    sm.mem = ctx.allocMemoryRange<SolverScratch256b>(num_elems);
+    sm.memPtr = ctx.memoryRangePointer<SolverScratch256b>(sm.mem);
 
-    float *a_solve = res_f + nf;
-    float *x0 = a_solve + nv;
+    float *acc_ref_c = sm.acc_ref_c();
+    float *R_c = sm.R_c();
+    float *D_c = sm.D_c();
+    float *res_c = sm.res_c();
+    // Limit
+    float *acc_ref_e = sm.acc_ref_e();
+    float *R_e = sm.R_e();
+    float *D_e = sm.D_e();
+    float *res_e = sm.res_e();
+    // Friction
+    float *acc_ref_f = sm.acc_ref_f();
+    float *R_f = sm.R_f();
+    float *res_f = sm.res_f();
 
     // Set residuals for contact constraints
     memset(res_c, 0, sizeof(float) * nc);
     for (uint32_t i = 0; i < cv_sing.numContactPts; i++) {
         res_c[i * 3] = -cv_sing.penetrations[i];
     }
+    // Set residuals for equality constraints
+    memcpy(res_e, cv_sing.eqResiduals, sizeof(float) * ne);
+
     // For friction loss, residuals is just zero
     memset(res_f, 0, sizeof(float) * nf);
 
@@ -2585,7 +2590,7 @@ void solveCPU(Context &ctx,
                   nc, nv, res_c,
                   cv_sing.diagApprox_c, cv_sing.h);
     computeAccRef(acc_ref_e, R_e, cv_sing.vel, cv_sing.J_e,
-                  ne, nv, cv_sing.eqResiduals,
+                  ne, nv, res_e,
                   cv_sing.diagApprox_e, cv_sing.h);
     computeAccRef(acc_ref_f, R_f, cv_sing.vel, cv_sing.J_f,
                   nf, nv, res_f,
@@ -2608,11 +2613,11 @@ void solveCPU(Context &ctx,
     uint32_t ls_iters = 50;
 
     // Set initial guess to be previous acceleration
-    memcpy(x0, cv_sing.currAcc, sizeof(float) * cv_sing.totalNumDofs);
-    nonlinearCG(ctx, a_solve, x0, acc_ref_c, acc_ref_e, acc_ref_f,
-        D_c, D_e, R_f, tol, ls_tol,
-        adaptive_ls, max_iter, ls_iters, cv_sing);
+    float *a_solve = sm.x();
+    memcpy(a_solve, cv_sing.currAcc, sizeof(float) * nv);
+    nonlinearCG(ctx, sm, tol, ls_tol, adaptive_ls, max_iter, ls_iters, cv_sing);
     copyResult(ctx, a_solve);
+    ctx.freeMemoryRange(sm.mem);
 }
 #endif
 }
