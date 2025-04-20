@@ -41,8 +41,6 @@ struct SolverMemory {
 
     MemoryRange mem;
     void *memPtr;
-    inline uint32_t numReqBytes();
-
     inline float * x();
     inline float * g();
     inline float * M_grad();
@@ -82,6 +80,17 @@ struct SolverMemory {
     inline ContactStore * cs();
     inline LimitStore * ls();
     inline FrictionStore * fs();
+
+    static uint32_t numReqBytes(uint32_t nv,
+                                uint32_t nc,
+                                uint32_t ne,
+                                uint32_t nf)
+    {
+        return sizeof(float) * (8 * nv + 7 * nc + 7 * ne + 6 * nf) +
+               sizeof(ContactStore) * (nc / 3) +
+               sizeof(LimitStore) * ne +
+               sizeof(FrictionStore) * nf;
+    }
 };
 
 void computeAccRef(

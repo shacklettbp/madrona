@@ -2553,12 +2553,13 @@ void solveCPU(Context &ctx,
     }
 
     //Allocate memory for reference acceleration, impedance, and residuals
-    SolverMemory sm = SolverMemory { .nv = nv, .nc = nc, .ne = ne, .nf = nf };
-    uint32_t num_bytes = sm.numReqBytes();
+    uint32_t num_bytes = SolverMemory::numReqBytes(nv, nc, ne, nf);
     uint32_t num_elems = (num_bytes + sizeof(SolverScratch256b) - 1) /
         sizeof(SolverScratch256b);
-    sm.mem = ctx.allocMemoryRange<SolverScratch256b>(num_elems);
-    sm.memPtr = ctx.memoryRangePointer<SolverScratch256b>(sm.mem);
+    MemoryRange mem = ctx.allocMemoryRange<SolverScratch256b>(num_elems);
+    void *memPtr = ctx.memoryRangePointer<SolverScratch256b>(mem);
+    SolverMemory sm = SolverMemory { .nv = nv, .nc = nc, .ne = ne, .nf = nf,
+        .mem = mem, .memPtr = memPtr };
 
     float *acc_ref_c = sm.acc_ref_c();
     float *R_c = sm.R_c();

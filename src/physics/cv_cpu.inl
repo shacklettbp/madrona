@@ -37,13 +37,6 @@ inline float * SolverMemory::res_f() { return res_e() + ne; }
 inline ContactStore * SolverMemory::cs() { return (ContactStore *) (res_f() + nf); }
 inline LimitStore * SolverMemory::ls() { return (LimitStore *) (cs() + nc / 3); }
 inline FrictionStore * SolverMemory::fs() { return (FrictionStore *) (ls() + ne); }
-inline uint32_t SolverMemory::numReqBytes()
-{
-    return sizeof(float) * (8 * nv + 7 * nc + 7 * ne + 6 * nf) +
-           sizeof(ContactStore) * (nc / 3) +
-           sizeof(LimitStore) * ne +
-           sizeof(FrictionStore) * nf;
-}
 
 
 inline float getImpedance(const float* solimp, float pos) {
@@ -278,7 +271,7 @@ inline void fullMSolveMul(Context &ctx,
         if (solve) {
             tasks::solveM(p, m, x_ptr);
         } else {
-            float y[p.qvDim];
+            float *y = (float *)ctx.tmpAlloc(p.qvDim * sizeof(float));
             tasks::mulM(p, m, x_ptr, y);
             memcpy(x_ptr, y, p.qvDim * sizeof(float));
         }
