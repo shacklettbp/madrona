@@ -58,8 +58,8 @@ struct GaussMinimizationNode : NodeBase {
     float objWarp(
         float *x,
         CVSolveData *sd,
-        float *jaccref_cont,
-        float *jaccref_eq,
+        float *jaccref_c,
+        float *jaccref_l,
         float *Mxmin);
 
     float exactLineSearch(
@@ -129,8 +129,8 @@ struct GaussMinimizationNode : NodeBase {
 float GaussMinimizationNode::objWarp(
     float *x,
     CVSolveData *sd,
-    float *jaccref_cont,
-    float *jaccref_eq,
+    float *jaccref_c,
+    float *jaccref_l,
     float *Mxmin)
 {
     using namespace gpu_utils;
@@ -155,18 +155,8 @@ float GaussMinimizationNode::objWarp(
     warpLoopSync(sd->nc / 3, [&](uint32_t iter) {
         float curr_val = 0.f;
         if (iter != 0xFFFF'FFFF) {
-#if 0
-            float n = jaccref_cont[iter * 3];
-            float t1 = jaccref_cont[iter * 3 + 1];
-            float t2 = jaccref_cont[iter * 3 + 2];
-
-            float t = sqrtf(t1 * t1 + t2 * t2);
-            float mu = sd->mu[iter];
-            float mw = 1.f / (1.f + mu * mu);
-#endif
-
             auto [n, t1, t2, t, mu, mw] = mapToConeSpace(
-                    jaccref_cont, sd->mu, iter);
+                    jaccref_c, sd->mu, iter);
 
             float dn = dc[3 * iter + 0];
             float d1 = dc[3 * iter + 1];
@@ -177,9 +167,9 @@ float GaussMinimizationNode::objWarp(
             } else if (mu * n + t <= 0.f || (t <= 0.f && n < 0.f)) {
                 // Bottom zone
                 curr_val =
-                    0.5f * (dn * jaccref_cont[iter * 3 + 0] * jaccref_cont[iter * 3 + 0] +
-                            d1 * jaccref_cont[iter * 3 + 1] * jaccref_cont[iter * 3 + 1] + 
-                            d2 * jaccref_cont[iter * 3 + 2] * jaccref_cont[iter * 3 + 2]);
+                    0.5f * (dn * jaccref_c[iter * 3 + 0] * jaccref_c[iter * 3 + 0] +
+                            d1 * jaccref_c[iter * 3 + 1] * jaccref_c[iter * 3 + 1] +
+                            d2 * jaccref_c[iter * 3 + 2] * jaccref_c[iter * 3 + 2]);
             } else {
                 // Middle zone
                 curr_val = 0.5f * dn * mw * (n - mu * t) * (n - mu * t);
@@ -192,7 +182,12 @@ float GaussMinimizationNode::objWarp(
     warpLoopSync(sd->nl, [&](uint32_t iter) {
         float curr_val = 0.f;
         if (iter != 0xFFFF'FFFF) {
-            curr_val = 0.5f * de[iter] * jaccref_eq[iter] * jaccref_eq[iter];
+            // Constraint is satisfied
+            if (jaccref_l[iter] >= 0.f) {
+                curr_val = 0.f;
+            } else {
+                curr_val = 0.5f * de[iter] * jaccref_l[iter] * jaccref_l[iter];
+            }
         }
 
         res += warpReduceSum(curr_val);
@@ -217,10 +212,6 @@ inline ConeSpace GaussMinimizationNode::mapToConeSpace(
     float t2 = jar_t2 * mu2;
 
     float t = sqrtf(t1 * t1 + t2 * t2);
-    
-    if (0.f == (mu * mu * (1.f + mu * mu))) {
-        // printf("nan0 happening\n");
-    }
     float mid_weight = 1.f / (mu * mu * (1.f + mu * mu));
 
     return {
@@ -249,16 +240,6 @@ void GaussMinimizationNode::dobjWarp(
     });
 
     __syncwarp();
-
-#if 0
-    if (threadIdx.x % 32 == 0) {
-        LOG("after warpCopy\n");
-    }
-
-    if (threadIdx.x % 32 == 0) {
-        LOG("before sparseBlkDiagSmallReg\n");
-    }
-#endif
 
     sparseBlkDiagSmallReg<float, 4, false, false, true>(
             res,
@@ -303,16 +284,6 @@ void GaussMinimizationNode::dobjWarp(
 
     // ds
     warpLoop(sd->nc / 3, [&](uint32_t iter) {
-#if 0
-        float n = scratch[iter * 3];
-        float t1 = scratch[iter * 3 + 1];
-        float t2 = scratch[iter * 3 + 2];
-
-        float t = sqrtf(t1 * t1 + t2 * t2);
-        float mu = sd->mu[iter];
-        float mw = 1.f / (1.f + mu * mu);
-#endif
-
         auto [n, t1, t2, t, mu, mw] = mapToConeSpace(
                 scratch, sd->mu, iter);
 
@@ -331,11 +302,6 @@ void GaussMinimizationNode::dobjWarp(
         } else {
             float tmp = dn * mw * (n - mu * t) * mu;
             scratch[3 * iter] = tmp;
-
-            if (t == 0.f) {
-                printf("nan going to happen dobj!\n");
-            }
-
             scratch[3 * iter + 1] = -(tmp / t) * t1 * sd->mu[3 * iter + 1];
             scratch[3 * iter + 2] = -(tmp / t) * t2 * sd->mu[3 * iter + 2];
         }
@@ -378,7 +344,12 @@ void GaussMinimizationNode::dobjWarp(
     }
 
     warpLoop(sd->nl, [&](uint32_t iter) {
-        scratch[iter] = de[iter] * scratch[iter];
+        // Constraint is satisfied
+        if (scratch[iter] >= 0.f) {
+            scratch[iter] = 0.f;
+        } else {
+            scratch[iter] = de[iter] * scratch[iter];
+        }
     });
 
     gmmaWarpSmallReg<float, 4, false, false, false>(
@@ -810,8 +781,8 @@ float GaussMinimizationNode::exactLineSearch(
     // Line search function: updates evals with phi(a), d_phi(a), d2_phi(a)
     auto phi = [&](Evals *evals) {
         float a = evals->alpha;
-        float fun = 0.5f * a * a * pMp +
-                    a * pMx_free + 0.5f * xmin_M_xmin;
+        // Process Gauss first
+        float fun = 0.5f * a * a * pMp + a * pMx_free + 0.5f * xmin_M_xmin;
         float grad = a * pMp + pMx_free;
         float hess = pMp;
 
@@ -821,6 +792,7 @@ float GaussMinimizationNode::exactLineSearch(
             float dhess;
         };
 
+        // Process contacts
         warpLoopSync(sd->nc / 3, [&](uint32_t iter) {
             auto d = [&]() -> Diff {
                 if (iter == 0xFFFF'FFFF) {
@@ -828,79 +800,92 @@ float GaussMinimizationNode::exactLineSearch(
                         0.f, 0.f, 0.f
                     };
                 } else {
-                    float jx_n = jaccref_cont[iter * 3];
-                    float jx_t1 = jaccref_cont[iter * 3 + 1];
-                    float jx_t2 = jaccref_cont[iter * 3 + 2];
-
+                    // Components of J @ x - a_ref, J @ p
+                    float Jx_n = jaccref_cont[iter * 3];
+                    float Jx_t1 = jaccref_cont[iter * 3 + 1];
+                    float Jx_t2 = jaccref_cont[iter * 3 + 2];
+                    float Jp_n = Jp_c[iter * 3];
+                    float Jp_t1 = Jp_c[iter * 3 + 1];
+                    float Jp_t2 = Jp_c[iter * 3 + 2];
+                    // Friction
                     float mu = mus[iter * 3];
                     float mu1 = mus[iter * 3 + 1];
                     float mu2 = mus[iter * 3 + 2];
+                    // Weights
+                    float Dn = d_c[iter * 3];
+                    float D1 = d_c[iter * 3 + 1];
+                    float D2 = d_c[iter * 3 + 2];
+                    float Dm = Dn / (mu * mu * (1.f + mu * mu));
 
-                    float dn = d_c[iter * 3];
-                    float d1 = d_c[iter * 3 + 1];
-                    float d2 = d_c[iter * 3 + 2];
+                    // Quadratic (bottom zone)
+                    float quad0 = 0.5f * (Dn * Jx_n * Jx_n +
+                                          D1 * Jx_t1 * Jx_t1 +
+                                          D2 * Jx_t2 * Jx_t2);
+                    float quad1 = (Dn * Jx_n * Jp_n +
+                                   D1 * Jx_t1 * Jp_t1 +
+                                   D2 * Jx_t2 * Jp_t2);
+                    float quad2 = 0.5f * (Dn * Jp_n * Jp_n +
+                                          D1 * Jp_t1 * Jp_t1 +
+                                          D2 * Jp_t2 * Jp_t2);
 
-                    // float mu = sd->mu[iter];
-                    if (0.f == (mu * mu * (1.f + mu * mu))) {
-                        // printf("nan1 happening; mu = %f\n", mu);
+                    // Map to dual cone space
+                    Jx_n = Jx_n * mu;
+                    Jx_t1 = Jx_t1 * mu1;
+                    Jx_t2 = Jx_t2 * mu2;
+                    Jp_n = Jp_n * mu;
+                    Jp_t1 = Jp_t1 * mu1;
+                    Jp_t2 = Jp_t2 * mu2;
+
+                    // Temporary
+                    float U0 = Jx_n;
+                    float V0 = Jp_n;
+                    float UU = Jx_t1 * Jx_t1 + Jx_t2 * Jx_t2;
+                    float UV = Jx_t1 * Jp_t1 + Jx_t2 * Jp_t2;
+                    float VV = Jp_t1 * Jp_t1 + Jp_t2 * Jp_t2;
+
+                    float N = U0 + a * V0;
+                    float T_sqr = UU + a * (2 * UV + a * VV);
+                    // No tangent force
+                    if (T_sqr <= 0) {
+                        // Bottom zone
+                        if (N < 0) {
+                            return {
+                                // Fun
+                                quad0 + a * quad1 + a * a * quad2,
+                                // Grad
+                                quad1 + 2.f * a * quad2,
+                                // Hess
+                                2.f * quad2
+                            };
+                        }
+                        // Top zone
+                        return { 0.f, 0.f, 0.f };
                     }
 
-                    float mw = 1.f / (mu * mu * (1.f + mu * mu));
-
-                    float jp_n = Jp_c[iter * 3];
-                    float jp_t1 = Jp_c[iter * 3 + 1];
-                    float jp_t2 = Jp_c[iter * 3 + 2];
-
-                    float jacc_n = jx_n + a * jp_n;
-                    float jacc_t1 = jx_t1 + a * jp_t1;
-                    float jacc_t2 = jx_t2 + a * jp_t2;
-
-                    float n_search = jacc_n * mu;
-                    float t1_search = jacc_t1 * mu1;
-                    float t2_search = jacc_t2 * mu2;
-
-                    float t_search = sqrtf(t1_search * t1_search +
-                                           t2_search * t2_search);
-
-                    if (n_search >= mu * t_search || (t_search <= 0.f && 0.f <= n_search)) {
+                    float T = sqrtf(T_sqr);
+                    if (N >= mu * T) {
                         // Don't add anything up
                         return {0.f, 0.f, 0.f};
-                    } else if (mu * n_search + t_search <= 0.f ||
-                            (t_search <= 0.f && n_search < 0.f)) {
-                        float p_sq = dn * (jp_n * jp_n) +
-                                     d1 * (jp_t1 * jp_t1) +
-                                     d2 * (jp_t2 * jp_t2);
-
-                        Diff diff = {
+                    }
+                    // Bottom zone
+                    else if (mu * N + T <= 0.f) {
+                        return {
                             // Fun
-                            0.5f * (dn * (jacc_n * jacc_n) +
-                                    d1 * (jacc_t1 * jacc_t1) +
-                                    d2 * (jacc_t2 * jacc_t2)),
+                            quad0 + a * quad1 + a * a * quad2,
                             // Grad
-                            (dn * jp_n * jx_n + 
-                             d1 * jp_t1 * jx_t1 +
-                             d2 * jp_t2 * jx_t2 +
-                             a * p_sq),
+                            quad1 + 2.f * a * quad2,
                             // Hess
-                            p_sq
+                            2.f * quad2
                         };
-                        return diff;
                     } else {
-                        float dn_da = jp_n * mu;
-                        float dt_da = (square(mu1) * jp_t1 * jacc_t1 +
-                                       square(mu2) * jp_t2 * jacc_t2) / t_search;
-                        float d2tp_da2 = ((square(mu1) * square(mu2) *
-                                           square(jp_t2 * jx_t1 - jp_t1 * jx_t2)) / cube(t_search));
-                        float tmp = n_search - mu * t_search;
-                        float d_tmp = dn_da - mu * dt_da;
-
-                        Diff diff = {
-                            0.5f * dn * mw * square(n_search - mu * t_search),
-                            dn * mw * tmp * d_tmp,
-                            dn * mw * (square(d_tmp) - tmp * mu * d2tp_da2),
+                        float N1 = V0;
+                        float T1 = (UV + a * VV) / T;
+                        float T2 = VV / T - (UV + a * VV) * T1 / (T * T);
+                        return {
+                            0.5f*Dm*(N-mu*T)*(N-mu*T),
+                            Dm*(N-mu*T)*(N1-mu*T1),
+                            Dm*((N1-mu*T1)*(N1-mu*T1) + (N-mu*T)*(-mu*T2)),
                         };
-
-                        return diff;
                     }
                 }
             } ();
@@ -919,22 +904,26 @@ float GaussMinimizationNode::exactLineSearch(
         warpLoopSync(sd->nl, [&](uint32_t iter) {
             auto d = [&]() -> Diff {
                 if (iter == 0xFFFF'FFFF) {
-                    return {
-                        0.f, 0.f, 0.f
-                    };
-                } else {
-                    float orig = jaccref_eq[iter];
-                    float dj = Jp_l[iter];
+                    return { 0.f, 0.f, 0.f };
+                }
 
+                float jx = jaccref_eq[iter];
+                float jp = Jp_l[iter];
+                float N_search = jx + a * jp;
+                // Active limit
+                if (N_search < 0.f)
+                {
                     float de = d_e[iter];
-                    float n_search = orig + a * dj;
-
+                    float quad0 = 0.5f * de * jx * jx;
+                    float quad1 = de * jx * jp;
+                    float quad2 = 0.5f * de * jp * jp;
                     return {
-                        0.5f * de * square(n_search),
-                        de * (orig * dj + a * square(dj)),
-                        de * square(dj)
+                        quad0 + a * quad1 + a * a * quad2,
+                        quad1 + 2.f * a * quad2,
+                        2.f * quad2
                     };
                 }
+                return {0.f, 0.f, 0.f};
             } ();
 
             float dfun = warpReduceSum(d.dfun);
@@ -945,6 +934,7 @@ float GaussMinimizationNode::exactLineSearch(
             grad += dgrad;
             hess += dhess;
         });
+
         evals->fun = fun;
         evals->grad = grad;
         evals->hess = hess;
