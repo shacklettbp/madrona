@@ -36,7 +36,7 @@ struct FrictionStore {
 struct SolverMemory {
     uint32_t nv;
     uint32_t nc;
-    uint32_t ne;
+    uint32_t nl;
     uint32_t nf;
 
     MemoryRange mem;
@@ -51,30 +51,27 @@ struct SolverMemory {
     inline float * Mpk();
     // J @ x - a_ref for each constraint type
     inline float * jar_c();
-    inline float * jar_e();
+    inline float * jar_l();
     inline float * jar_f();
     // J @ p for each constraint type
     inline float * jp_c();
-    inline float * jp_e();
+    inline float * jp_l();
     inline float * jp_f();
     // Gradients of objective function for each constraint
     inline float * grad_c();
-    inline float * grad_e();
+    inline float * grad_l();
     inline float * grad_f();
     // Reference accelerations
     inline float * acc_ref_c();
-    inline float * acc_ref_e();
+    inline float * acc_ref_l();
     inline float * acc_ref_f();
-    // Constraint mass
-    inline float * D_c();
-    inline float * D_e();
-    // Inverse constraint mass
-    inline float * R_c();
-    inline float * R_e();
+    // Inverse constraint mass (constraint mass for contact + limit)
+    inline float * DR_c();
+    inline float * DR_l();
     inline float * R_f();
     // Residuals
     inline float * res_c();
-    inline float * res_e();
+    inline float * res_l();
     inline float * res_f();
     // Pre-processed line search data
     inline ContactStore * cs();
@@ -86,7 +83,7 @@ struct SolverMemory {
                                 uint32_t ne,
                                 uint32_t nf)
     {
-        return sizeof(float) * (8 * nv + 7 * nc + 7 * ne + 6 * nf) +
+        return sizeof(float) * (8 * nv + 6 * nc + 6 * ne + 6 * nf) +
                sizeof(ContactStore) * (nc / 3) +
                sizeof(LimitStore) * ne +
                sizeof(FrictionStore) * nf;
@@ -123,13 +120,13 @@ float obj(float *grad_out,
           float *x_min_a_free,
           float *Mx_min_a_free,
           float *D_c,
-          float *D_e,
+          float *D_l,
           float *R_f,
           float *jar_c,
-          float *jar_e,
+          float *jar_l,
           float *jar_f,
           float *grad_c,
-          float *grad_e,
+          float *grad_l,
           float *grad_f,
           CVSolveData &cv_sing);
 
@@ -139,9 +136,9 @@ float s_c(float *grad_out,
           float *mus,
           uint32_t dim);
 
-float s_e(float *grad_out,
+float s_l(float *grad_out,
           float *jar,
-          float *D_e,
+          float *D_l,
           uint32_t dim);
 
 float s_f(float *grad_out,
@@ -156,13 +153,13 @@ float exactLineSearch(
     float *Mx_min_a_free,
     float *Mpk,
     float *D_c,
-    float *D_e,
+    float *D_l,
     float *R_f,
     float *jar_c,
-    float *jar_e,
+    float *jar_l,
     float *jar_f,
     float *Jp_c,
-    float *Jp_e,
+    float *Jp_l,
     float *Jp_f,
     ContactStore *cs,
     LimitStore *ls,

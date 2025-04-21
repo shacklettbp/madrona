@@ -161,7 +161,7 @@ static void warpSetZero(void *dst, uint32_t num_bytes)
         bytes_to_set);
 }
 
-static void warpCopy(void *dst, void *src, uint32_t num_bytes, bool dbg)
+static void warpCopy(void* dst, void* src, uint32_t num_bytes)
 {
     int32_t lane_id = threadIdx.x % 32;
     int32_t bytes_per_warp = (num_bytes + 31) / 32;

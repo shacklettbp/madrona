@@ -51,7 +51,7 @@ template <typename Fn>
 void warpLoopSync(uint32_t total_num_iters, Fn &&fn);
 
 static inline void warpSetZero(void *dst, uint32_t num_bytes);
-static inline void warpCopy(void *dst, void *src, uint32_t num_bytes, bool dbg = false);
+static inline void warpCopy(void *dst, void *src, uint32_t num_bytes);
 
 template <typename DataT>
 float norm2Warp(DataT *values, uint32_t dim);

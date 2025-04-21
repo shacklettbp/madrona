@@ -38,7 +38,7 @@ float * BodyGroupMemory::f(BodyGroupProperties p) { return dqv(p) + p.qvDim; }
 float * BodyGroupMemory::mus(BodyGroupProperties p) { return f(p) + p.qvDim; }
 float * BodyGroupMemory::damping(BodyGroupProperties p) { return mus(p) + p.numBodies; }
 BodyLimitConstraint * BodyGroupMemory::limits(BodyGroupProperties p) { return (BodyLimitConstraint *)(damping(p) + p.qvDim); }
-BodyInertial * BodyGroupMemory::inertials(BodyGroupProperties p) { return (BodyInertial *)(limits(p) + p.numEq); }
+BodyInertial * BodyGroupMemory::inertials(BodyGroupProperties p) { return (BodyInertial *)(limits(p) + p.numLimits); }
 int32_t * BodyGroupMemory::expandedParent(BodyGroupProperties p) { return (int32_t *)(inertials(p) + p.numBodies); }
 int32_t * BodyGroupMemory::dofToBody(BodyGroupProperties p) { return (int32_t *)(expandedParent(p) + p.qvDim); }
 uint32_t * BodyGroupMemory::isStatic(BodyGroupProperties p) { return (uint32_t *)(dofToBody(p) + p.qvDim); }
@@ -70,7 +70,7 @@ inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
            p.qvDim * sizeof(float) +                // force
            p.numBodies * sizeof(float) +            // mus
            p.qvDim * sizeof(float) +                // damping
-           p.numEq * sizeof(BodyLimitConstraint) +  // equalities
+           p.numLimits * sizeof(BodyLimitConstraint) +  // equalities
            p.numBodies * sizeof(BodyInertial) +     // inertias
            p.qvDim * sizeof(int32_t) +              // expanded parent
            p.qvDim * sizeof(int32_t) +              // dof to body index
@@ -105,7 +105,7 @@ inline uint32_t BodyGroupMemory::checkpointNumBytes(BodyGroupProperties p)
            p.qvDim * sizeof(float) +                // dqv
            p.qvDim * sizeof(float) +                // force
            p.numBodies * sizeof(float) +            // mus.
-           p.numEq * sizeof(BodyLimitConstraint) +  // equalities
+           p.numLimits * sizeof(BodyLimitConstraint) +  // equalities
            p.numBodies * sizeof(BodyInertial) +     // inertias
            p.qvDim * sizeof(int32_t) +              // expanded parent
            p.numBodies * sizeof(uint32_t) +         // fixed root status

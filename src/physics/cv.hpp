@@ -130,10 +130,13 @@ struct CVSolveData {
 
     uint32_t numBodyGroups;
     uint32_t *dofOffsets;
-
-    uint32_t totalNumDofs;
-    uint32_t numContactPts;
     float h;
+
+    // Total number of dofs, limit, contact, friction constraints
+    uint32_t nv;
+    uint32_t nl;
+    uint32_t nc;
+    uint32_t nf;
 
     // Values
     float *mass;
@@ -141,34 +144,22 @@ struct CVSolveData {
     float *vel;
     float *currAcc;
     float *J_c;
-    float *J_e;
+    float *J_l;
     float *J_f;
     float *mu;
     float *penetrations;
-    float *eqResiduals;
+    float *limitResiduals;
     // Diagonal approximations of A = J * M^-1 * J^T
     float *diagApprox_c;
-    float *diagApprox_e;
+    float *diagApprox_l;
     float *diagApprox_f;
     float *floss;
-
-    uint32_t massDim;
-    uint32_t freeAccDim;
-    uint32_t velDim;
-
-    uint32_t numRowsJc;
-    uint32_t numColsJc;
-
-    uint32_t numRowsJe;
-    uint32_t numColsJe;
-
-    uint32_t numRowsJf;
 
     uint32_t muDim;
     uint32_t penetrationsDim;
 
     // Sum of diagonals of mass matrix
-    float totalMass;
+    float massDiagSum;
 
     enum StateFlags {
         // Is a_ref stored in shared memory?
@@ -206,7 +197,7 @@ struct CVSolveData {
 
     inline float * getEqualityAccRef(StateManager *state_mgr)
     {
-        return (float *)accRefMem + numRowsJc;
+        return (float *)accRefMem + nc;
     }
 
     inline SparseBlkDiag::Blk * getMassBlks(StateManager *state_mgr)
@@ -222,7 +213,6 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            //(uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups;
         return (float *)bytes;
@@ -232,10 +222,9 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs;
+            sizeof(float) * nv;
         return (float *)bytes;
     }
 
@@ -243,11 +232,10 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * totalNumDofs;
+            sizeof(float) * nv +
+            sizeof(float) * nv;
         return (float *)bytes;
     }
 
@@ -255,12 +243,11 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            //(uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts * 3;
+            sizeof(float) * nv +
+            sizeof(float) * nv +
+            sizeof(float) * nc;
         return (float *)bytes;
     }
 
@@ -268,13 +255,12 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numContactPts * 3;
+            sizeof(float) * nv +
+            sizeof(float) * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nc;
         return (float *)bytes;
     }
 
@@ -282,30 +268,28 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numRowsJc * numColsJc;
+            sizeof(float) * nv +
+            sizeof(float) * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nc +
+            sizeof(float) * nc * nv;
         return (float *)bytes;
     }
 
-    inline float * getEqualityJacobian(StateManager *state_mgr)
+    inline float * getLimitJacobian(StateManager *state_mgr)
     {
         (void)state_mgr;
         uint8_t *bytes =
-            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numRowsJc * numColsJc +
-            sizeof(float) * numRowsJc;
+            sizeof(float) * nv +
+            sizeof(float) * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nc +
+            sizeof(float) * nc * nv +
+            sizeof(float) * nc;
         return (float *)bytes;
     }
 
@@ -316,13 +300,13 @@ struct CVSolveData {
             // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numRowsJc * numColsJc +
-            sizeof(float) * numRowsJc +
-            sizeof(float) * numRowsJe * numColsJe;
+            sizeof(float) * nv +
+            sizeof(float) * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nc +
+            sizeof(float) * nc * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nl * nv;
         return (float *)bytes;
     }
 
@@ -333,14 +317,14 @@ struct CVSolveData {
             // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numRowsJc * numColsJc +
-            sizeof(float) * numRowsJc +
-            sizeof(float) * numRowsJe * numColsJe +
-            sizeof(float) * numRowsJe;
+            sizeof(float) * nv +
+            sizeof(float) * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nc +
+            sizeof(float) * nc * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nl * nv +
+            sizeof(float) * nl;
         return (float *)bytes;
     }
 
@@ -351,15 +335,15 @@ struct CVSolveData {
             // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numRowsJc * numColsJc +
-            sizeof(float) * numRowsJc +
-            sizeof(float) * numRowsJe * numColsJe +
-            sizeof(float) * numRowsJe +
-            sizeof(float) * numRowsJe;
+            sizeof(float) * nv +
+            sizeof(float) * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nc +
+            sizeof(float) * nc * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nl * nv +
+            sizeof(float) * nl +
+            sizeof(float) * nl;
         return (float *)bytes;
     }
 
@@ -370,16 +354,16 @@ struct CVSolveData {
             // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * totalNumDofs +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numContactPts * 3 +
-            sizeof(float) * numRowsJc * numColsJc +
-            sizeof(float) * numRowsJc +
-            sizeof(float) * numRowsJe * numColsJe +
-            sizeof(float) * numRowsJe +
-            sizeof(float) * numRowsJe +
-            sizeof(float) * numRowsJc;
+            sizeof(float) * nv +
+            sizeof(float) * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nc +
+            sizeof(float) * nc * nv +
+            sizeof(float) * nc +
+            sizeof(float) * nl * nv +
+            sizeof(float) * nl +
+            sizeof(float) * nl +
+            sizeof(float) * nc;
         return (float *)bytes;
     }
 #endif

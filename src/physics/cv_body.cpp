@@ -22,7 +22,7 @@ Entity makeBodyGroup(Context &ctx,
         p.qDim = 0;
         p.qvDim = 0;
         p.numBodies = num_bodies;
-        p.numEq = 0;
+        p.numLimits = 0;
         p.numObjData = 0;
         p.numHashes = 0;
         p.numFixedQ = 0;
@@ -53,7 +53,7 @@ static void initBodyGroupMemory(
         BodyDesc &bd = body_descs[i];
         p.qDim += BodyOffsets::getDofTypeDim(bd.type, true);
         p.qvDim += BodyOffsets::getDofTypeDim(bd.type);
-        p.numEq += bd.numLimits;
+        p.numLimits += bd.numLimits;
     }
 
     { // Allocate frame persistent memory
@@ -141,7 +141,7 @@ static void initBodyGroupMemory(
                 .dofType = body_descs[i].type,
                 .numDofs = (uint8_t)BodyOffsets::getDofTypeDim(body_descs[i].type),
                 .eqOffset = (uint8_t)eq_offset,
-                .numEqs = (uint8_t)bd.numLimits,
+                .numLimits = (uint8_t)bd.numLimits,
             };
 
             assert((uint8_t *)(offsets + i) < max_ptr);
@@ -565,7 +565,7 @@ void attachLimit(
     BodyOffsets *offsets = m.offsets(p);
     BodyLimitConstraint *limits = m.limits(p);
 
-    assert(offsets[body_info.idx].numEqs > 0);
+    assert(offsets[body_info.idx].numLimits > 0);
 
     auto &l = limits[offsets[body_info.idx].eqOffset];
     l.type = BodyLimitConstraint::Type::Hinge;
@@ -589,7 +589,7 @@ void attachLimit(
     BodyOffsets *offsets = m.offsets(p);
     BodyLimitConstraint *limits = m.limits(p);
 
-    assert(offsets[body_info.idx].numEqs > 0);
+    assert(offsets[body_info.idx].numLimits > 0);
 
     auto &l = limits[offsets[body_info.idx].eqOffset];
     l.type = BodyLimitConstraint::Type::Slider;
@@ -818,7 +818,7 @@ uint32_t saveBodyGroupCheckpoint(Context &ctx, Entity body_grp, void *ptr)
             .numFixedQ = (BodyGroupDesc::DescUint)p.numFixedQ,
             .qvDim = (BodyGroupDesc::DescUint)p.qvDim,
             .numBodies = (BodyGroupDesc::DescUint)p.numBodies,
-            .numEq = (BodyGroupDesc::DescUint)p.numEq,
+            .numLimits = (BodyGroupDesc::DescUint)p.numLimits,
             .numObjData = (BodyGroupDesc::DescUint)p.numObjData,
             .numHashes = (BodyGroupDesc::DescUint)p.numHashes,
             .pad = 0,
@@ -848,8 +848,8 @@ uint32_t saveBodyGroupCheckpoint(Context &ctx, Entity body_grp, void *ptr)
     }
 
     { // Equalities
-        memcpy(write_ptr, m.limits(p), sizeof(BodyLimitConstraint) * p.numEq);
-        write_ptr += sizeof(BodyLimitConstraint) * p.numEq;
+        memcpy(write_ptr, m.limits(p), sizeof(BodyLimitConstraint) * p.numLimits);
+        write_ptr += sizeof(BodyLimitConstraint) * p.numLimits;
     }
 
     { // Inertias
@@ -919,7 +919,7 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
         p.numFixedQ = desc.numFixedQ;
         p.qvDim = desc.qvDim;
         p.numBodies = desc.numBodies;
-        p.numEq = desc.numEq;
+        p.numLimits = desc.numLimits;
         p.numObjData = desc.numObjData;
         p.numHashes = desc.numHashes;
         p.gravityCoeff = 1.f;
@@ -959,7 +959,7 @@ std::pair<Entity, uint32_t> loadBodyGroupCheckpoint(Context &ctx, void *ptr)
     }
 
     { // Equalities
-        uint32_t num_bytes = sizeof(BodyLimitConstraint) * p.numEq;
+        uint32_t num_bytes = sizeof(BodyLimitConstraint) * p.numLimits;
         memcpy(m.limits(p), read_ptr, num_bytes);
         read_ptr += num_bytes;
     }

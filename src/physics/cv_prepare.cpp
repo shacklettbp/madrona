@@ -1167,12 +1167,12 @@ inline void exportCPUSolverState(
 
     uint32_t processed_dofs = 0;
 
-    cv_sing.totalMass = 0; // sum of diagonals
+    cv_sing.massDiagSum = 0; // sum of diagonals
     for (CountT i = 0; i < num_grps; ++i) {
         BodyGroupMemory &m = all_memories[i];
         BodyGroupProperties &p = all_properties[i];
 
-        cv_sing.totalMass += p.inertiaSum;
+        cv_sing.massDiagSum += p.inertiaSum;
 
         float *local_mass = m.massMatrix(p);
         float *freeAcceleration = m.biasVector(p);
@@ -1337,6 +1337,7 @@ inline void exportCPUSolverState(
         }
 
         cv_sing.J_c = J_c;
+        cv_sing.nc = J_rows;
         cv_sing.diagApprox_c = diagApprox_c;
     }
 
@@ -1362,12 +1363,12 @@ inline void exportCPUSolverState(
         for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
             BodyGroupMemory &m = all_memories[grp_idx];
             BodyGroupProperties &p = all_properties[grp_idx];
-            if (p.numEq == 0) { continue; }
+            if (p.numLimits == 0) { continue; }
             BodyOffsets *curr_offsets = m.offsets(p);
 
             for (uint32_t body_idx = 0; body_idx < p.numBodies; ++body_idx) {
                 BodyOffsets offset = curr_offsets[body_idx];
-                if (offset.dofType == DofType::FixedBody || offset.numEqs == 0) {
+                if (offset.dofType == DofType::FixedBody || offset.numLimits == 0) {
                     continue;
                 }
                 float *q = m.q(p) + offset.posOffset;
@@ -1388,34 +1389,34 @@ inline void exportCPUSolverState(
             }
         }
 
-        uint32_t total_num_rows = num_active_constraints;
+        uint32_t total_limit_dofs = num_active_constraints;
 
         float *J_e = (float *)ctx.tmpAlloc(
-                total_num_rows * total_num_dofs * sizeof(float));
-        memset(J_e, 0, total_num_rows * total_num_dofs * sizeof(float));
+                total_limit_dofs * total_num_dofs * sizeof(float));
+        memset(J_e, 0, total_limit_dofs * total_num_dofs * sizeof(float));
         auto Je = [&](int32_t row, int32_t col) -> float& {
-            return J_e[row + total_num_rows * col];
+            return J_e[row + total_limit_dofs * col];
         };
 
         float *diagApprox_e = (float *)ctx.tmpAlloc(
-                total_num_rows * sizeof(float));
+                total_limit_dofs * sizeof(float));
 
         float *residuals = (float *)ctx.tmpAlloc(
-                total_num_rows * sizeof(float));
-        memset(residuals, 0, total_num_rows * sizeof(float));
+                total_limit_dofs * sizeof(float));
+        memset(residuals, 0, total_limit_dofs * sizeof(float));
 
         // This is much easier to do with parallel execution
         num_active_constraints = 0;
         for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
             BodyGroupMemory &m = all_memories[grp_idx];
             BodyGroupProperties &p = all_properties[grp_idx];
-            if (p.numEq == 0) { continue; }
+            if (p.numLimits == 0) { continue; }
 
             BodyOffsets *curr_offsets = m.offsets(p);
 
             for (uint32_t body_idx = 0; body_idx < p.numBodies; ++body_idx) {
                 BodyOffsets offset = curr_offsets[body_idx];
-                if (offset.dofType == DofType::FixedBody || offset.numEqs == 0) {
+                if (offset.dofType == DofType::FixedBody || offset.numLimits == 0) {
                     continue;
                 }
 
@@ -1462,16 +1463,15 @@ inline void exportCPUSolverState(
             }
         }
 
-        cv_sing.J_e = J_e;
-        cv_sing.eqResiduals = residuals;
-        cv_sing.diagApprox_e = diagApprox_e;
-        cv_sing.numRowsJe = total_num_rows;
-        cv_sing.numColsJe = total_num_dofs;
+        cv_sing.J_l = J_e;
+        cv_sing.limitResiduals = residuals;
+        cv_sing.diagApprox_l = diagApprox_e;
+        cv_sing.nl = total_limit_dofs;
     }
 
+    uint32_t total_friction_dofs = 0;
     { // Process friction loss dofs
         // Count number of dofs that require friction loss
-        uint32_t total_friction_dofs = 0;
         for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
             BodyGroupProperties &p = all_properties[grp_idx];
             total_friction_dofs += p.numFrictionDofs;
@@ -1513,13 +1513,11 @@ inline void exportCPUSolverState(
         }
         assert(processed == total_friction_dofs);
         cv_sing.J_f = J_f;
-        cv_sing.numRowsJf = total_friction_dofs;
+        cv_sing.nf = total_friction_dofs;
         cv_sing.diagApprox_f = diagApprox_f;
         cv_sing.floss = floss_full;
     }
 
-    cv_sing.totalNumDofs = total_num_dofs;
-    cv_sing.numContactPts = total_contact_pts;
     cv_sing.h = step_h;
 
 #ifndef MADRONA_GPU_MODE
@@ -1534,11 +1532,7 @@ inline void exportCPUSolverState(
 
     cv_sing.numBodyGroups = num_grps;
 
-    cv_sing.massDim = total_num_dofs;
-    cv_sing.freeAccDim = total_num_dofs;
-    cv_sing.velDim = total_num_dofs;
-    cv_sing.numRowsJc = J_rows;
-    cv_sing.numColsJc = J_cols;
+    cv_sing.nv = total_num_dofs;
     cv_sing.muDim = 3 * total_contact_pts;
     cv_sing.penetrationsDim = total_contact_pts;
 }
@@ -1659,19 +1653,19 @@ inline void prepareDampingFriction(
     int32_t *dof_to_body = m.dofToBody(p);
     float *damping = m.damping(p);
 
-    bool req_damping = false;
+    bool requires_damping = false;
     uint32_t num_friction_dofs = 0;
     for (uint32_t i = 0; i < p.qvDim; ++i) {
         BodyHierarchy &hier= hiers[dof_to_body[i]];
         damping[i] = hier.damping;
         if (hier.damping != 0.f) {
-            req_damping = true;
+            requires_damping = true;
         }
         if (hier.frictionLoss != 0.f) {
             num_friction_dofs++;
         }
     }
-    p.reqDamping = req_damping;
+    p.requiresDamping = requires_damping;
     p.numFrictionDofs = num_friction_dofs;
 }
 
@@ -2221,7 +2215,7 @@ void implicitDamping(Context &ctx,
     float *damping = mem.damping(prop);
 
     // Check if damping is required
-    if (!prop.reqDamping) { return; }
+    if (!prop.requiresDamping) { return; }
 
     float *M = mem.massMatrix(prop);
     // Compute M * acc, store into bias vector as scratch

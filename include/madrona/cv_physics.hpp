@@ -67,7 +67,7 @@ struct BodyOffsets {
     DofType dofType;
     uint8_t numDofs; // Dimension of velocity
     uint8_t eqOffset;
-    uint8_t numEqs;
+    uint8_t numLimits;
 
     static inline uint32_t getDofTypeDim(DofType type, bool is_pos = false);
 };
@@ -157,7 +157,7 @@ struct BodyGroupProperties {
 
     uint32_t qvDim;
     uint32_t numBodies;
-    uint32_t numEq;
+    uint32_t numLimits;
     uint32_t numObjData;
 
     // Sum of diagonals of mass matrix
@@ -168,7 +168,7 @@ struct BodyGroupProperties {
     float gravityCoeff;
 
     // Joint dynamics
-    bool reqDamping;
+    bool requiresDamping;
     uint32_t numFrictionDofs;
 
     struct {
@@ -180,8 +180,8 @@ struct BodyGroupProperties {
         // Offset in the global velocity vector
         uint32_t qvOffset;
 
-        // Offset (row) in the equality jacobian
-        uint32_t eqOffset;
+        // Offset (row) in the limit jacobian
+        uint32_t limOffset;
     } tmp;
 };
 
@@ -193,7 +193,7 @@ struct BodyGroupDesc {
     DescUint numFixedQ;
     DescUint qvDim;
     DescUint numBodies;
-    DescUint numEq;
+    DescUint numLimits;
     DescUint numObjData;
     DescUint numHashes;
     DescUint pad;
