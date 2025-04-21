@@ -195,7 +195,7 @@ struct CVSolveData {
         return (float *)accRefMem;
     }
 
-    inline float * getEqualityAccRef(StateManager *state_mgr)
+    inline float * getLimitAccRef(StateManager *state_mgr)
     {
         return (float *)accRefMem + nc;
     }
@@ -204,7 +204,6 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            //(uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory);
             prepMem;
         return (SparseBlkDiag::Blk *)bytes;
     }
@@ -297,7 +296,6 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * nv +
@@ -314,7 +312,6 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * nv +
@@ -332,7 +329,6 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * nv +
@@ -351,7 +347,6 @@ struct CVSolveData {
     {
         (void)state_mgr;
         uint8_t *bytes =
-            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
             prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * nv +
