@@ -24,6 +24,8 @@
 #define MADRONA_X64 (1)
 #elif defined (__arm64__) || defined(_M_ARM64)
 #define MADRONA_ARM (1)
+#elif defined (EMSCRIPTEN)
+#define MADRONA_EMSCRIPTEN (1)
 #elif !defined (MADRONA_GPU_MODE)
 #error "Unsupported architecture"
 #endif

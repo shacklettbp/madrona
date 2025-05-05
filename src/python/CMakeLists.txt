@@ -28,6 +28,10 @@ if (TARGET madrona_cuda)
     )
 endif ()
 
+if (NOT Python_FOUND)
+  return ()
+endif ()
+
 get_filename_component(MADRONA_PY_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 set_property(GLOBAL PROPERTY madrona_python_dir ${MADRONA_PY_DIR})
 

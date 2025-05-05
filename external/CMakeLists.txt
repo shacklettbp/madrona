@@ -13,10 +13,12 @@ set(MADRONA_ARM ${MADRONA_ARM} PARENT_SCOPE)
 
 unset(CMAKE_CXX_VISIBILITY_PRESET)
 
-if (NOT WIN32) #FIX
+if (NOT WIN32 AND NOT EMSCRIPTEN) #FIX
     add_subdirectory(madrona-toolchain)
 else()
     add_library(madrona_libcxx INTERFACE)
+    install(TARGETS madrona_libcxx EXPORT madronaExternal)
+    add_library(madrona_libcxx_hdrs INTERFACE)
 endif()
 
 add_library(madrona_noexceptrtti INTERFACE)
@@ -114,7 +116,7 @@ target_include_directories(stb SYSTEM INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/stb
 )
 
-if (MADRONA_LINUX)
+if (MADRONA_LINUX AND NOT EMSCRIPTEN)
     find_package(X11 QUIET)
 
     set(INCLUDE_GLFW ${X11_FOUND})
@@ -122,7 +124,9 @@ else ()
     set(INCLUDE_GLFW ON)
 endif()
 
-#set(INCLUDE_GLFW OFF)
+if (MADRONA_WEB)
+  set(INCLUDE_GLFW OFF)
+endif()
 
 if (INCLUDE_GLFW)
     set(GLFW_LIBRARY_TYPE "SHARED")

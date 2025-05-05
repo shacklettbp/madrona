@@ -10,7 +10,9 @@
 namespace madrona {
 
 struct ThreadPoolExecutor::Impl {
+#ifndef EMSCRIPTEN
     HeapArray<std::thread> workers;
+#endif
     alignas(MADRONA_CACHE_LINE) AtomicI32 workerWakeup;
     alignas(MADRONA_CACHE_LINE) AtomicI32 mainWakeup;
     ThreadPoolExecutor::Job *currentJobs;
@@ -50,6 +52,8 @@ static CountT getNumCores()
     SYSTEM_INFO sys_info;
     GetSystemInfo(&sys_info);
     return sys_info.dwNumberOfProcessors;
+#elif defined(EMSCRIPTEN)
+    return 1;
 #else
     STATIC_UNIMPLEMENTED();
 #endif
@@ -98,8 +102,10 @@ ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
     const ThreadPoolExecutor::Config &cfg)
 {
     Impl *impl = new Impl {
+#ifndef EMSCRIPTEN
         .workers = HeapArray<std::thread>(
             cfg.numWorkers == 0 ? getNumCores() : cfg.numWorkers),
+#endif
         .workerWakeup = 0,
         .mainWakeup = 0,
         .currentJobs = nullptr,
@@ -115,11 +121,13 @@ ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
         impl->stateCaches.emplace(i);
     }
 
+#ifndef EMSCRIPTEN
     for (CountT i = 0; i < impl->workers.size(); i++) {
         impl->workers.emplace(i, [](Impl *impl, CountT i) {
             impl->workerThread(i);
         }, impl, i);
     }
+#endif
 
     return impl;
 }
@@ -135,9 +143,11 @@ ThreadPoolExecutor::Impl::~Impl()
     workerWakeup.store_release(-1);
     workerWakeup.notify_all();
 
+#ifndef EMSCRIPTEN
     for (CountT i = 0; i < workers.size(); i++) {
         workers[i].join();
     }
+#endif
 }
 
 ThreadPoolExecutor::~ThreadPoolExecutor() = default;
@@ -150,11 +160,29 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
     numJobs = uint32_t(num_jobs);
     nextJob.store_relaxed(0);
     numFinished.store_relaxed(0);
+
+#ifdef EMSCRIPTEN
+    while (true) {
+        uint32_t job_idx = nextJob.fetch_add_relaxed(1);
+
+        if (job_idx >= numJobs) {
+            break;
+        }
+
+        currentJobs[job_idx].fn(currentJobs[job_idx].data);
+
+        // This has to be acq_rel so the finishing thread has seen
+        // all the other threads' effects
+        uint32_t prev_finished =
+            numFinished.fetch_add_acq_rel(1);
+    }
+#else
     workerWakeup.store_release(1);
     workerWakeup.notify_all();
 
     mainWakeup.wait<sync::acquire>(0);
     mainWakeup.store_relaxed(0);
+#endif
 
     stateMgr.copyOutExportedColumns();
 }

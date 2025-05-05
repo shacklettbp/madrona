@@ -9,8 +9,6 @@ add_subdirectory(interact)
 
 add_subdirectory(mw)
 
-if (Python_FOUND)
-    add_subdirectory(python)
-endif ()
+  add_subdirectory(python)
 
 add_subdirectory(viz)

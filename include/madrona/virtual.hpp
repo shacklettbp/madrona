@@ -16,6 +16,70 @@
 
 namespace madrona {
 
+#ifdef EMSCRIPTEN
+class VirtualRegion {
+public:
+  inline VirtualRegion(uint64_t max_bytes, uint64_t, uint64_t, uint64_t = 0)
+    : ptr_(malloc(max_bytes))
+  {}
+  inline VirtualRegion(const VirtualRegion &) = delete;
+  inline VirtualRegion(VirtualRegion &&o) 
+  {
+    ptr_ = o.ptr_;
+    o.ptr_ = nullptr;
+  }
+  inline ~VirtualRegion()
+  {
+    free(ptr_);
+  }
+
+  inline void commitChunks(uint64_t start_chunk, uint64_t num_chunks) {}
+  inline void decommitChunks(uint64_t start_chunk, uint64_t num_chunks) {}
+
+  inline void * ptr() { return ptr_; }
+private:
+  void *ptr_;
+};
+
+class VirtualStore {
+public:
+    inline VirtualStore(uint32_t bytes_per_item,
+                        uint32_t item_alignment,
+                        uint32_t start_offset,
+                        uint32_t )
+      : bytes_per_item_(bytes_per_item),
+        capacity_(start_offset),
+        data_(malloc(start_offset * bytes_per_item))
+    {}
+
+    inline void * operator[](uint32_t idx) 
+    {
+        return (char *)data_ + bytes_per_item_ * idx;
+    }
+
+    inline const void * operator[](uint32_t idx) const
+    {
+        return (char *)data_ + bytes_per_item_ * idx;
+    }
+
+    inline void expand(uint32_t num_items)
+    {
+      capacity_ += num_items;
+      data_ = realloc(data_, bytes_per_item_ * capacity_);
+    }
+
+    inline void shrink(uint32_t ) {}
+
+    inline void * data() const { return data_; }
+
+    inline uint32_t numBytesPerItem() const { return bytes_per_item_; }
+private:
+    uint32_t bytes_per_item_;
+    uint32_t capacity_;
+    void *data_;
+};
+#else
+
 class VirtualRegion {
 public:
     VirtualRegion(uint64_t max_bytes, uint64_t chunk_shift,
@@ -74,6 +138,7 @@ private:
     uint32_t committed_chunks_;
     uint32_t committed_items_;
 };
+#endif
 
 template <typename T>
 class VirtualArray {

@@ -525,6 +525,9 @@ void * StateManager::exportColumn(uint32_t archetype_id, uint32_t component_id)
 
         uint32_t num_bytes_per_row = component_infos_[component_id]->numBytes;
         uint64_t map_size = 1'000'000'000 * num_bytes_per_row;
+#ifdef EMSCRIPTEN
+        map_size = 100 * num_bytes_per_row;
+#endif
 
         VirtualRegion mem(map_size, 0, 1);
         void *export_buffer = mem.ptr();
@@ -590,6 +593,7 @@ void StateManager::copyOutExportedColumns()
             CountT tbl_start = cumulative_copied_rows;
             cumulative_copied_rows += num_rows;
 
+#ifndef EMSCRIPTEN
             uint64_t num_mapped_chunks = export_job.numMappedChunks;
             uint64_t num_mapped_bytes =
                  num_mapped_chunks * export_job.mem.chunkSize();
@@ -608,6 +612,7 @@ void StateManager::copyOutExportedColumns()
                     new_num_chunks - num_mapped_chunks);
                 export_job.numMappedChunks = new_num_chunks;
             }
+#endif
 
             memcpy((char *)export_job.mem.ptr() +
                        tbl_start * export_job.numBytesPerRow,
