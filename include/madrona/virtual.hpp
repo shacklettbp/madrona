@@ -19,13 +19,25 @@ namespace madrona {
 #ifdef EMSCRIPTEN
 class VirtualRegion {
 public:
-  inline VirtualRegion(uint64_t max_bytes, uint64_t, uint64_t, uint64_t = 0)
-    : ptr_(malloc(max_bytes))
-  {}
+  inline VirtualRegion(uint64_t max_bytes, uint64_t chunk_shift,
+                       uint64_t alignment, uint64_t init_chunks = 0)
+  {
+    (void)max_bytes;
+    chunk_size_ = 1ull << chunk_shift;
+
+    capacity_ = init_chunks * chunk_size_;
+
+    if (init_chunks > 0) {
+      ptr_ = malloc(capacity_);
+    }
+  }
+
   inline VirtualRegion(const VirtualRegion &) = delete;
   inline VirtualRegion(VirtualRegion &&o) 
   {
     ptr_ = o.ptr_;
+    chunk_size_ = o.chunk_size_;
+    capacity_ = o.capacity_;
     o.ptr_ = nullptr;
   }
   inline ~VirtualRegion()
@@ -33,12 +45,31 @@ public:
     free(ptr_);
   }
 
-  inline void commitChunks(uint64_t start_chunk, uint64_t num_chunks) {}
-  inline void decommitChunks(uint64_t start_chunk, uint64_t num_chunks) {}
+  inline void commitChunks(uint64_t start_chunk, uint64_t num_chunks)
+  {
+    uint64_t start_offset = start_chunk * chunk_size_;
+    uint64_t end_offset = start_offset + num_chunks * chunk_size_;
+
+    if (end_offset <= capacity_) {
+      return;
+    }
+
+    ptr_ = realloc(ptr_, end_offset);
+  }
+
+  inline void decommitChunks(uint64_t start_chunk, uint64_t num_chunks)
+  {
+    (void)start_chunk;
+    (void)num_chunks;
+  }
+
+  inline uint64_t chunkSize() const { return chunk_size_; }
 
   inline void * ptr() { return ptr_; }
 private:
   void *ptr_;
+  uint64_t chunk_size_;
+  uint64_t capacity_;
 };
 
 class VirtualStore {
@@ -46,11 +77,13 @@ public:
     inline VirtualStore(uint32_t bytes_per_item,
                         uint32_t item_alignment,
                         uint32_t start_offset,
-                        uint32_t )
+                        uint32_t max_items)
       : bytes_per_item_(bytes_per_item),
         capacity_(start_offset),
         data_(malloc(start_offset * bytes_per_item))
-    {}
+    {
+      (void)max_items;
+    }
 
     inline void * operator[](uint32_t idx) 
     {
