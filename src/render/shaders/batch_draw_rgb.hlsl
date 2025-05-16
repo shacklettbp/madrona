@@ -34,6 +34,10 @@ StructuredBuffer<MeshData> meshDataBuffer;
 [[vk::binding(2, 2)]]
 StructuredBuffer<MaterialData> materialBuffer;
 
+// TODO: Make this part of lighting shader
+[[vk::binding(3, 2)]]
+StructuredBuffer<DirectionalLight> lightDataBuffer;
+
 [[vk::binding(0, 3)]]
 Texture2D<float4> materialTexturesArray[];
 
@@ -41,9 +45,12 @@ Texture2D<float4> materialTexturesArray[];
 SamplerState linearSampler;
 
 struct V2F {
-    [[vk::location(0)]] float2 uv : TEXCOORD0;
-    [[vk::location(1)]] int materialIdx : TEXCOORD1;
-    [[vk::location(2)]] uint color : TEXCOORD2;
+    [[vk::location(0)]] float4 position : SV_Position;
+    [[vk::location(1)]] float3 worldPos : TEXCOORD0;
+    [[vk::location(2)]] float2 uv : TEXCOORD1;
+    [[vk::location(3)]] int materialIdx : TEXCOORD2;
+    [[vk::location(4)]] uint color : TEXCOORD3;
+    [[vk::location(5)]] float3 worldNormal : TEXCOORD4;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -164,9 +171,9 @@ void computeCompositeTransform(float3 obj_t,
 }
 
 [shader("vertex")]
-float4 vert(in uint vid : SV_VertexID,
+void vert(in uint vid : SV_VertexID,
             in uint draw_id : SV_InstanceID,
-            out V2F v2f) : SV_Position
+            out V2F v2f)
 {
     DrawDataBR draw_data = drawDataBuffer[draw_id + pushConst.drawDataOffset];
 
@@ -208,8 +215,10 @@ float4 vert(in uint vid : SV_VertexID,
                   min(0.0, abs(float(draw_data.instanceID))) +
                   something;
 
+    v2f.worldPos = rotateVec(instance_data.rotation, instance_data.scale * vert.position) + instance_data.position;
+    v2f.position = clip_pos;
     v2f.uv = vert.uv;
-
+    v2f.worldNormal = rotateVec(instance_data.rotation, vert.normal);
 #if 0
     if (instance_data.matID == -1) {
         v2f.materialIdx = meshDataBuffer[draw_data.meshID].materialIndex;
@@ -228,8 +237,6 @@ float4 vert(in uint vid : SV_VertexID,
         v2f.materialIdx = instance_data.matID;
         v2f.color = 0;
     }
-
-    return clip_pos;
 }
 
 // We are basically packing 3 uints into 2. 21 bits per uint except for 22 
@@ -279,6 +286,39 @@ PixelOutput frag(in V2F v2f,
                     linearSampler, v2f.uv, 0);
         }
 
+        float ambient = 0.2;
+        float3 normal = normalize(v2f.normal);
+        float3 totalLighting = 0;
+        uint num_lights = 0;
+        lightDataBuffer.getDimensions(num_lights);
+        for (uint i = 0; i < num_lights; i++) {
+            DirectionalLight light = lightDataBuffer[i];
+            
+            float3 light_dir;
+            float attenuation = 1.0;
+            
+            if (light.lightPos.w < 0.5) { // Directional light
+                light_dir = -light.lightDir.xyz;
+            } else { // Point light
+                light_dir = v2f.worldPos.xyz - light.lightPos.xyz;
+                float dist = length(light_dir);
+                
+                float cutoff = light.lightCutoff.x;
+                float cutoff_sq = cutoff * cutoff;
+                attenuation = saturate(1.0 - (dist * dist) / cutoff_sq);
+            }
+
+            light_dir = normalize(light_dir);
+            float n_dot_l = max(0.0, dot(normal, light_dir));
+            totalLighting += n_dot_l * attenuation;
+        }
+
+        float3 lighting = totalLighting * color.rgb;
+
+        // Add ambient term
+        lighting += color.rgb * ambient;
+        
+        color.rgb = lighting;
         output.rgbOut = color;
 
         return output;

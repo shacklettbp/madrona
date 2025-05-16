@@ -9,6 +9,7 @@ struct RenderECSBridge {
     PerspectiveCameraData *views;
     InstanceData *instances;
     TLBVHNode *aabbs;
+    LightDesc *lights;
 
     int32_t *instanceOffsets;
     int32_t *viewOffsets;

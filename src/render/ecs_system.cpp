@@ -25,22 +25,25 @@ using namespace math;
 struct RenderingSystemState {
     uint32_t *totalNumViews;
     uint32_t *totalNumInstances;
-
+    uint32_t *totalNumLights;
     uint32_t *voxels;
     float aspectRatio;
 
     // This is used if on the CPU backend
     AtomicU32 *totalNumViewsCPU;
     AtomicU32 *totalNumInstancesCPU;
+    AtomicU32 *totalNumLightsCPU;
 
     // This is used if on the CPU backend
     InstanceData *instancesCPU;
     PerspectiveCameraData *viewsCPU;
+    LightDesc *lightsCPU;
 
     // World IDs (keys used in the key-value sorting)
     // Also only used when on the CPU backend
     uint64_t *instanceWorldIDsCPU;
     uint64_t *viewWorldIDsCPU;
+    uint64_t *lightWorldIDsCPU;
 
     MeshBVH *bvhs;
     uint32_t numBVHs;
@@ -605,19 +608,21 @@ void init(Context &ctx,
         // This is where the renderer will read out the totals
         system_state.totalNumViews = bridge->totalNumViews;
         system_state.totalNumInstances = bridge->totalNumInstances;
-
+        system_state.totalNumLights = bridge->totalNumLights;
 #if !defined(MADRONA_GPU_MODE)
         // This is just an atomic counter (final value will be moved to
         // the totalNumViews/Instances variables).
         system_state.totalNumViewsCPU = bridge->totalNumViewsCPUInc;
         system_state.totalNumInstancesCPU = bridge->totalNumInstancesCPUInc;
+        system_state.totalNumLightsCPU = bridge->totalNumLightsCPUInc;
 
         // This is only relevant for the CPU backend
         system_state.instancesCPU = bridge->instances;
         system_state.viewsCPU = bridge->views;
-
+        system_state.lightsCPU = bridge->lights;
         system_state.instanceWorldIDsCPU = bridge->instancesWorldIDs;
         system_state.viewWorldIDsCPU = bridge->viewsWorldIDs;
+        system_state.lightWorldIDsCPU = bridge->lightsWorldIDs;
 #endif
 
         system_state.aspectRatio = 
