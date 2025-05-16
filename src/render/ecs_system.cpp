@@ -25,17 +25,19 @@ using namespace math;
 struct RenderingSystemState {
     uint32_t *totalNumViews;
     uint32_t *totalNumInstances;
-
+    uint32_t *totalNumLights;
     uint32_t *voxels;
     float aspectRatio;
 
     // This is used if on the CPU backend
     AtomicU32 *totalNumViewsCPU;
     AtomicU32 *totalNumInstancesCPU;
+    AtomicU32 *totalNumLightsCPU;
 
     // This is used if on the CPU backend
     InstanceData *instancesCPU;
     PerspectiveCameraData *viewsCPU;
+    LightDesc *lightsCPU;
 
     // World IDs (keys used in the key-value sorting)
     // Also only used when on the CPU backend
@@ -197,6 +199,7 @@ inline void lightUpdate(Context &ctx,
 
     (void)e;
 
+#if defined(MADRONA_GPU_MODE)
     LightDesc &desc = ctx.get<LightDesc>(carrier.light);
 
     desc.type = type.type;
@@ -206,6 +209,19 @@ inline void lightUpdate(Context &ctx,
     desc.cutoff = angle.cutoff;
     desc.intensity = intensity.intensity;
     desc.active = active.active;
+#else
+    auto &system_state = ctx.singleton<RenderingSystemState>();
+    uint32_t light_id = system_state.totalNumLightsCPU->fetch_add<sync::acq_rel>(1);
+
+    LightDesc &desc = system_state.lightsCPU[light_id];
+    desc.type = type.type;
+    desc.castShadow = shadow.castShadow;
+    desc.position = pos;
+    desc.direction = dir;
+    desc.cutoff = angle.cutoff;
+    desc.intensity = intensity.intensity;
+    desc.active = active.active;
+#endif
 }
 
 inline void instanceTransformUpdateWithMat(Context &ctx,
@@ -605,17 +621,18 @@ void init(Context &ctx,
         // This is where the renderer will read out the totals
         system_state.totalNumViews = bridge->totalNumViews;
         system_state.totalNumInstances = bridge->totalNumInstances;
-
+        system_state.totalNumLights = bridge->totalNumLights;
 #if !defined(MADRONA_GPU_MODE)
         // This is just an atomic counter (final value will be moved to
         // the totalNumViews/Instances variables).
         system_state.totalNumViewsCPU = bridge->totalNumViewsCPUInc;
         system_state.totalNumInstancesCPU = bridge->totalNumInstancesCPUInc;
+        system_state.totalNumLightsCPU = bridge->totalNumLightsCPUInc;
 
         // This is only relevant for the CPU backend
         system_state.instancesCPU = bridge->instances;
         system_state.viewsCPU = bridge->views;
-
+        system_state.lightsCPU = bridge->lights;
         system_state.instanceWorldIDsCPU = bridge->instancesWorldIDs;
         system_state.viewWorldIDsCPU = bridge->viewsWorldIDs;
 #endif

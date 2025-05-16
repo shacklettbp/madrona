@@ -32,7 +32,7 @@ public:
 
         uint32_t numWorlds;
         uint32_t maxViewsPerWorld;
-
+        uint32_t maxLightsPerWorld;
         uint32_t maxInstancesPerWorld;
         ExecMode execMode;
 
