@@ -156,12 +156,10 @@ struct EngineInterop {
 
     uint32_t *iotaArrayInstancesCPU;
     uint32_t *iotaArrayViewsCPU;
-    uint32_t *iotaArrayLightsCPU;
 
     // We need the sorted instance world IDs in order to compute the instance offsets
     uint64_t *sortedInstanceWorldIDs;
     uint64_t *sortedViewWorldIDs;
-    uint64_t *sortedLightWorldIDs;
 };
 
 struct ShadowOffsets {

@@ -43,7 +43,6 @@ struct RenderingSystemState {
     // Also only used when on the CPU backend
     uint64_t *instanceWorldIDsCPU;
     uint64_t *viewWorldIDsCPU;
-    uint64_t *lightWorldIDsCPU;
 
     MeshBVH *bvhs;
     uint32_t numBVHs;
@@ -214,11 +213,7 @@ inline void lightUpdate(Context &ctx,
     auto &system_state = ctx.singleton<RenderingSystemState>();
     uint32_t light_id = system_state.totalNumLightsCPU->fetch_add<sync::acq_rel>(1);
 
-    // Required for stable sorting on CPU
-    system_state.lightWorldIDsCPU[light_id] = 
-        ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
-
-    LightDesc &data = system_state.lightsCPU[light_id];
+    LightDesc &desc = system_state.lightsCPU[light_id];
     desc.type = type.type;
     desc.castShadow = shadow.castShadow;
     desc.position = pos;
@@ -640,7 +635,6 @@ void init(Context &ctx,
         system_state.lightsCPU = bridge->lights;
         system_state.instanceWorldIDsCPU = bridge->instancesWorldIDs;
         system_state.viewWorldIDsCPU = bridge->viewsWorldIDs;
-        system_state.lightWorldIDsCPU = bridge->lightsWorldIDs;
 #endif
 
         system_state.aspectRatio = 

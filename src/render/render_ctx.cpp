@@ -611,7 +611,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     VkBuffer instances_hdl = VK_NULL_HANDLE;
     VkBuffer instance_offsets_hdl = VK_NULL_HANDLE;
     VkBuffer aabb_hdl = VK_NULL_HANDLE;
-    VkBuffer light_hdl = VK_NULL_HANDLE;
+    VkBuffer lights_hdl = VK_NULL_HANDLE;
 
     void *views_base = nullptr;
     void *view_offsets_base = nullptr;
@@ -796,25 +796,31 @@ static EngineInterop setupEngineInterop(Device &dev,
 
     uint32_t *total_num_views_readback = nullptr;
     uint32_t *total_num_instances_readback = nullptr;
+    uint32_t *total_num_lights_readback = nullptr;
 
     AtomicU32 *total_num_views_cpu_inc = nullptr;
     AtomicU32 *total_num_instances_cpu_inc = nullptr;
+    AtomicU32 *total_num_lights_cpu_inc = nullptr;
 
     if (!gpu_input) {
         total_num_views_readback = (uint32_t *)malloc(
-            2*sizeof(uint32_t));
+            3*sizeof(uint32_t));
         total_num_instances_readback = total_num_views_readback + 1;
+        total_num_lights_readback = total_num_instances_readback + 1;
 
-        total_num_views_cpu_inc = (AtomicU32 *)malloc(2 * sizeof(AtomicU32));
+        total_num_views_cpu_inc = (AtomicU32 *)malloc(3 * sizeof(AtomicU32));
         total_num_instances_cpu_inc = total_num_views_cpu_inc + 1;
+        total_num_lights_cpu_inc = total_num_instances_cpu_inc + 1;
 
         total_num_views_cpu_inc->store_release(0);
         total_num_instances_cpu_inc->store_release(0);
+        total_num_lights_cpu_inc->store_release(0);
     } else {
 #ifdef MADRONA_VK_CUDA_SUPPORT
         total_num_views_readback = (uint32_t *)cu::allocReadback(
-            2*sizeof(uint32_t));
+            3*sizeof(uint32_t));
         total_num_instances_readback = total_num_views_readback + 1;
+        total_num_lights_readback = total_num_instances_readback + 1;
 #endif
     }
 
@@ -827,8 +833,10 @@ static EngineInterop setupEngineInterop(Device &dev,
         .viewOffsets = (int32_t *)view_offsets_base,
         .totalNumViews = total_num_views_readback,
         .totalNumInstances = total_num_instances_readback,
+        .totalNumLights = total_num_lights_readback,
         .totalNumViewsCPUInc = total_num_views_cpu_inc,
         .totalNumInstancesCPUInc = total_num_instances_cpu_inc,
+        .totalNumLightsCPUInc = total_num_lights_cpu_inc,
         .instancesWorldIDs = (uint64_t *)world_ids_instances_base,
         .viewsWorldIDs = (uint64_t *)world_ids_views_base,
         .renderWidth = (int32_t)render_width,
@@ -1825,18 +1833,17 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     }
 
     int64_t num_total_objs = src_objs.size();
-    int64_t num_total_lights = engine_interop_.maxLightsPerWorld;
+    uint32_t num_total_lights = engine_interop_.maxLightsPerWorld;
     printf(">>>>>>>>>num_total_lights: %d\n", num_total_lights);
 
-    int64_t buffer_offsets[6];
-    int64_t buffer_sizes[7] = {
+    int64_t buffer_offsets[5];
+    int64_t buffer_sizes[6] = {
         (int64_t)sizeof(ObjectData) * num_total_objs,
         (int64_t)sizeof(MeshData) * num_total_meshes,
         (int64_t)sizeof(PackedVertex) * num_total_vertices,
         (int64_t)sizeof(uint32_t) * num_total_indices,
         (int64_t)sizeof(MaterialDataShader) * src_mats.size(),
         (int64_t)sizeof(ShaderAABB) * num_total_objs,
-        (int64_t)sizeof(DirectionalLight) * num_total_lights
     };
 
     int64_t num_asset_bytes = utils::computeBufferOffsets(
@@ -1855,8 +1862,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         (MaterialDataShader *)(staging_ptr + buffer_offsets[3]);
     ShaderAABB *aabbs_ptr =
         (ShaderAABB *)(staging_ptr + buffer_offsets[4]);
-    DirectionalLight *lights_ptr =
-        (DirectionalLight *)(staging_ptr + buffer_offsets[5]);
 
     int32_t mesh_offset = 0;
     int32_t vertex_offset = 0;
@@ -2032,13 +2037,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
 
     free(aabbs_src);
 
-    for (int i = 0; i < num_total_lights; ++i) {
-        printf(">>>>>>>>>lights[%d]: %f, %f, %f\n", i, engine_interop_.bridge.lights[i].lightDir.x, engine_interop_.bridge.lights[i].lightDir.y, engine_interop_.bridge.lights[i].lightDir.z);
-        DirectionalLight* src = engine_interop_.bridge.lights[i];
-        DirectionalLight* dst = lights_ptr[i];
-        *dst = *src;
-    }
-
     staging.flush(dev);
 
     LocalBuffer asset_buffer = *alloc.makeLocalBuffer(num_asset_bytes);
@@ -2141,14 +2139,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     desc_updates.push_back({});
     DescHelper::storage(desc_updates[7], asset_batch_lighting_set_, &mat_info, 2);
 
-    VkDescriptorBufferInfo light_info;
-    light_info.buffer = asset_buffer.buffer;
-    light_info.offset = buffer_offsets[5];
-    light_info.range = buffer_sizes[6];
-
-    desc_updates.push_back({});
-    DescHelper::storage(desc_updates[8], asset_batch_lighting_set_, &light_info, 3);
-
     VkDescriptorBufferInfo aabb_set_info;
     aabb_set_info.buffer = asset_buffer.buffer;
     aabb_set_info.offset = buffer_offsets[4];
@@ -2199,7 +2189,8 @@ void RenderContext::configureLighting(Span<const LightConfig> lights)
     for (int i = 0; i < lights.size(); ++i) {
         lights_.insert(i, DirectionalLight{ 
             math::Vector4{lights[i].dir.x, lights[i].dir.y, lights[i].dir.z, 1.0f }, 
-            math::Vector4{lights[i].color.x, lights[i].color.y, lights[i].color.z, 1.0f}
+            math::Vector4{lights[i].color.x, lights[i].color.y, lights[i].color.z, 1.0f},
+            0.0f
         });
     }
 }
