@@ -14,6 +14,10 @@ StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 [[vk::binding(2, 0)]]
 StructuredBuffer<uint32_t> instanceOffsets;
 
+// TODO: Make this part of lighting shader
+[[vk::binding(3, 0)]]
+StructuredBuffer<DirectionalLight> lightDataBuffer;
+
 // Draw information
 [[vk::binding(0, 1)]]
 RWStructuredBuffer<uint32_t> drawCount;
@@ -33,10 +37,6 @@ StructuredBuffer<MeshData> meshDataBuffer;
 
 [[vk::binding(2, 2)]]
 StructuredBuffer<MaterialData> materialBuffer;
-
-// TODO: Make this part of lighting shader
-[[vk::binding(3, 2)]]
-StructuredBuffer<DirectionalLight> lightDataBuffer;
 
 [[vk::binding(0, 3)]]
 Texture2D<float4> materialTexturesArray[];

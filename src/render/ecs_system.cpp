@@ -37,7 +37,7 @@ struct RenderingSystemState {
     // This is used if on the CPU backend
     InstanceData *instancesCPU;
     PerspectiveCameraData *viewsCPU;
-    LightDesc *lightsCPU;
+    DirectionalLightData *lightsCPU;
 
     // World IDs (keys used in the key-value sorting)
     // Also only used when on the CPU backend
@@ -200,7 +200,8 @@ inline void lightUpdate(Context &ctx,
 
     (void)e;
 
-    LightDesc &desc = ctx.get<LightDesc>(carrier.light);
+#if defined(MADRONA_GPU_MODE)
+    LightDesc &data = ctx.get<LightDesc>(carrier.light);
 
     desc.type = type.type;
     desc.castShadow = shadow.castShadow;
@@ -209,6 +210,31 @@ inline void lightUpdate(Context &ctx,
     desc.cutoff = angle.cutoff;
     desc.intensity = intensity.intensity;
     desc.active = active.active;
+
+#else
+    auto &system_state = ctx.singleton<RenderingSystemState>();
+    uint32_t light_id = system_state.totalNumLightsCPU->fetch_add<sync::acq_rel>(1);
+
+    // Required for stable sorting on CPU
+    system_state.lightWorldIDsCPU[light_id] = 
+        ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
+
+    DirectionalLightData &data = system_state.lightsCPU[light_id];
+
+    if(type.type == LightDesc::Directional)
+    {
+        data.direction = {dir.x, dir.y, dir.z, 0.0f};
+        data.lightCutoff = 0.0f;
+    }
+    else
+    {
+        data.direction = {pos.x, pos.y, pos.z, 1.0f};
+        data.lightCutoff = angle.cutoff;
+    }
+    constexpr Vector3 default_color = {1.0f, 1.0f, 1.0f};
+    Vector3 color_with_intensity = default_color * intensity.intensity;
+    data.color = {color_with_intensity.x, color_with_intensity.y, color_with_intensity.z, 1.0f};
+#endif
 }
 
 inline void instanceTransformUpdateWithMat(Context &ctx,

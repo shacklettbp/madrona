@@ -110,7 +110,6 @@ struct EngineInterop {
 
     Optional<render::vk::HostBuffer> aabbCPU;
     Optional<render::vk::HostBuffer> lightsCPU;
-
 #ifdef MADRONA_VK_CUDA_SUPPORT
     Optional<render::vk::DedicatedBuffer> viewsGPU;
     Optional<render::vk::DedicatedBuffer> viewOffsetsGPU;

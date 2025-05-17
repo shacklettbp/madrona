@@ -88,6 +88,12 @@ struct LightDesc {
     bool active;
 };
 
+struct alignas(16) DirectionalLightData {
+    math::Vector4 direction;
+    math::Vector4 color;
+    float lightCutoff;
+};
+
 struct LightDescDirection : math::Vector3 {
     LightDescDirection(math::Vector3 v)
         : Vector3(v)

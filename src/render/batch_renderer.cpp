@@ -1583,6 +1583,16 @@ static void computeViewOffsets(EngineInterop *interop, uint32_t num_worlds)
     }
 }
 
+static void computeLights(EngineInterop *interop, uint32_t num_worlds, uint32_t num_lightsPerWorld)
+{
+    LightDesc *lights = (LightDesc *)interop->lightsCPU->ptr;
+    for (int i = 0; i < (int)num_worlds; ++i) {
+        for (int j = 0; j < (int)num_lightsPerWorld; ++j) {
+            lights[i * num_lightsPerWorld + j] = interop->bridge.lights[i * num_lightsPerWorld + j];
+        }
+    }
+}
+
 void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                                         EngineInterop *interop)
 {
@@ -1604,6 +1614,7 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
             sortInstancesAndViewsCPU(interop);
             computeInstanceOffsets(interop, info.numWorlds);
             computeViewOffsets(interop, info.numWorlds);
+            computeLights(interop, info.numWorlds, info.maxLightsPerWorld);
 
             // Need to flush engine input state before copy
             interop->viewsCPU->flush(impl->dev);
@@ -1611,6 +1622,8 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
             interop->instancesCPU->flush(impl->dev);
             interop->instanceOffsetsCPU->flush(impl->dev);
             interop->aabbCPU->flush(impl->dev);
+            interop->lightsCPU->flush(impl->dev);
+            interop->lightOffsetsCPU->flush(impl->dev);
         }
 
         if (interop->voxelInputCPU.has_value()) {
@@ -1712,6 +1725,21 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                              batch_buffers.viewOffsets.buffer,
                              1, &offsets_data_copy);
     }
+
+    { // Import the lights
+        VkDeviceSize num_lights_bytes = info.numWorlds * info.maxLightsPerWorld
+            sizeof(shader::PackedLightData);
+
+        VkBufferCopy lights_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_lights_bytes
+        };
+
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->lightsHdl,
+                             batch_buffers.lights.buffer,
+                             1, &lights_data_copy);
+    }
+
 
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
 

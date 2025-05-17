@@ -741,7 +741,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     }
     
     { // Create the lights buffer
-        uint64_t num_lights_bytes = max_lights_per_world *
+        uint64_t num_lights_bytes = num_worlds * max_lights_per_world *
             (int64_t)sizeof(render::shader::DirectionalLight);
 
         if (!gpu_input) {
@@ -1372,12 +1372,19 @@ RenderContext::RenderContext(
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                 .pImmutableSamplers = nullptr,
+            },
+            {
+                .binding = 3,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .pImmutableSamplers = nullptr,
             }
         };
 
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        info.bindingCount = 3;
+        info.bindingCount = 4;
         info.pBindings = bindings;
 
         dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_batch_draw_layout_);
@@ -1405,13 +1412,6 @@ RenderContext::RenderContext(
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
                 .pImmutableSamplers = nullptr,
-            },
-            {
-                .binding = 3,
-                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .pImmutableSamplers = nullptr,
             }
         };
 
@@ -1419,7 +1419,7 @@ RenderContext::RenderContext(
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
-            .bindingCount = 4,
+            .bindingCount = 3,
             .pBindings = bindings
         };
 
@@ -1861,7 +1861,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     int32_t mesh_offset = 0;
     int32_t vertex_offset = 0;
     int32_t index_offset = 0;
-    
+
     auto packHalf2x16 = [](const Vector2 &v) {
 #if defined(MADRONA_MSVC)
         uint16_t x_half = f32tof16(v.x);
