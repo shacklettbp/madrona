@@ -1512,6 +1512,10 @@ static void sortInstancesAndViewsCPU(EngineInterop *interop)
         interop->iotaArrayViewsCPU[i] = i;
     }
 
+    for (uint32_t i = 0; i < *interop->bridge.totalNumLights; ++i) {
+        interop->iotaArrayLightsCPU[i] = i;
+    }
+
     { // Sort the indices based on worldID/entityID number
         std::sort(interop->iotaArrayInstancesCPU, 
                   interop->iotaArrayInstancesCPU + *interop->bridge.totalNumInstances,
@@ -1524,10 +1528,17 @@ static void sortInstancesAndViewsCPU(EngineInterop *interop)
                   [&interop] (uint32_t a, uint32_t b) {
                       return interop->bridge.viewsWorldIDs[a] < interop->bridge.viewsWorldIDs[b];
                   });
+
+        std::sort(interop->iotaArrayLightsCPU,
+                  interop->iotaArrayLightsCPU + *interop->bridge.totalNumLights,
+                  [&interop] (uint32_t a, uint32_t b) {
+                      return interop->bridge.lightsWorldIDs[a] < interop->bridge.lightsWorldIDs[b];
+                  });
     }
 
     InstanceData *instances = (InstanceData *)interop->instancesCPU->ptr;
     PerspectiveCameraData *views = (PerspectiveCameraData *)interop->viewsCPU->ptr;
+    render::shader::DirectionalLight *lights = (render::shader::DirectionalLight *)interop->lightsCPU->ptr;
 
     { // Write the sorted array of views and instances
         for (uint32_t i = 0; i < *interop->bridge.totalNumInstances; ++i) {
@@ -1543,6 +1554,13 @@ static void sortInstancesAndViewsCPU(EngineInterop *interop)
 
             interop->sortedViewWorldIDs[i] = 
                 interop->bridge.viewsWorldIDs[interop->iotaArrayViewsCPU[i]];
+        }
+
+        for (uint32_t i = 0; i < *interop->bridge.totalNumLights; ++i) {
+            lights[i] = interop->bridge.lights[interop->iotaArrayLightsCPU[i]];
+
+            interop->sortedLightWorldIDs[i] = 
+                interop->bridge.lightsWorldIDs[interop->iotaArrayLightsCPU[i]];
         }
     }
 }
@@ -1587,19 +1605,19 @@ static void computeLights(EngineInterop *interop, uint32_t num_worlds, uint32_t 
 {
     // Convert LightDesc to DirectionalLight
     render::shader::DirectionalLight *lights = (render::shader::DirectionalLight *)interop->lightsCPU->ptr;
-    LightDesc *lightDescs = (LightDesc *)interop->lightsCPU->ptr;
+    LightDesc *lightDescs = (LightDesc *)interop->bridge.lights;
     for (int i = 0; i < (int)num_worlds * num_lightsPerWorld; ++i) {
         if(lightDescs[i].type == LightDesc::Type::Directional) {
             lights[i] = {
                 .lightDir = Vector4(lightDescs[i].direction, 0.0f),
-                .color = Vector4(lightDescs[i].color, 1.0f),
-                .lightCutoff = lightDescs[i].cutoff
+                .color = Vector4(lightDescs[i].color * lightDescs[i].intensity, 1.0f),
+                .lightCutoff = 0
             };
         }
         else if(lightDescs[i].type == LightDesc::Type::Spotlight) {
             lights[i] = {
                 .lightDir = Vector4(lightDescs[i].position, 1.0f),
-                .color = Vector4(lightDescs[i].color, 1.0f),
+                .color = Vector4(lightDescs[i].color * lightDescs[i].intensity, 1.0f),
                 .lightCutoff = lightDescs[i].cutoff,
             };
         }
@@ -1636,7 +1654,6 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
             interop->instanceOffsetsCPU->flush(impl->dev);
             interop->aabbCPU->flush(impl->dev);
             interop->lightsCPU->flush(impl->dev);
-            interop->lightOffsetsCPU->flush(impl->dev);
         }
 
         if (interop->voxelInputCPU.has_value()) {

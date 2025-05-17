@@ -53,7 +53,6 @@ struct BatchImportedBuffers {
     render::vk::LocalBuffer instanceOffsets;
 
     render::vk::LocalBuffer lights;
-    render::vk::LocalBuffer lightOffsets;
 };
 
 struct BatchRenderer {

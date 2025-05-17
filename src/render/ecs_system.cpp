@@ -37,7 +37,7 @@ struct RenderingSystemState {
     // This is used if on the CPU backend
     InstanceData *instancesCPU;
     PerspectiveCameraData *viewsCPU;
-    DirectionalLightData *lightsCPU;
+    LightDesc *lightsCPU;
 
     // World IDs (keys used in the key-value sorting)
     // Also only used when on the CPU backend
@@ -218,21 +218,14 @@ inline void lightUpdate(Context &ctx,
     system_state.lightWorldIDsCPU[light_id] = 
         ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
 
-    DirectionalLightData &data = system_state.lightsCPU[light_id];
-
-    if(type.type == LightDesc::Directional)
-    {
-        data.direction = {dir.x, dir.y, dir.z, 0.0f};
-        data.lightCutoff = 0.0f;
-    }
-    else
-    {
-        data.direction = {pos.x, pos.y, pos.z, 1.0f};
-        data.lightCutoff = angle.cutoff;
-    }
-    constexpr Vector3 default_color = {1.0f, 1.0f, 1.0f};
-    Vector3 color_with_intensity = default_color * intensity.intensity;
-    data.color = {color_with_intensity.x, color_with_intensity.y, color_with_intensity.z, 1.0f};
+    LightDesc &data = system_state.lightsCPU[light_id];
+    desc.type = type.type;
+    desc.castShadow = shadow.castShadow;
+    desc.position = pos;
+    desc.direction = dir;
+    desc.cutoff = angle.cutoff;
+    desc.intensity = intensity.intensity;
+    desc.active = active.active;
 #endif
 }
 
