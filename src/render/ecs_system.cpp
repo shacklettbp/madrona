@@ -201,7 +201,7 @@ inline void lightUpdate(Context &ctx,
     (void)e;
 
 #if defined(MADRONA_GPU_MODE)
-    LightDesc &data = ctx.get<LightDesc>(carrier.light);
+    LightDesc &desc = ctx.get<LightDesc>(carrier.light);
 
     desc.type = type.type;
     desc.castShadow = shadow.castShadow;
@@ -210,7 +210,6 @@ inline void lightUpdate(Context &ctx,
     desc.cutoff = angle.cutoff;
     desc.intensity = intensity.intensity;
     desc.active = active.active;
-
 #else
     auto &system_state = ctx.singleton<RenderingSystemState>();
     uint32_t light_id = system_state.totalNumLightsCPU->fetch_add<sync::acq_rel>(1);

@@ -1585,10 +1585,23 @@ static void computeViewOffsets(EngineInterop *interop, uint32_t num_worlds)
 
 static void computeLights(EngineInterop *interop, uint32_t num_worlds, uint32_t num_lightsPerWorld)
 {
-    LightDesc *lights = (LightDesc *)interop->lightsCPU->ptr;
-    for (int i = 0; i < (int)num_worlds; ++i) {
-        for (int j = 0; j < (int)num_lightsPerWorld; ++j) {
-            lights[i * num_lightsPerWorld + j] = interop->bridge.lights[i * num_lightsPerWorld + j];
+    // Convert LightDesc to DirectionalLight
+    render::shader::DirectionalLight *lights = (render::shader::DirectionalLight *)interop->lightsCPU->ptr;
+    LightDesc *lightDescs = (LightDesc *)interop->lightsCPU->ptr;
+    for (int i = 0; i < (int)num_worlds * num_lightsPerWorld; ++i) {
+        if(lightDescs[i].type == LightDesc::Type::Directional) {
+            lights[i] = {
+                .lightDir = Vector4(lightDescs[i].direction, 0.0f),
+                .color = Vector4(lightDescs[i].color, 1.0f),
+                .lightCutoff = lightDescs[i].cutoff
+            };
+        }
+        else if(lightDescs[i].type == LightDesc::Type::Spotlight) {
+            lights[i] = {
+                .lightDir = Vector4(lightDescs[i].position, 1.0f),
+                .color = Vector4(lightDescs[i].color, 1.0f),
+                .lightCutoff = lightDescs[i].cutoff,
+            };
         }
     }
 }
@@ -1728,7 +1741,7 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
 
     { // Import the lights
         VkDeviceSize num_lights_bytes = info.numWorlds * info.maxLightsPerWorld
-            sizeof(shader::PackedLightData);
+            sizeof(shader::DirectionalLight);
 
         VkBufferCopy lights_data_copy = {
             .srcOffset = 0, .dstOffset = 0,
