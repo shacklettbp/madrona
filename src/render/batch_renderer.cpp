@@ -1623,7 +1623,7 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
     uint32_t frame_index = impl->currentFrame;
 
     { // Flush CPU buffers if we used CPU buffers
-        if (interop->viewsCPU.has_value {
+        if (interop->viewsCPU.has_value()) {
             *interop->bridge.totalNumViews = interop->bridge.totalNumViewsCPUInc->load_acquire();
             *interop->bridge.totalNumInstances = interop->bridge.totalNumInstancesCPUInc->load_acquire();
 
