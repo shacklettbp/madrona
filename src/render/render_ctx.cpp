@@ -1835,6 +1835,11 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     int64_t num_total_objs = src_objs.size();
     uint32_t num_total_lights = engine_interop_.maxLightsPerWorld;
     printf(">>>>>>>>>num_total_lights: %d\n", num_total_lights);
+    #ifdef MADRONA_VK_CUDA_SUPPORT 
+    printf(">>>>>>>>>MADRONA_VK_CUDA_SUPPORT\n");
+    #else
+    printf(">>>>>>>>>NO MADRONA_VK_CUDA_SUPPORT\n");
+    #endif 
 
     int64_t buffer_offsets[5];
     int64_t buffer_sizes[6] = {
