@@ -136,7 +136,8 @@ struct BVHParams {
 
     void *rgbOutput;
     void *depthOutput;
-    uint32_t renderOutputResolution;
+    uint32_t renderOutputWidth;
+    uint32_t renderOutputHeight;
 
     // This will render the depth component as well as the RGB component.
     uint32_t raycastRGBD;

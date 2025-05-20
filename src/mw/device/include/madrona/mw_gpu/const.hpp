@@ -31,7 +31,8 @@ struct GPUImplConsts {
     uint32_t sharedJobTrackerOffset;
     uint32_t userJobTrackerOffset;
     uint32_t numMeshBVHs;
-    uint32_t raycastOutputResolution;
+    uint32_t raycastOutputWidth;
+    uint32_t raycastOutputHeight;
     uint32_t raycastRGBD;
 
     static inline GPUImplConsts & get();
