@@ -1835,11 +1835,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     int64_t num_total_objs = src_objs.size();
     uint32_t num_total_lights = engine_interop_.maxLightsPerWorld;
     printf(">>>>>>>>>num_total_lights: %d\n", num_total_lights);
-    #ifdef MADRONA_VK_CUDA_SUPPORT 
-    printf(">>>>>>>>>MADRONA_VK_CUDA_SUPPORT\n");
-    #else
-    printf(">>>>>>>>>NO MADRONA_VK_CUDA_SUPPORT\n");
-    #endif 
 
     int64_t buffer_offsets[5];
     int64_t buffer_sizes[6] = {
@@ -1848,7 +1843,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         (int64_t)sizeof(PackedVertex) * num_total_vertices,
         (int64_t)sizeof(uint32_t) * num_total_indices,
         (int64_t)sizeof(MaterialDataShader) * src_mats.size(),
-        (int64_t)sizeof(ShaderAABB) * num_total_objs,
+        (int64_t)sizeof(ShaderAABB) * num_total_objs
     };
 
     int64_t num_asset_bytes = utils::computeBufferOffsets(
@@ -2193,7 +2188,7 @@ void RenderContext::configureLighting(Span<const LightConfig> lights)
 {
     for (int i = 0; i < lights.size(); ++i) {
         lights_.insert(i, DirectionalLight{ 
-            math::Vector4{lights[i].dir.x, lights[i].dir.y, lights[i].dir.z, 1.0f }, 
+            math::Vector4{lights[i].dir.x, lights[i].dir.y, lights[i].dir.z, 0.0f }, 
             math::Vector4{lights[i].color.x, lights[i].color.y, lights[i].color.z, 1.0f},
             0.0f
         });

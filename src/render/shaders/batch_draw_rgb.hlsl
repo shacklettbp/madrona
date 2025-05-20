@@ -298,17 +298,15 @@ PixelOutput frag(in V2F v2f,
             float attenuation = 1.0;
             
             if (light.lightDir.w < 0.5) { // Directional light
-                light_dir = -light.lightDir.xyz;
-            } else { // Point light
-                light_dir = v2f.worldPos.xyz - light.lightDir.xyz;
-                float dist = length(light_dir);
-                
-                float cutoff = light.lightCutoff.x;
-                float cutoff_sq = cutoff * cutoff;
-                attenuation = saturate(1.0 - (dist * dist) / cutoff_sq);
+                light_dir = normalize(-light.lightDir.xyz);
+            } else { // Spot light
+                light_dir = normalize(v2f.worldPos.xyz - light.lightDir.xyz);
+                float angle = acos(dot(normalize(light_dir), normalize(light.lightDir.xyz)));
+                if (abs(angle) > light.lightCutoff) {
+                    continue;
+                }
             }
 
-            light_dir = normalize(light_dir);
             float n_dot_l = max(0.0, dot(normal, light_dir));
             totalLighting += n_dot_l;// * attenuation;
         }

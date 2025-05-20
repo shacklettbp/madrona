@@ -24,6 +24,7 @@ struct RenderECSBridge {
     //                        least significant 32 bits: entity ID)
     uint64_t *instancesWorldIDs;
     uint64_t *viewsWorldIDs;
+
     int32_t renderWidth;
     int32_t renderHeight;
     uint32_t *voxels;
