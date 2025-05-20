@@ -66,7 +66,7 @@ inline Vector3 calculateOutRay(PerspectiveCameraData *view_data,
     const float h = 1.0f / (-view_data->yScale);
 
     const auto viewport_height = 2 * h;
-    const auto viewport_width = viewport_height;
+    const auto viewport_width = viewport_height * view_data->yScale / view_data->xScale;
     const auto forward = look_at.normalize();
 
     auto u = rot.inv().rotateVec({1, 0, 0});
@@ -77,8 +77,8 @@ inline Vector3 calculateOutRay(PerspectiveCameraData *view_data,
 
     auto lower_left_corner = ray_start - horizontal / 2 - vertical / 2 + forward;
   
-    float pixel_u = ((float)pixel_x + 0.5f) / (float)bvhParams.renderOutputResolution;
-    float pixel_v = ((float)pixel_y + 0.5f) / (float)bvhParams.renderOutputResolution;
+    float pixel_u = ((float)pixel_x + 0.5f) / (float)bvhParams.renderOutputWidth;
+    float pixel_v = ((float)pixel_y + 0.5f) / (float)bvhParams.renderOutputHeight;
 
     Vector3 ray_dir = lower_left_corner + pixel_u * horizontal + 
         pixel_v * vertical - ray_start;
@@ -953,7 +953,7 @@ extern "C" __global__ void bvhRaycastEntry()
     uint32_t current_view_offset = resident_view_offset;
 
     uint32_t bytes_per_view =
-        bvhParams.renderOutputResolution * bvhParams.renderOutputResolution * 4;
+        bvhParams.renderOutputWidth * bvhParams.renderOutputHeight * 4;
 
     uint32_t num_processed_pixels = 0;
 
@@ -997,7 +997,7 @@ extern "C" __global__ void bvhRaycastEntry()
 
 
         uint32_t linear_pixel_idx = 4 * 
-            (pixel_x + pixel_y * bvhParams.renderOutputResolution);
+            (pixel_x + pixel_y * bvhParams.renderOutputWidth);
 
         uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
             linear_pixel_idx;

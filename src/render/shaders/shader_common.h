@@ -196,6 +196,7 @@ struct ShadowViewData {
 struct DirectionalLight {
     float4 lightDir;
     float4 color;
+    float lightCutoff;
 };
 
 struct PerspectiveCameraData {

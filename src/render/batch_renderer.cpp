@@ -706,7 +706,7 @@ static void makeBatchFrame(vk::Device& dev,
 #endif
 
         new (frame) BatchFrame{
-            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
+            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets), std::move(lights) },
             std::move(lights), std::move(lights_staging),
             std::move(sky_input), std::move(sky_input_staging),
             VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -779,13 +779,14 @@ static void makeBatchFrame(vk::Device& dev,
 
     vk::DescHelper::storage(desc_updates[6],
                             pbr_set, &light_data_info, 0);
+    vk::DescHelper::storage(desc_updates[7], draw_views_set, &light_data_info, 3);
 
     VkDescriptorImageInfo transmittance_info;
     transmittance_info.imageView = rctx.sky_.transmittanceView;
     transmittance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     transmittance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[7],
+    vk::DescHelper::textures(desc_updates[8],
                              pbr_set, &transmittance_info, 1, 1);
 
     VkDescriptorImageInfo irradiance_info;
@@ -793,7 +794,7 @@ static void makeBatchFrame(vk::Device& dev,
     irradiance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     irradiance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[8],
+    vk::DescHelper::textures(desc_updates[9],
                              pbr_set, &irradiance_info, 1, 2);
 
     VkDescriptorImageInfo scattering_info;
@@ -801,7 +802,7 @@ static void makeBatchFrame(vk::Device& dev,
     scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     scattering_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[9],
+    vk::DescHelper::textures(desc_updates[10],
                              pbr_set, &scattering_info, 1, 3);
 
     VkDescriptorBufferInfo sky_info;
@@ -809,7 +810,7 @@ static void makeBatchFrame(vk::Device& dev,
     sky_info.offset = 0;
     sky_info.range = VK_WHOLE_SIZE;
 
-    vk::DescHelper::storage(desc_updates[10],
+    vk::DescHelper::storage(desc_updates[11],
                             pbr_set, &sky_info, 4);
 
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
@@ -926,6 +927,7 @@ static void makeBatchFrame(vk::Device& dev,
             std::move(view_offsets),
             std::move(instances),
             std::move(instance_offsets),
+            std::move(lights)
         },
         std::move(lights),
         std::move(lights_staging),
@@ -1583,6 +1585,37 @@ static void computeViewOffsets(EngineInterop *interop, uint32_t num_worlds)
     }
 }
 
+static void computeLights(EngineInterop *interop, uint32_t num_worlds, uint32_t num_lightsPerWorld)
+{
+    // TODO: Implement light color
+    static constexpr math::Vector3 defaultColor = math::Vector3(1.0f, 1.0f, 1.0f);
+
+    // Convert LightDesc to DirectionalLight
+    render::shader::DirectionalLight *lights = (render::shader::DirectionalLight *)interop->lightsCPU->ptr;
+    LightDesc *lightDescs = (LightDesc *)interop->bridge.lights;
+    printf(">>>>>>>>>num_worlds: %d, num_lightsPerWorld: %d\n", num_worlds, num_lightsPerWorld);
+    for (uint32_t i = 0; i < num_worlds * num_lightsPerWorld; ++i) {
+        printf(">>>>>>>>>lightDescs[%d]: %d\n", i, lightDescs[i].type);
+        printf(">>>>>>>>>lightDescs[%d]: %f\n", i, lightDescs[i].intensity);
+        printf(">>>>>>>>>lightDescs[%d]: %f, %f, %f\n", i, lightDescs[i].direction.x, lightDescs[i].direction.y, lightDescs[i].direction.z);
+        printf(">>>>>>>>>lightDescs[%d]: %f, %f, %f\n", i, lightDescs[i].position.x, lightDescs[i].position.y, lightDescs[i].position.z);
+        if(lightDescs[i].type == LightDesc::Type::Directional) {
+            lights[i] = {
+                .lightDir = math::Vector4::fromVec3W(lightDescs[i].direction, 0.0f),
+                .color = math::Vector4::fromVec3W(defaultColor* lightDescs[i].intensity, 1.0f),
+                .lightCutoff = 0
+            };
+        }
+        else if(lightDescs[i].type == LightDesc::Type::Spotlight) {
+            lights[i] = {
+                .lightDir = math::Vector4::fromVec3W(lightDescs[i].position, 1.0f),
+                .color = math::Vector4::fromVec3W(defaultColor * lightDescs[i].intensity, 1.0f),
+                .lightCutoff = lightDescs[i].cutoff,
+            };
+        }
+    }
+}
+
 void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                                         EngineInterop *interop)
 {
@@ -1619,6 +1652,11 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
         }
     }
 
+    if (interop->lightsCPU.has_value()) {
+        printf(">>>>>>>>>info.numWorlds: %d, info.maxLightsPerWorld: %d\n", info.numWorlds, info.maxLightsPerWorld);
+        computeLights(interop, info.numWorlds, info.maxLightsPerWorld);
+        interop->lightsCPU->flush(impl->dev);
+    }
 
     BatchFrame &frame_data = impl->batchFrames[frame_index];
 
@@ -1712,6 +1750,21 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                              batch_buffers.viewOffsets.buffer,
                              1, &offsets_data_copy);
     }
+
+    { // Import the lights
+        VkDeviceSize num_lights_bytes = info.numWorlds * info.maxLightsPerWorld *
+            sizeof(shader::DirectionalLight);
+
+        VkBufferCopy lights_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_lights_bytes
+        };
+
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->lightsHdl,
+                             batch_buffers.lights.buffer,
+                             1, &lights_data_copy);
+    }
+
 
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
 

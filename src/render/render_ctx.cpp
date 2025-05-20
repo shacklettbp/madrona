@@ -571,6 +571,7 @@ static EngineInterop setupEngineInterop(Device &dev,
                                         uint32_t num_worlds,
                                         uint32_t max_views_per_world,
                                         uint32_t max_instances_per_world,
+                                        uint32_t max_lights_per_world,
                                         uint32_t render_width,
                                         uint32_t render_height,
                                         VoxelConfig voxel_config)
@@ -583,6 +584,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     auto instances_cpu = Optional<render::vk::HostBuffer>::none();
     auto instance_offsets_cpu = Optional<render::vk::HostBuffer>::none();
     auto aabb_cpu = Optional<render::vk::HostBuffer>::none();
+    auto lights_cpu = Optional<render::vk::HostBuffer>::none();
 
 #ifdef MADRONA_VK_CUDA_SUPPORT
     auto views_gpu = Optional<render::vk::DedicatedBuffer>::none();
@@ -599,6 +601,9 @@ static EngineInterop setupEngineInterop(Device &dev,
 
     auto aabb_gpu = Optional<render::vk::DedicatedBuffer>::none();
     auto aabb_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+
+    auto lights_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto lights_cuda = Optional<render::vk::CudaImportedBuffer>::none();
 #endif
 
     VkBuffer views_hdl = VK_NULL_HANDLE;
@@ -606,6 +611,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     VkBuffer instances_hdl = VK_NULL_HANDLE;
     VkBuffer instance_offsets_hdl = VK_NULL_HANDLE;
     VkBuffer aabb_hdl = VK_NULL_HANDLE;
+    VkBuffer lights_hdl = VK_NULL_HANDLE;
 
     void *views_base = nullptr;
     void *view_offsets_base = nullptr;
@@ -614,6 +620,8 @@ static EngineInterop setupEngineInterop(Device &dev,
     void *instance_offsets_base = nullptr;
 
     void *aabb_base = nullptr;
+
+    void *lights_base = nullptr;
 
     void *world_ids_instances_base = nullptr;
     void *world_ids_views_base = nullptr;
@@ -711,7 +719,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         }
     }
 
-    { // Create the instance offsets buffer
+    { // Create the view offsets buffer
         uint64_t num_offsets_bytes = (num_worlds+1) * sizeof(int32_t);
 
         if (!gpu_input) {
@@ -728,6 +736,29 @@ static EngineInterop setupEngineInterop(Device &dev,
 
             view_offsets_hdl = view_offsets_gpu->buf.buffer;
             view_offsets_base = (char *)view_offsets_cuda->getDevicePointer();
+#endif
+        }
+    }
+    
+    { // Create the lights buffer
+        uint64_t num_lights_bytes = num_worlds * max_lights_per_world *
+            (int64_t)sizeof(render::shader::DirectionalLight);
+
+        if (!gpu_input) {
+            lights_cpu = alloc.makeStagingBuffer(num_lights_bytes);
+            lights_hdl = lights_cpu->buffer;
+            lights_base = lights_cpu->ptr;
+        }
+        else
+        {
+#ifdef MADRONA_VK_CUDA_SUPPORT
+            lights_gpu = alloc.makeDedicatedBuffer(
+                num_lights_bytes, false, true);
+            lights_cuda.emplace(dev, lights_gpu->mem,
+                num_lights_bytes);
+
+            lights_hdl = lights_gpu->buf.buffer;
+            lights_base = (char *)lights_cuda->getDevicePointer();
 #endif
         }
     }
@@ -765,25 +796,31 @@ static EngineInterop setupEngineInterop(Device &dev,
 
     uint32_t *total_num_views_readback = nullptr;
     uint32_t *total_num_instances_readback = nullptr;
+    uint32_t *total_num_lights_readback = nullptr;
 
     AtomicU32 *total_num_views_cpu_inc = nullptr;
     AtomicU32 *total_num_instances_cpu_inc = nullptr;
+    AtomicU32 *total_num_lights_cpu_inc = nullptr;
 
     if (!gpu_input) {
         total_num_views_readback = (uint32_t *)malloc(
-            2*sizeof(uint32_t));
+            3*sizeof(uint32_t));
         total_num_instances_readback = total_num_views_readback + 1;
+        total_num_lights_readback = total_num_instances_readback + 1;
 
-        total_num_views_cpu_inc = (AtomicU32 *)malloc(2 * sizeof(AtomicU32));
+        total_num_views_cpu_inc = (AtomicU32 *)malloc(3 * sizeof(AtomicU32));
         total_num_instances_cpu_inc = total_num_views_cpu_inc + 1;
+        total_num_lights_cpu_inc = total_num_instances_cpu_inc + 1;
 
         total_num_views_cpu_inc->store_release(0);
         total_num_instances_cpu_inc->store_release(0);
+        total_num_lights_cpu_inc->store_release(0);
     } else {
 #ifdef MADRONA_VK_CUDA_SUPPORT
         total_num_views_readback = (uint32_t *)cu::allocReadback(
-            2*sizeof(uint32_t));
+            3*sizeof(uint32_t));
         total_num_instances_readback = total_num_views_readback + 1;
+        total_num_lights_readback = total_num_instances_readback + 1;
 #endif
     }
 
@@ -791,12 +828,15 @@ static EngineInterop setupEngineInterop(Device &dev,
         .views = (PerspectiveCameraData *)views_base,
         .instances = (InstanceData *)instances_base,
         .aabbs = (TLBVHNode *)aabb_base,
+        .lights = (LightDesc *)lights_base,
         .instanceOffsets = (int32_t *)instance_offsets_base,
         .viewOffsets = (int32_t *)view_offsets_base,
         .totalNumViews = total_num_views_readback,
         .totalNumInstances = total_num_instances_readback,
+        .totalNumLights = total_num_lights_readback,
         .totalNumViewsCPUInc = total_num_views_cpu_inc,
         .totalNumInstancesCPUInc = total_num_instances_cpu_inc,
+        .totalNumLightsCPUInc = total_num_lights_cpu_inc,
         .instancesWorldIDs = (uint64_t *)world_ids_instances_base,
         .viewsWorldIDs = (uint64_t *)world_ids_views_base,
         .renderWidth = (int32_t)render_width,
@@ -837,6 +877,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         std::move(instances_cpu),
         std::move(instance_offsets_cpu),
         std::move(aabb_cpu),
+        std::move(lights_cpu),
 #ifdef MADRONA_VK_CUDA_SUPPORT
         std::move(views_gpu),
         std::move(view_offsets_gpu),
@@ -852,16 +893,21 @@ static EngineInterop setupEngineInterop(Device &dev,
 
         std::move(aabb_gpu),
         std::move(aabb_cuda),
+
+        std::move(lights_gpu),
+        std::move(lights_cuda),
 #endif
         views_hdl,
         view_offsets_hdl,
         instances_hdl,
         instance_offsets_hdl,
         aabb_hdl,
+        lights_hdl,
         bridge,
         gpu_bridge,
         max_views_per_world,
         max_instances_per_world,
+        max_lights_per_world,
         std::move(voxel_cpu),
 #ifdef MADRONA_VK_CUDA_SUPPORT
         std::move(voxel_gpu),
@@ -1245,6 +1291,7 @@ RenderContext::RenderContext(
       engine_interop_(setupEngineInterop(
           dev, alloc, cfg.execMode == ExecMode::CUDA, cfg.numWorlds,
           cfg.maxViewsPerWorld, cfg.maxInstancesPerWorld,
+          cfg.maxLightsPerWorld,
           br_width_, br_height_, cfg.voxelCfg)),
       lights_(InternalConfig::maxLights),
       loaded_assets_(0),
@@ -1333,12 +1380,19 @@ RenderContext::RenderContext(
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                 .pImmutableSamplers = nullptr,
+            },
+            {
+                .binding = 3,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .pImmutableSamplers = nullptr,
             }
         };
 
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        info.bindingCount = 3;
+        info.bindingCount = 4;
         info.pBindings = bindings;
 
         dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_batch_draw_layout_);
@@ -1779,6 +1833,13 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     }
 
     int64_t num_total_objs = src_objs.size();
+    uint32_t num_total_lights = engine_interop_.maxLightsPerWorld;
+    printf(">>>>>>>>>num_total_lights: %d\n", num_total_lights);
+    #ifdef MADRONA_VK_CUDA_SUPPORT 
+    printf(">>>>>>>>>MADRONA_VK_CUDA_SUPPORT\n");
+    #else
+    printf(">>>>>>>>>NO MADRONA_VK_CUDA_SUPPORT\n");
+    #endif 
 
     int64_t buffer_offsets[5];
     int64_t buffer_sizes[6] = {
@@ -1787,7 +1848,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         (int64_t)sizeof(PackedVertex) * num_total_vertices,
         (int64_t)sizeof(uint32_t) * num_total_indices,
         (int64_t)sizeof(MaterialDataShader) * src_mats.size(),
-        (int64_t)sizeof(ShaderAABB) * num_total_objs
+        (int64_t)sizeof(ShaderAABB) * num_total_objs,
     };
 
     int64_t num_asset_bytes = utils::computeBufferOffsets(
@@ -2133,7 +2194,8 @@ void RenderContext::configureLighting(Span<const LightConfig> lights)
     for (int i = 0; i < lights.size(); ++i) {
         lights_.insert(i, DirectionalLight{ 
             math::Vector4{lights[i].dir.x, lights[i].dir.y, lights[i].dir.z, 1.0f }, 
-            math::Vector4{lights[i].color.x, lights[i].color.y, lights[i].color.z, 1.0f}
+            math::Vector4{lights[i].color.x, lights[i].color.y, lights[i].color.z, 1.0f},
+            0.0f
         });
     }
 }

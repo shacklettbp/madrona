@@ -87,8 +87,9 @@ struct CudaBatchRenderConfig {
     render::MaterialData materialData;
 
     // The raytracer output is square so the resolution of the outputs would be
-    // renderResolution x renderResolution.
-    uint32_t renderResolution = 0;
+    // renderWidth x renderHeight.
+    uint32_t renderWidth = 0;
+    uint32_t renderHeight = 0;
 
     // Configure near and far planes of the rendering.
     float nearPlane = 0.f;

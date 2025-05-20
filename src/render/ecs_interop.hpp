@@ -9,21 +9,21 @@ struct RenderECSBridge {
     PerspectiveCameraData *views;
     InstanceData *instances;
     TLBVHNode *aabbs;
+    LightDesc *lights;
 
     int32_t *instanceOffsets;
     int32_t *viewOffsets;
 
     uint32_t *totalNumViews;
     uint32_t *totalNumInstances;
-
+    uint32_t *totalNumLights;
     AtomicU32 *totalNumViewsCPUInc;
     AtomicU32 *totalNumInstancesCPUInc;
-
+    AtomicU32 *totalNumLightsCPUInc;
     // Keys used for sorting (most significant 32 bits: world ID; 
     //                        least significant 32 bits: entity ID)
     uint64_t *instancesWorldIDs;
     uint64_t *viewsWorldIDs;
-
     int32_t renderWidth;
     int32_t renderHeight;
     uint32_t *voxels;
