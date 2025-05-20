@@ -871,7 +871,7 @@ static __device__ FragmentResult computeFragment(
         float light_contrib = 0.f;
 
         for (int i = 0; i < world_info.numLights; ++i) {
-            LightDesc desc = world_info.lights[i];
+            const LightDesc& desc = world_info.lights[i];
 
             float cutoff = -1.f;
 
