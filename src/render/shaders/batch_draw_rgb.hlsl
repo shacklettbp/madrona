@@ -289,7 +289,7 @@ PixelOutput frag(in V2F v2f,
         float ambient = 0.2;
         float3 normal = normalize(v2f.worldNormal);
         float3 totalLighting = 0;
-        uint num_lights = 2;
+        uint num_lights = 1;
         //lightDataBuffer.getDimensions(num_lights);
         for (uint i = 0; i < num_lights; i++) {
             DirectionalLight light = lightDataBuffer[i];
