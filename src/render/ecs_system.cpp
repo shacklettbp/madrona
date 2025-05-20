@@ -296,7 +296,8 @@ inline void viewTransformUpdate(Context &ctx,
                                 const Rotation &rot,
                                 const RenderCamera &cam)
 {
-    Vector3 camera_pos = pos + cam.cameraOffset;
+    auto &system_state = ctx.singleton<RenderingSystemState>();
+    float aspect_ratio = system_state.aspectRatio;
 
 #if defined(MADRONA_GPU_MODE)
     (void)e;
@@ -307,8 +308,17 @@ inline void viewTransformUpdate(Context &ctx,
     ctx.get<RenderOutputIndex>(cam.cameraEntity).index = 
         ctx.loc(e).row;
 
+    auto raycast_output_width = mwGPU::GPUImplConsts::get().raycastOutputWidth;
+    auto raycast_output_height = mwGPU::GPUImplConsts::get().raycastOutputHeight;
+    bool raycast_enabled = 
+        raycast_output_width != 0 && 
+        raycast_output_height != 0;
+
+    if (raycast_enabled) {  
+        aspect_ratio = (float)raycast_output_width / 
+            (float)raycast_output_height;
+    }
 #else
-    auto &system_state = ctx.singleton<RenderingSystemState>();
     uint32_t view_id = system_state.totalNumViewsCPU->fetch_add<sync::acq_rel>(1);
 
     // Required for stable sorting on CPU
@@ -317,18 +327,18 @@ inline void viewTransformUpdate(Context &ctx,
 
     PerspectiveCameraData &cam_data = system_state.viewsCPU[view_id];
 #endif
-    cam_data.position = camera_pos;
-    cam_data.rotation = rot.inv();
-    cam_data.worldIDX = ctx.worldID().idx;
 
-#if !defined(MADRONA_GPU_MODE)
-    float x_scale = cam.fovScale / system_state.aspectRatio;
+    float x_scale = cam.fovScale / aspect_ratio;
     float y_scale = -cam.fovScale;
 
     cam_data.xScale = x_scale;
     cam_data.yScale = y_scale;
     cam_data.zNear = cam.zNear;
-#endif
+
+    Vector3 camera_pos = pos + cam.cameraOffset;
+    cam_data.position = camera_pos;
+    cam_data.rotation = rot.inv();
+    cam_data.worldIDX = ctx.worldID().idx;
 }
 
 #ifdef MADRONA_GPU_MODE
@@ -690,12 +700,22 @@ void attachEntityToView(Context &ctx,
 
     auto &state = ctx.singleton<RenderingSystemState>();
 
-#ifdef MADRONA_GPU_MODE
-    float aspect_ratio = (float)mwGPU::GPUImplConsts::get().raycastOutputWidth / 
-        (float)mwGPU::GPUImplConsts::get().raycastOutputHeight;
-#else
     float aspect_ratio = state.aspectRatio;
+#ifdef MADRONA_GPU_MODE
+    auto raycast_output_width = mwGPU::GPUImplConsts::get().raycastOutputWidth;
+    auto raycast_output_height = mwGPU::GPUImplConsts::get().raycastOutputHeight;
+
+    bool raycast_enabled = 
+        raycast_output_width != 0 && 
+        raycast_output_height != 0;
+    if (raycast_enabled) {  
+        aspect_ratio = (float)raycast_output_width / 
+            (float)raycast_output_height;
+    }
+#else
+    bool raycast_enabled = false;
 #endif
+
     float x_scale = fov_scale / aspect_ratio;
     float y_scale = -fov_scale;
 
@@ -707,14 +727,6 @@ void attachEntityToView(Context &ctx,
         ctx.worldID().idx,
         0 // Padding
     };
-
-#ifdef MADRONA_GPU_MODE
-    bool raycast_enabled = 
-        mwGPU::GPUImplConsts::get().raycastOutputWidth != 0 && 
-        mwGPU::GPUImplConsts::get().raycastOutputHeight != 0;
-#else
-    bool raycast_enabled = false;
-#endif
 
     if (raycast_enabled) {
         Entity render_output_entity = ctx.makeEntity<RaycastOutputArchetype>();

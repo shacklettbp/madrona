@@ -36,7 +36,8 @@ struct PrepareViewPushConstant {
 struct DeferredLightingPushConstBR {
     uint32_t maxImagesXPerTarget;
     uint32_t maxImagesYPerTarget;
-    uint32_t viewDim;
+    uint32_t viewWidth;
+    uint32_t viewHeight;
 };
 
 struct BlurPushConst {

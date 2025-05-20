@@ -35,9 +35,11 @@ namespace consts {
 inline constexpr uint32_t maxDrawsPerView = 512*4;
 
 
+inline constexpr uint32_t maxTextureDim = 16384;
 inline constexpr uint32_t maxNumImagesX = 16;
+inline constexpr uint32_t maxNumImagesY = 16;
 inline constexpr uint32_t maxNumImagesPerTarget = 
-    maxNumImagesX * maxNumImagesX;
+    maxNumImagesX * maxNumImagesY;
 
 
 // 256, is the number of views per image we can have
@@ -68,12 +70,12 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
                                                    vk::MemoryAllocator &alloc,
                                                    bool depth_only)
 {
-    uint32_t max_image_dim = consts::maxNumImagesX * width;
-
+    uint32_t max_image_dim_x = std::min(consts::maxTextureDim, consts::maxNumImagesX * width);
+    uint32_t max_image_dim_y = std::min(consts::maxTextureDim, consts::maxNumImagesY * height);
     // Each view is going to be stored in one section of the layer (one viewport of
     // the layer). Each image, will have as many layers as possible.
-    uint32_t max_images_x = max_image_dim / width;
-    uint32_t max_images_y = max_image_dim / height;
+    uint32_t max_images_x = max_image_dim_x / width;
+    uint32_t max_images_y = max_image_dim_y / height;
 
     uint32_t max_views_per_target = max_images_x * max_images_y;
 
@@ -108,7 +110,8 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
             .lightingSet = {},
             .pixelWidth = image_width,
             .pixelHeight = image_height,
-            .viewDim = width,
+            .viewWidth = width,
+            .viewHeight = height,
         };
 
         VkImageViewCreateInfo view_info = {};
@@ -817,12 +820,13 @@ static void makeBatchFrame(vk::Device& dev,
 
     HeapArray<DrawCommandPackage> draw_packages(consts::numDrawCmdBuffers);
     for (int i = 0; i < (int)consts::numDrawCmdBuffers; ++i) {
-        uint32_t max_image_dim = consts::maxNumImagesX * view_width;
+        uint32_t max_image_dim_x = std::min(consts::maxTextureDim, consts::maxNumImagesX * view_width);
+        uint32_t max_image_dim_y = std::min(consts::maxTextureDim, consts::maxNumImagesY * view_height);
 
         // Each view is going to be stored in one section of the layer (one viewport of
         // the layer). Each image, will have as many layers as possible.
-        uint32_t max_images_x = max_image_dim / view_width;
-        uint32_t max_images_y = max_image_dim / view_height;
+        uint32_t max_images_x = max_image_dim_x / view_width;
+        uint32_t max_images_y = max_image_dim_y / view_height;
 
         uint32_t max_views_per_target = max_images_x * max_images_y;
 
@@ -1134,7 +1138,8 @@ static void issueRasterization(vk::Device &dev,
                                  draw_descriptors.data(), 
                                  0, nullptr);
 
-    uint32_t max_num_image_x = consts::maxNumImagesX;
+    uint32_t max_image_dim_x = std::min(consts::maxTextureDim, consts::maxNumImagesX * target.viewWidth);
+    uint32_t max_num_image_x = max_image_dim_x / target.viewWidth;
 
     for (uint32_t i = 0; i < target.numViews; ++i) {
         uint32_t image_x = i % max_num_image_x;
@@ -1144,19 +1149,19 @@ static void issueRasterization(vk::Device &dev,
 
         // Set viewport and scissor
         VkViewport viewport = {
-            .x = (float)(image_x * target.viewDim),
-            .y = (float)(image_y * target.viewDim),
-            .width = (float)target.viewDim,
-            .height = (float)target.viewDim,
+            .x = (float)(image_x * target.viewWidth),
+            .y = (float)(image_y * target.viewHeight),
+            .width = (float)target.viewWidth,
+            .height = (float)target.viewHeight,
             .minDepth = 0.f,
             .maxDepth = 1.f
         };
 
         VkRect2D rect = {
-            .offset = { (int32_t)(image_x * target.viewDim),
-                        (int32_t)(image_y * target.viewDim) },
-            .extent = { (uint32_t)target.viewDim,
-                        (uint32_t)target.viewDim }
+            .offset = { (int32_t)(image_x * target.viewWidth),
+                        (int32_t)(image_y * target.viewHeight) },
+            .extent = { (uint32_t)target.viewWidth,
+                        (uint32_t)target.viewHeight }
         };
 
         dev.dt.cmdSetViewport(draw_cmd, 0, 1, &viewport);
@@ -1194,15 +1199,17 @@ static void issueDeferred(vk::Device &dev,
                           VkDescriptorSet asset_mat_tex_set,
                           VkDescriptorSet index_buffer_set,
                           VkDescriptorSet pbr_set,
-                          uint32_t view_dim) 
+                          uint32_t view_width,
+                          uint32_t view_height) 
 {
     (void)asset_set;
     (void)asset_mat_tex_set;
 
-    uint32_t max_image_dim = consts::maxNumImagesX * view_dim;
+    uint32_t max_image_dim_x = std::min(consts::maxTextureDim, consts::maxNumImagesX * view_width);
+    uint32_t max_image_dim_y = std::min(consts::maxTextureDim, consts::maxNumImagesY * view_height);
 
-    uint32_t max_images_x = max_image_dim / view_dim;
-    uint32_t max_images_y = max_image_dim / view_dim;
+    uint32_t max_images_x = max_image_dim_x / view_width;
+    uint32_t max_images_y = max_image_dim_y / view_height;
 
     // The output buffer has been transitioned to general at the start of the frame.
     // The viz buffers have been transitioned to general before this happens.
@@ -1211,7 +1218,8 @@ static void issueDeferred(vk::Device &dev,
     shader::DeferredLightingPushConstBR push_const = {
         .maxImagesXPerTarget = max_images_x,
         .maxImagesYPerTarget = max_images_y,
-        .viewDim = view_dim
+        .viewWidth = view_width,
+        .viewHeight = view_height
     };
 
     dev.dt.cmdPushConstants(draw_cmd, pipeline.layout,
@@ -1595,10 +1603,6 @@ static void computeLights(EngineInterop *interop, uint32_t num_worlds, uint32_t 
     LightDesc *lightDescs = (LightDesc *)interop->bridge.lights;
     printf(">>>>>>>>>num_worlds: %d, num_lightsPerWorld: %d\n", num_worlds, num_lightsPerWorld);
     for (uint32_t i = 0; i < num_worlds * num_lightsPerWorld; ++i) {
-        printf(">>>>>>>>>lightDescs[%d]: %d\n", i, lightDescs[i].type);
-        printf(">>>>>>>>>lightDescs[%d]: %f\n", i, lightDescs[i].intensity);
-        printf(">>>>>>>>>lightDescs[%d]: %f, %f, %f\n", i, lightDescs[i].direction.x, lightDescs[i].direction.y, lightDescs[i].direction.z);
-        printf(">>>>>>>>>lightDescs[%d]: %f, %f, %f\n", i, lightDescs[i].position.x, lightDescs[i].position.y, lightDescs[i].position.z);
         if(lightDescs[i].type == LightDesc::Type::Directional) {
             lights[i] = {
                 .lightDir = math::Vector4::fromVec3W(lightDescs[i].direction, 0.0f),
@@ -2101,7 +2105,8 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
         impl->assetSetTextureMat,
         loaded_assets[0].indexBufferSet,
         frame_data.pbrSet,
-        frame_data.targets[0].viewDim);
+        frame_data.targets[0].viewWidth,
+        frame_data.targets[0].viewHeight);
 
     impl->dev.dt.cmdWriteTimestamp(draw_cmd, 
                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, impl->timeQueryPool, 1);

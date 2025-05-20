@@ -563,10 +563,10 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     uint target_view_idx_y = target_view_idx /
                              pushConst.maxImagesXPerTarget;
 
-    float x_pixel_offset = target_view_idx_x * pushConst.viewDim;
-    float y_pixel_offset = target_view_idx_y * pushConst.viewDim;
+    float x_pixel_offset = target_view_idx_x * pushConst.viewWidth;
+    float y_pixel_offset = target_view_idx_y * pushConst.viewHeight;
 
-    if (idx.x >= pushConst.viewDim || idx.y >= pushConst.viewDim) {
+    if (idx.x >= pushConst.viewWidth || idx.y >= pushConst.viewHeight) {
         return;
     }
 
@@ -574,17 +574,16 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
     float2 vbuffer_pixel_clip =
         float2(float(vbuffer_pixel.x) + 0.5f, float(vbuffer_pixel.y) + 0.5f) /
-        float2(pushConst.viewDim, pushConst.viewDim);
+        float2(pushConst.viewWidth, pushConst.viewHeight);
 
     vbuffer_pixel_clip = vbuffer_pixel_clip * 2.0f - float2(1.0f, 1.0f);
     vbuffer_pixel_clip.y *= -1.0;
 
     uint2 sample_uv_u32 = vbuffer_pixel.xy + uint2(x_pixel_offset, y_pixel_offset);
 
-    uint total_res = pushConst.viewDim * pushConst.maxImagesXPerTarget;
+    float2 total_res = float2(pushConst.viewWidth * pushConst.maxImagesXPerTarget, pushConst.viewHeight * pushConst.maxImagesYPerTarget);
 
-    float2 sample_uv = float2(sample_uv_u32) / 
-                       float2(total_res, total_res);
+    float2 sample_uv = float2(sample_uv_u32) / total_res;
     sample_uv.y = 1.0 - sample_uv.y;
 
     // Apply the offset when reading the pixel value from the image
@@ -620,8 +619,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     out_color.x += zeroDummy();
 
     uint32_t out_pixel_idx =
-        view_idx * pushConst.viewDim * pushConst.viewDim +
-        idx.y * pushConst.viewDim + idx.x;
+        view_idx * pushConst.viewWidth * pushConst.viewHeight +
+        idx.y * pushConst.viewWidth + idx.x;
 
     rgbOutputBuffer[out_pixel_idx] = linearToSRGB8(out_color); 
     depthOutputBuffer[out_pixel_idx] = depth;

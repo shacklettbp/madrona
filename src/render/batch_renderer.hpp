@@ -35,7 +35,8 @@ struct LayeredTarget {
     uint32_t pixelWidth;
     uint32_t pixelHeight;
 
-    uint32_t viewDim;
+    uint32_t viewWidth;
+    uint32_t viewHeight;
 };
 
 struct BatchRenderInfo {
