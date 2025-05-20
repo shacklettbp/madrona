@@ -873,15 +873,15 @@ static __device__ FragmentResult computeFragment(
         for (int i = 0; i < world_info.numLights; ++i) {
             const LightDesc& desc = world_info.lights[i];
 
-            float cutoff = -1.f;
+            float cutoffAngle = -1.f;
 
             Vector3 light_dir = -desc.direction;
             if (desc.type == LightDesc::Type::Spotlight) {
                 light_dir = (desc.position - hit_pos).normalize();
-                cutoff = desc.cutoff;
+                cutoffAngle = desc.cutoffAngle;
             }
 
-            if (cutoff != -1.f && desc.type == LightDesc::Type::Spotlight) {
+            if (cutoffAngle != -1.f && desc.type == LightDesc::Type::Spotlight) {
                 // Dot the vector going from point to light with the direction
                 // of the light.
                 float d = (-light_dir).dot(desc.direction);
@@ -889,7 +889,7 @@ static __device__ FragmentResult computeFragment(
                 float angle = acosf(d);
 
                 // This pixel isn't affected by this light.
-                if (std::abs(angle) > std::abs(desc.cutoff)) {
+                if (std::abs(angle) > std::abs(desc.cutoffAngle)) {
                     continue;
                 }
             }

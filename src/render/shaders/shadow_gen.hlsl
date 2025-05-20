@@ -11,7 +11,7 @@ RWStructuredBuffer<ShadowViewData> shadowViewDataBuffer;
 StructuredBuffer<PackedViewData> flycamBuffer;
 
 [[vk::binding(2, 0)]]
-StructuredBuffer<DirectionalLight> lights;
+StructuredBuffer<LightDesc> lights;
 
 [[vk::binding(3, 0)]]
 StructuredBuffer<PackedViewData> viewDataBuffer;
@@ -79,7 +79,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     float3 cam_right = rotateVec(cam_rot, float3(1.0f, 0.0f, 0.0f));
 
     // Construct orthonormal basis
-    float3 light_fwd = normalize(lights[0].lightDir.xyz);
+    float3 light_fwd = normalize(lights[0].direction.xyz);
     float3 light_up = (light_fwd.x < 0.9999f) ?
         normalize(cross(float3(1.f, 0.f, 0.f), light_fwd)) :
         float3(0.f, 0.f, 1.f);

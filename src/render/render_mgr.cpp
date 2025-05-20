@@ -18,7 +18,7 @@ CountT RenderManager::loadObjects(Span<const imp::SourceObject> objs,
     return rctx_->loadObjects(objs, mats, textures, override_materials);
 }
 
-void RenderManager::configureLighting(Span<const LightConfig> lights)
+void RenderManager::configureLighting(Span<const LightDesc> lights)
 {
     rctx_->configureLighting(lights);
 }
@@ -45,7 +45,7 @@ void RenderManager::readECS()
         .numViews = cur_num_views,
         .numInstances = cur_num_instances,
         .numWorlds = rctx_->num_worlds_,
-        .maxLightsPerWorld = cur_num_lights,
+        .numLights = cur_num_lights,
     };
 
     rctx_->batchRenderer->prepareForRendering(info, &rctx_->engine_interop_);
@@ -61,7 +61,7 @@ void RenderManager::batchRender()
         .numViews = cur_num_views,
         .numInstances = cur_num_instances,
         .numWorlds = rctx_->num_worlds_,
-        .maxLightsPerWorld = cur_num_lights,
+        .numLights = cur_num_lights,
     };
 
     rctx_->batchRenderer->renderViews(

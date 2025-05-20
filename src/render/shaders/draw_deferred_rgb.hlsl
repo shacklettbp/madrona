@@ -38,7 +38,7 @@ StructuredBuffer<uint32_t> instanceOffsets;
 
 // Lighting
 [[vk::binding(0, 3)]]
-StructuredBuffer<DirectionalLight> lights;
+StructuredBuffer<LightDesc> lights;
 
 [[vk::binding(1, 3)]]
 Texture2D<float4> transmittanceLUT;
@@ -288,7 +288,6 @@ uint zeroDummy()
                       min(0.0, abs(viewDataBuffer[0].data[0].x)) +
                       min(0.0, abs(engineInstanceBuffer[0].data[0].x)) +
                       min(0.0, abs(float(indexBuffer[0]))) +
-                      min(0.0, abs(lights[0].color.x)) +
                       min(0.0, abs(depthInBuffer[0].SampleLevel(linearSampler, float2(0,0), 0).x));
 
 
@@ -448,7 +447,7 @@ float3 accumulateSunRadianceBRDF(in GBufferData gbuffer,
                                    metal,
                                    normalize(gbuffer.wPosition.xyz - camera_data.pos.xyz),
                                    radiance_from_sun,
-                                   normalize(-lights[0].lightDir.xyz));
+                                   normalize(-lights[0].direction.xyz));
 
     return ret * 1.0;
 }
@@ -467,7 +466,7 @@ float4 getPointRadianceBRDF(float roughness, float metal,
         float3 p = gbuffer.wPosition / 1000.0 - skyBuffer[0].wPlanetCenter.xyz;
         float3 normal = gbuffer.wNormal;
 
-        float3 sun_direction = -normalize(lights[0].lightDir.xyz);
+        float3 sun_direction = -normalize(lights[0].direction.xyz);
 
         float3 view_direction = normalize(gbuffer.wPosition - camera_data.pos.xyz);
 
@@ -489,7 +488,7 @@ float4 getPointRadianceBRDF(float roughness, float metal,
                                               scatteringLUT, scatteringLUT,
                                               camera_data.pos.xyz / 1000.0 - skyBuffer[0].wPlanetCenter.xyz,
                                               gbuffer.wPosition / 1000.0 - skyBuffer[0].wPlanetCenter.xyz, 0.0,
-                                              -normalize(lights[0].lightDir.xyz),
+                                              -normalize(lights[0].direction.xyz),
                                               transmittance);
 
     point_radiance = point_radiance * transmittance + in_scatter;

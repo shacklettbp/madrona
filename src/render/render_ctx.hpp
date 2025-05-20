@@ -18,7 +18,7 @@ struct RenderContext {
                        Span<const imp::SourceTexture> textures,
                        bool override_materials);
 
-    void configureLighting(Span<const LightConfig> lights);
+    void configureLighting(Span<const LightDesc> lights);
 
     void waitForIdle();
 
@@ -55,7 +55,7 @@ struct RenderContext {
 
     EngineInterop engine_interop_;
 
-    HeapArray<render::shader::DirectionalLight> lights_;
+    HeapArray<LightDesc> lights_;
 
     DynArray<AssetData> loaded_assets_;
 
