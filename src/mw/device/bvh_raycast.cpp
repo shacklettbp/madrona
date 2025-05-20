@@ -66,7 +66,7 @@ inline Vector3 calculateOutRay(PerspectiveCameraData *view_data,
     const float h = 1.0f / (-view_data->yScale);
 
     const auto viewport_height = 2 * h;
-    const auto viewport_width = (float)bvhParams.renderOutputWidth / (float)bvhParams.renderOutputHeight * viewport_height;
+    const auto viewport_width = viewport_height * view_data->yScale / view_data->xScale;
     const auto forward = look_at.normalize();
 
     auto u = rot.inv().rotateVec({1, 0, 0});
