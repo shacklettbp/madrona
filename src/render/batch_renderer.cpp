@@ -522,9 +522,6 @@ static PipelineMP<1> makeComputePipeline(const vk::Device &dev,
 struct BatchFrame {
     BatchImportedBuffers buffers;
 
-    vk::LocalBuffer lighting;
-    vk::HostBuffer lightingStaging;
-
     vk::LocalBuffer skyInput;
     vk::HostBuffer skyInputStaging;
 
@@ -675,7 +672,6 @@ static void makeBatchFrame(vk::Device& dev,
 
     VkDeviceSize lights_size = cfg.numWorlds * cfg.maxLightsPerWorld * sizeof(render::shader::LightDesc);
     vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
-    vk::HostBuffer lights_staging = alloc.makeStagingBuffer(lights_size);
 
     VkDeviceSize light_offsets_size = cfg.numWorlds * sizeof(uint32_t);
     vk::LocalBuffer light_offsets = alloc.makeLocalBuffer(light_offsets_size).value();
@@ -713,7 +709,6 @@ static void makeBatchFrame(vk::Device& dev,
 
         new (frame) BatchFrame{
             { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets), std::move(lights), std::move(light_offsets) },
-            std::move(lights), std::move(lights_staging),
             std::move(sky_input), std::move(sky_input_staging),
             VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
             HeapArray<LayeredTarget>(0),
@@ -937,8 +932,6 @@ static void makeBatchFrame(vk::Device& dev,
             std::move(lights),
             std::move(light_offsets)
         },
-        std::move(lights),
-        std::move(lights_staging),
         std::move(sky_input),
         std::move(sky_input_staging),
         prepare_views_set,
@@ -1846,16 +1839,6 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
     didRender = true;
 }
 
-static void packLighting(const vk::Device &dev,
-                         vk::HostBuffer &light_staging_buffer,
-                         const HeapArray<render::LightDesc> &lights)
-{
-    LightDesc *staging = (LightDesc *)light_staging_buffer.ptr;
-    memcpy(staging, lights.data(),
-           sizeof(LightDesc) * InternalConfig::maxLights);
-    light_staging_buffer.flush(dev);
-}
-
 static void packSky( const vk::Device &dev,
                      vk::HostBuffer &staging)
 {
@@ -1942,18 +1925,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 
     ////////////////////////////////////////////////////////////////
 
-    { // Import sky and lighting information first
-    /*
-        packLighting(impl->dev, frame_data.lightingStaging, rctx.lights_);
-        VkBufferCopy light_copy {
-            .srcOffset = 0,
-            .dstOffset = 0,
-            .size = sizeof(render::shader::LightDesc) * InternalConfig::maxLights
-        };
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, frame_data.lightingStaging.buffer,
-                             frame_data.lighting.buffer,
-                             1, &light_copy);
-    */
+    { // Import sky information first
         packSky(impl->dev, frame_data.skyInputStaging);
         VkBufferCopy sky_copy {
             .srcOffset = 0,
@@ -2236,17 +2208,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 
     ////////////////////////////////////////////////////////////////
 
-    { // Import sky and lighting information first
-        packLighting(impl->dev, frame_data.lightingStaging, rctx.lights_);
-        VkBufferCopy light_copy {
-            .srcOffset = 0,
-            .dstOffset = 0,
-            .size = sizeof(render::shader::LightDesc) * InternalConfig::maxLights
-        };
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, frame_data.lightingStaging.buffer,
-                             frame_data.lighting.buffer,
-                             1, &light_copy);
-
+    { // Import sky information first
         packSky(impl->dev, frame_data.skyInputStaging);
         VkBufferCopy sky_copy {
             .srcOffset = 0,
@@ -2292,6 +2254,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 frame_data.buffers.aabbs.buffer,
                 0, VK_WHOLE_SIZE
             },
+/*
             VkBufferMemoryBarrier{
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
                 nullptr,
@@ -2300,6 +2263,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 frame_data.lighting.buffer,
                 0, VK_WHOLE_SIZE
             },
+*/
             VkBufferMemoryBarrier{
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
                 nullptr,

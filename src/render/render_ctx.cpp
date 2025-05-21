@@ -682,7 +682,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     { // Create the lights buffer
         uint64_t num_lights_bytes = num_worlds * max_lights_per_world *
             (int64_t)sizeof(render::shader::LightDesc);
-        printf(">>>>>>>>>num_worlds, max_lights_per_world, num_lights_bytes: %d, %d, %d\n", num_worlds, max_lights_per_world, num_lights_bytes);
+        printf(">>>>>>>>>num_worlds, max_lights_per_world, num_lights_bytes: %d, %d, %d\n", num_worlds, max_lights_per_world, (uint32_t)num_lights_bytes);
         if (!gpu_input) {
             lights_cpu = alloc.makeStagingBuffer(num_lights_bytes);
             lights_hdl = lights_cpu->buffer;

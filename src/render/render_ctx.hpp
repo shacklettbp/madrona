@@ -55,6 +55,7 @@ struct RenderContext {
 
     EngineInterop engine_interop_;
 
+    // Only used for the viewer
     HeapArray<LightDesc> lights_;
 
     DynArray<AssetData> loaded_assets_;
