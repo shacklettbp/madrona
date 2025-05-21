@@ -1838,6 +1838,16 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
     didRender = true;
 }
 
+static void packLighting(const Device &dev,
+                         HostBuffer &light_staging_buffer,
+                         const HeapArray<render::LightDesc> &lights)
+{
+    LightDesc *staging = (LightDesc *)light_staging_buffer.ptr;
+    memcpy(staging, lights.data(),
+           sizeof(LightDesc) * InternalConfig::maxLights);
+    light_staging_buffer.flush(dev);
+}
+
 static void packSky( const vk::Device &dev,
                      vk::HostBuffer &staging)
 {
@@ -1925,7 +1935,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     ////////////////////////////////////////////////////////////////
 
     { // Import sky and lighting information first
-    /*
         packLighting(impl->dev, frame_data.lightingStaging, rctx.lights_);
         VkBufferCopy light_copy {
             .srcOffset = 0,
@@ -1935,7 +1944,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
         impl->dev.dt.cmdCopyBuffer(draw_cmd, frame_data.lightingStaging.buffer,
                              frame_data.lighting.buffer,
                              1, &light_copy);
-    */
 
         packSky(impl->dev, frame_data.skyInputStaging);
         VkBufferCopy sky_copy {
