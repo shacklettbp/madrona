@@ -72,6 +72,7 @@ struct BatchRenderer {
         uint32_t numWorlds;
         uint32_t maxViewsPerWorld;
         uint32_t maxInstancesPerWorld;
+        uint32_t maxLightsPerWorld;
         uint32_t numFrames;
     };
 

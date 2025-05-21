@@ -206,6 +206,7 @@ inline void lightUpdate(Context &ctx,
     desc.type = type.type;
     desc.castShadow = shadow.castShadow;
     desc.position = pos;
+    printf(">>>>>>>>>lightUpdate, desc.position: %f, %f, %f\n", desc.position.x, desc.position.y, desc.position.z);
     desc.direction = dir;
     desc.cutoffAngle = angle.cutoffAngle;
     desc.intensity = intensity.intensity;
@@ -358,8 +359,11 @@ inline void exportCountsGPU(Context &ctx,
         *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
             RenderableArchetype>();
     }
+    if (sys_state.totalNumLights) {
+        *sys_state.totalNumLights = state_mgr->getArchetypeNumRows<
+            LightArchetype>();
+    }
 
-#if MADRONA_GPU_MODE
     auto &gpu_consts = mwGPU::GPUImplConsts::get();
 
     BVHInternalData *bvh_internals =
@@ -370,10 +374,6 @@ inline void exportCountsGPU(Context &ctx,
             state_mgr->getArchetypeNumRows<RenderCameraArchetype>();
         bvh_internals->numViews = num_views;
     }
-#endif
-
-
-
 
 #if 0
     uint32_t *morton_codes = state_mgr->getArchetypeComponent<
@@ -484,6 +484,7 @@ void registerTypes(ECSRegistry &registry,
 
 #if defined(MADRONA_GPU_MODE)
     if (bridge) {
+        printf(">>>>>>>>>has bridge\n");
         auto *state_mgr = mwGPU::getStateManager();
 
         state_mgr->setArchetypeWorldOffsets<RenderableArchetype>(
