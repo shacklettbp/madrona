@@ -1070,7 +1070,7 @@ static void issueRasterization(vk::Device &dev,
                                VkExtent2D render_extent,
                                const DynArray<AssetData> &loaded_assets,
                                bool depth_only,
-                               uint32_t num_lights)
+                               uint32_t num_lights_per_world)
 {
     (void)render_extent;
 
@@ -1157,7 +1157,7 @@ static void issueRasterization(vk::Device &dev,
 
         shader::BatchDrawPushConst push_const = {
             i * consts::maxDrawsPerView,
-            num_lights
+            num_lights_per_world
         };
 
         dev.dt.cmdPushConstants(draw_cmd, draw_pipeline.layout,
@@ -1897,7 +1897,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 
 
     { // Import the lights
-        VkDeviceSize num_lights_bytes = info.numWorlds * info.numLights *
+        VkDeviceSize num_lights_bytes = info.numLights *
             sizeof(shader::PackedLightData);
         VkBufferCopy lights_data_copy = {
             .srcOffset = 0,
@@ -2098,7 +2098,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                            impl->renderExtent,
                            loaded_assets,
                            impl->depthOnly,
-                           info.numLights);
+                           info.numLights / info.numWorlds);
 
         issueComputeLayoutTransitions(impl->dev,
                                target,

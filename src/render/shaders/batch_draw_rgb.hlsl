@@ -146,7 +146,6 @@ PixelOutput frag(in V2F v2f,
                     linearSampler, v2f.uv, 0);
         }
 
-        float ambient = 0.2;
         float3 normal = normalize(v2f.worldNormal);
         float3 totalLighting = 0;
         uint numLights = pushConst.numLights;
@@ -158,24 +157,27 @@ PixelOutput frag(in V2F v2f,
                 continue;
             }
             
-            float3 light_dir;            
+            float3 ray_dir;            
             if (light.isDirectional) { // Directional light
-                light_dir = normalize(-light.direction.xyz);
+                ray_dir = normalize(light.direction.xyz);
             } else { // Spot light
-                light_dir = normalize(v2f.worldPos.xyz - light.position.xyz);
-                float angle = acos(dot(normalize(light_dir), normalize(light.direction.xyz)));
-                if (abs(angle) > light.cutoffAngle) {
-                    continue;
+                ray_dir = normalize(v2f.worldPos.xyz - light.position.xyz);
+                if(light.cutoffAngle >= 0) {
+                    float angle = acos(dot(normalize(ray_dir), normalize(light.direction.xyz)));
+                    if (abs(angle) > light.cutoffAngle) {
+                        continue;
+                    }
                 }
             }
 
-            float n_dot_l = max(0.0, dot(normal, light_dir));
+            float n_dot_l = max(0.0, dot(normal, -ray_dir));
             totalLighting += n_dot_l * light.intensity;
         }
 
         float3 lighting = totalLighting * color.rgb;
 
         // Add ambient term
+        float ambient = 0.2;
         lighting += color.rgb * ambient;
         
         color.rgb = lighting;
