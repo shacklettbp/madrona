@@ -213,6 +213,10 @@ struct LightDesc {
     uint32_t active;
 };
 
+struct PackedLightData {
+    float4 data[3];
+};
+
 struct PerspectiveCameraData {
     float3 pos;
     float4 rot;

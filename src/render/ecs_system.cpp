@@ -107,7 +107,6 @@ inline void instanceTransformUpdate(Context &ctx,
                                     const ObjectID &obj_id,
                                     const Renderable &renderable)
 {
-    printf(">>>>>>>>>instanceTransformUpdate\n");
     if (renderable.renderEntity == Entity::none()) {
         return;
     }
@@ -203,6 +202,12 @@ inline void lightUpdate(Context &ctx,
 
 #if defined(MADRONA_GPU_MODE)
     LightDesc &desc = ctx.get<LightDesc>(carrier.light);
+#else
+    auto &system_state = ctx.singleton<RenderingSystemState>();
+    uint32_t light_id = system_state.totalNumLightsCPU->fetch_add<sync::acq_rel>(1);
+
+    LightDesc &desc = system_state.lightsCPU[light_id];
+#endif
 
     desc.type = type.type;
     desc.castShadow = shadow.castShadow;
@@ -212,19 +217,6 @@ inline void lightUpdate(Context &ctx,
     desc.intensity = intensity.intensity;
     desc.active = active.active;
     printf(">>>>>>>>>lightUpdate, desc.position: %f, %f, %f, active: %d\n", desc.position.x, desc.position.y, desc.position.z, desc.active);
-#else
-    auto &system_state = ctx.singleton<RenderingSystemState>();
-    uint32_t light_id = system_state.totalNumLightsCPU->fetch_add<sync::acq_rel>(1);
-
-    LightDesc &desc = system_state.lightsCPU[light_id];
-    desc.type = type.type;
-    desc.castShadow = shadow.castShadow;
-    desc.position = pos;
-    desc.direction = dir;
-    desc.cutoffAngle = angle.cutoffAngle;
-    desc.intensity = intensity.intensity;
-    desc.active = active.active;
-#endif
 }
 
 inline void instanceTransformUpdateWithMat(Context &ctx,
@@ -237,7 +229,6 @@ inline void instanceTransformUpdateWithMat(Context &ctx,
                                            const ColorOverride &color,
                                            const Renderable &renderable)
 {
-    printf(">>>>>>>>>instanceTransformUpdateWithMat\n");
     if (renderable.renderEntity == Entity::none()) {
         return;
     }
@@ -349,6 +340,7 @@ inline void viewTransformUpdate(Context &ctx,
 inline void exportCountsGPU(Context &ctx,
                             RenderingSystemState &sys_state)
 {
+    printf(">>>>>>>>>exportCountsGPU\n");
     // FIXME: Add option for global, across worlds, systems
     if (ctx.worldID().idx != 0) {
         return;
@@ -467,6 +459,7 @@ void registerTypes(ECSRegistry &registry,
     // Pointers get set in RenderingSystem::init
     if (bridge) {
 #if defined(MADRONA_GPU_MODE)
+        printf(">>>>>>>>>registerArchetype<RenderCameraArchetype>\n");
         registry.registerArchetype<RenderCameraArchetype>(
             ComponentMetadataSelector<PerspectiveCameraData>(ComponentFlags::ImportMemory),
             ArchetypeFlags::None,

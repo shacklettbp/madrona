@@ -670,7 +670,7 @@ static void makeBatchFrame(vk::Device& dev,
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
-    VkDeviceSize lights_size = cfg.numWorlds * cfg.maxLightsPerWorld * sizeof(render::shader::LightDesc);
+    VkDeviceSize lights_size = cfg.numWorlds * cfg.maxLightsPerWorld * sizeof(LightDesc);
     vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
 
     VkDeviceSize light_offsets_size = cfg.numWorlds * sizeof(uint32_t);
@@ -762,14 +762,6 @@ static void makeBatchFrame(vk::Device& dev,
     offset_info.range = instance_offset_size;
     vk::DescHelper::storage(desc_updates[4], prepare_views_set, &offset_info, 2);
     vk::DescHelper::storage(desc_updates[5], draw_views_set, &offset_info, 2);
-
-#if 0
-    VkDescriptorBufferInfo aabb_info;
-    aabb_info.buffer = aabbs.buffer;
-    aabb_info.offset = 0;
-    aabb_info.range = aabb_size;
-    vk::DescHelper::storage(desc_updates[6], aabb_set, &aabb_info, 0);
-#endif
 
     // PBR descriptor sets
 
@@ -1905,7 +1897,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     { // Import the lights
         printf(">>>>>>>>>import lights, numWorlds: %d, numLights: %d\n", info.numWorlds, info.numLights);
         VkDeviceSize num_lights_bytes = info.numWorlds * info.numLights *
-            sizeof(shader::LightDesc);
+            sizeof(shader::PackedLightData);
         VkBufferCopy lights_data_copy = {
             .srcOffset = 0,
             .dstOffset = 0,

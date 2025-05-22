@@ -16,7 +16,7 @@ StructuredBuffer<uint32_t> instanceOffsets;
 
 // TODO: Make this part of lighting shader
 [[vk::binding(3, 0)]]
-StructuredBuffer<LightDesc> lightDataBuffer;
+StructuredBuffer<PackedLightData> lightDataBuffer;
 
 // Draw information
 [[vk::binding(0, 1)]]
@@ -126,6 +126,24 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     o.objectID = asint(d2.w);
     o.worldID = asint(d3.x);
     o.color = asuint(d3.y);
+
+    return o;
+}
+
+LightDesc unpackLightData(PackedLightData packed)
+{
+    const float4 d0 = packed.data[0];
+    const float4 d1 = packed.data[1];
+    const float4 d2 = packed.data[2];
+
+    LightDesc o;
+    o.position = d0.xyz;
+    o.direction = float3(d0.w, d1.xy);
+    o.cutoffAngle = d1.z;
+    o.intensity = d1.w;
+    o.isDirectional = asuint(d2.x);
+    o.castShadow = asuint(d2.y);
+    o.active = asuint(d2.z);
 
     return o;
 }
@@ -294,13 +312,13 @@ PixelOutput frag(in V2F v2f,
         float3 debug_color = float3(0, 0, 0);
         for (uint i = 0; i < num_lights; i++) {
             debug_color = float3(1, 1, 0);
-            LightDesc light = lightDataBuffer[i];
+            LightDesc light = unpackLightData(lightDataBuffer[i]);
             
             float3 light_dir;
             
             if (light.isDirectional) { // Directional light
                 light_dir = normalize(-light.direction.xyz);
-                debug_color = light.direction.xyz;
+                debug_color = float3(1, 0, 0);
             } else { // Spot light
                 light_dir = normalize(v2f.worldPos.xyz - light.position.xyz);
                 float angle = acos(dot(normalize(light_dir), normalize(light.direction.xyz)));

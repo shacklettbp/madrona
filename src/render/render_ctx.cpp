@@ -64,6 +64,7 @@ using DrawCmd = render::shader::DrawCmd;
 using DrawData = render::shader::DrawData;
 using PackedInstanceData = render::shader::PackedInstanceData;
 using PackedViewData = render::shader::PackedViewData;
+using PackedLightData = render::shader::PackedLightData;
 using ShadowViewData = render::shader::ShadowViewData;
 using SkyData = render::shader::SkyData;
 using DensityLayer = render::shader::DensityLayer;
@@ -681,12 +682,12 @@ static EngineInterop setupEngineInterop(Device &dev,
     
     { // Create the lights buffer
         uint64_t num_lights_bytes = num_worlds * max_lights_per_world *
-            (int64_t)sizeof(render::shader::LightDesc);
+            (int64_t)sizeof(render::shader::PackedLightData);
         printf(">>>>>>>>>num_worlds, max_lights_per_world, num_lights_bytes: %d, %d, %d\n", num_worlds, max_lights_per_world, (uint32_t)num_lights_bytes);
         if (!gpu_input) {
             lights_cpu = alloc.makeStagingBuffer(num_lights_bytes);
             lights_hdl = lights_cpu->buffer;
-            lights_base = malloc(sizeof(render::shader::LightDesc) * num_worlds * max_lights_per_world);
+            lights_base = malloc(sizeof(render::shader::PackedLightData) * num_worlds * max_lights_per_world);
         }
         else
         {
@@ -1423,7 +1424,7 @@ RenderContext::RenderContext(
                 .binding = 3,
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                 .pImmutableSamplers = nullptr,
             }
         };
@@ -1578,6 +1579,7 @@ RenderContext::~RenderContext()
 
     dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_layout_, nullptr);
     dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_tex_layout_, nullptr);
+    dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_batch_draw_layout_, nullptr);
     dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_batch_lighting_layout_, nullptr);
     // dev.dt.destroyDescriptorSetLayout(dev.hdl, sky_data_layout_, nullptr);
 
