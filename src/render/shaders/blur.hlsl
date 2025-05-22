@@ -1,5 +1,4 @@
-#include "shader_common.h"
-#include "../../render/vk/shaders/utils.hlsl"
+#include "shader_utils.hlsl"
 
 [[vk::push_constant]]
 BlurPushConst pushConst;

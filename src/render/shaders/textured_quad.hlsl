@@ -1,4 +1,4 @@
-#include "shader_common.h"
+#include "shader_utils.hlsl"
 
 [[vk::push_constant]]
 TexturedQuadPushConst pushConst;

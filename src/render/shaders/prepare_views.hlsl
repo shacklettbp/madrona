@@ -1,5 +1,4 @@
-#include "shader_common.h"
-#include "../../render/vk/shaders/utils.hlsl"
+#include "shader_utils.hlsl"
 
 [[vk::push_constant]]
 PrepareViewPushConstant pushConst;
@@ -48,54 +47,6 @@ uint getNumInstancesForWorld(uint world_idx)
 uint getInstanceOffsetsForWorld(uint world_idx)
 {
     return instanceOffsets[world_idx];
-}
-
-EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
-{
-    const float4 d0 = packed.data[0];
-    const float4 d1 = packed.data[1];
-    const float4 d2 = packed.data[2];
-    const float4 d3 = packed.data[3];
-
-    EngineInstanceData o;
-    o.position = d0.xyz;
-    o.rotation = float4(d1.xyz, d0.w);
-    o.scale = float3(d1.w, d2.xy);
-    o.matID = asint(d2.z);
-    o.objectID = asint(d2.w);
-    o.worldID = asint(d3.x);
-    o.color = asint(d3.y);
-
-    return o;
-}
-
-PerspectiveCameraData unpackViewData(PackedViewData packed)
-{
-    const float4 d0 = packed.data[0];
-    const float4 d1 = packed.data[1];
-    const float4 d2 = packed.data[2];
-
-    PerspectiveCameraData cam;
-    cam.pos = d0.xyz;
-    cam.rot = float4(d1.xyz, d0.w);
-    cam.xScale = d1.w;
-    cam.yScale = d2.x;
-    cam.zNear = d2.y;
-    cam.worldID = asint(d2.z);
-    float pad = d2.w;
-
-    return cam;
-}
-
-float3 rotateVec(float4 q, float3 v)
-{
-    float3 pure = q.xyz;
-    float scalar = q.w;
-
-    float3 pure_x_v = cross(pure, v);
-    float3 pure_x_pure_x_v = cross(pure, pure_x_v);
-
-    return v + 2.f * ((pure_x_v * scalar) + pure_x_pure_x_v);
 }
 
 float4 quatInv(float4 q){

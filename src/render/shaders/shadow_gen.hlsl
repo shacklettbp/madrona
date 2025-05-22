@@ -1,5 +1,4 @@
-#include "shader_common.h"
-#include "../../render/vk/shaders/utils.hlsl"
+#include "shader_utils.hlsl"
 
 [[vk::push_constant]]
 ShadowGenPushConst pushConst;
@@ -22,33 +21,6 @@ StructuredBuffer<int> viewOffsetsBuffer;
 float4 invQuat(float4 rot)
 {
     return float4(-rot.x, -rot.y, -rot.z, rot.w);
-}
-
-float3 rotateVec(float4 q, float3 v)
-{
-    float3 pure = q.xyz;
-    float scalar = q.w;
-    
-    float3 pure_x_v = cross(pure, v);
-    float3 pure_x_pure_x_v = cross(pure, pure_x_v);
-    
-    return v + 2.f * ((pure_x_v * scalar) + pure_x_pure_x_v);
-}
-
-PerspectiveCameraData unpackViewData(PackedViewData packed)
-{
-    const float4 d0 = packed.data[0];
-    const float4 d1 = packed.data[1];
-    const float4 d2 = packed.data[2];
-
-    PerspectiveCameraData cam;
-    cam.pos = d0.xyz;
-    cam.rot = float4(d1.xyz, d0.w);
-    cam.xScale = d1.w;
-    cam.yScale = d2.x;
-    cam.zNear = d2.y;
-
-    return cam;
 }
 
 PerspectiveCameraData getCameraData()

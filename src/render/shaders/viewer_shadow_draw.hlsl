@@ -1,5 +1,4 @@
-#include "shader_common.h"
-#include "../../render/vk/shaders/utils.hlsl"
+#include "shader_utils.hlsl"
 
 [[vk::push_constant]]
 DrawPushConst push_const;
@@ -36,72 +35,6 @@ struct V2F {
 };
 #endif
 
-Vertex unpackVertex(PackedVertex packed)
-{
-    const float4 d0 = packed.data[0];
-    const float4 d1 = packed.data[1];
-
-    uint3 packed_normal_tangent = uint3(
-        asuint(d0.w), asuint(d1.x), asuint(d1.y));
-
-    float3 normal;
-    float4 tangent_and_sign;
-    decodeNormalTangent(packed_normal_tangent, normal, tangent_and_sign);
-
-    Vertex vert;
-    vert.position = float3(d0.x, d0.y, d0.z);
-    vert.normal = normal;
-    vert.tangentAndSign = tangent_and_sign;
-    vert.uv = unpackHalf2x16(d1.z);
-    vert.materialIdx = asuint(d1.w);
-
-    return vert;
-}
-
-EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
-{
-    const float4 d0 = packed.data[0];
-    const float4 d1 = packed.data[1];
-    const float4 d2 = packed.data[2];
-    const float4 d3 = packed.data[3];
-
-    EngineInstanceData o;
-    o.position = d0.xyz;
-    o.rotation = float4(d1.xyz, d0.w);
-    o.scale = float3(d1.w, d2.xy);
-    o.matID = asint(d2.z);
-    o.objectID = asint(d2.w);
-    o.worldID = asint(d3.x);
-
-    return o;
-}
-
-float3x3 toMat(float4 r)
-{
-    float x2 = r.x * r.x;
-    float y2 = r.y * r.y;
-    float z2 = r.z * r.z;
-    float xz = r.x * r.z;
-    float xy = r.x * r.y;
-    float yz = r.y * r.z;
-    float wx = r.w * r.x;
-    float wy = r.w * r.y;
-    float wz = r.w * r.z;
-
-    return float3x3(
-        float3(
-            1.f - 2.f * (y2 + z2),
-            2.f * (xy - wz),
-            2.f * (xz + wy)),
-        float3(
-            2.f * (xy + wz),
-            1.f - 2.f * (x2 + z2),
-            2.f * (yz - wx)),
-        float3(
-            2.f * (xz - wy),
-            2.f * (yz + wx),
-            1.f - 2.f * (x2 + y2)));
-}
 
 [shader("vertex")]
 float4 vert(in uint vid : SV_VertexID,
