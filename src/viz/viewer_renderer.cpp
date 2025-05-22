@@ -35,8 +35,8 @@ using DrawCmd = render::shader::DrawCmd;
 using DrawData = render::shader::DrawData;
 using PackedInstanceData = render::shader::PackedInstanceData;
 using PackedViewData = render::shader::PackedViewData;
+using PackedLightData = render::shader::PackedLightData;
 using ShadowViewData = render::shader::ShadowViewData;
-using LightDesc = render::shader::LightDesc;
 using SkyData = render::shader::SkyData;
 using DensityLayer = render::shader::DensityLayer;
 
@@ -1531,7 +1531,7 @@ static void makeFrame(Frame *dst,
         // (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
         (int64_t)sizeof(DrawData) * max_instances * 10,
-        (int64_t)sizeof(LightDesc) * InternalConfig::maxLights,
+        (int64_t)sizeof(PackedLightData) * InternalConfig::maxLights,
         (int64_t)sizeof(ShadowViewData) * (max_views + 1),
         (int64_t)sizeof(SkyData)
     };
@@ -1540,7 +1540,7 @@ static void makeFrame(Frame *dst,
         buffer_sizes, buffer_offsets, 256);
 
     HostBuffer view_staging = alloc.makeStagingBuffer(sizeof(PackedViewData));
-    HostBuffer light_staging = alloc.makeStagingBuffer(sizeof(LightDesc) * InternalConfig::maxLights);
+    HostBuffer light_staging = alloc.makeStagingBuffer(sizeof(PackedLightData) * InternalConfig::maxLights);
     // HostBuffer shadow_staging = alloc.makeStagingBuffer(sizeof(ShadowViewData));
     HostBuffer sky_staging = alloc.makeStagingBuffer(sizeof(SkyData));
 

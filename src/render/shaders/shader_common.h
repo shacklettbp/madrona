@@ -3,6 +3,7 @@
 
 struct BatchDrawPushConst {
     uint drawDataOffset;
+    uint numLights;
 };
 
 struct GridDrawPushConst {
@@ -203,6 +204,7 @@ struct DirectionalLight {
 };
 */
 
+// Only used in shaders
 struct LightDesc {
     float3 position;
     float3 direction;

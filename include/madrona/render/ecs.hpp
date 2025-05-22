@@ -62,7 +62,7 @@ struct alignas(16) InstanceData {
 
 // This is all the data required to configure a light. The actual
 // data is read in / written to through SOA.
-struct LightDesc {
+struct alignas(16) LightDesc {
     // Only affects the spotlight (defaults to 0 0 0).
     math::Vector3 position;
 

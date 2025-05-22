@@ -284,7 +284,7 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
     dyn_info.pDynamicStates = dyn_enable.data();
 
     VkPushConstantRange push_const {
-        VK_SHADER_STAGE_VERTEX_BIT,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         0,
         sizeof(shader::BatchDrawPushConst),
     };
@@ -1069,7 +1069,8 @@ static void issueRasterization(vk::Device &dev,
                                VkDescriptorSet asset_mat_tex_set,
                                VkExtent2D render_extent,
                                const DynArray<AssetData> &loaded_assets,
-                               bool depth_only)
+                               bool depth_only,
+                               uint32_t num_lights)
 {
     (void)render_extent;
 
@@ -1155,7 +1156,8 @@ static void issueRasterization(vk::Device &dev,
         dev.dt.cmdSetScissor(draw_cmd, 0, 1, &rect);
 
         shader::BatchDrawPushConst push_const = {
-            i * consts::maxDrawsPerView
+            i * consts::maxDrawsPerView,
+            num_lights
         };
 
         dev.dt.cmdPushConstants(draw_cmd, draw_pipeline.layout,
@@ -2095,7 +2097,8 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                            impl->assetSetTextureMat,
                            impl->renderExtent,
                            loaded_assets,
-                           impl->depthOnly);
+                           impl->depthOnly,
+                           info.numLights);
 
         issueComputeLayoutTransitions(impl->dev,
                                target,

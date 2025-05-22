@@ -50,6 +50,7 @@ struct V2F {
     [[vk::location(3)]] int materialIdx : TEXCOORD2;
     [[vk::location(4)]] uint color : TEXCOORD3;
     [[vk::location(5)]] float3 worldNormal : TEXCOORD4;
+    [[vk::location(6)]] uint worldIdx : TEXCOORD5;
 };
 
 [shader("vertex")]
@@ -101,6 +102,7 @@ void vert(in uint vid : SV_VertexID,
     v2f.position = clip_pos;
     v2f.uv = vert.uv;
     v2f.worldNormal = rotateVec(instance_data.rotation, vert.normal);
+    v2f.worldIdx = instance_data.worldID;
 #if 0
     if (instance_data.matID == -1) {
         v2f.materialIdx = meshDataBuffer[draw_data.meshID].materialIndex;
@@ -147,22 +149,21 @@ PixelOutput frag(in V2F v2f,
         float ambient = 0.2;
         float3 normal = normalize(v2f.worldNormal);
         float3 totalLighting = 0;
-        uint num_lights = 1;
-        //lightDataBuffer.getDimensions(num_lights);
-        float3 debug_color = float3(0, 0, 0);
-        for (uint i = 0; i < num_lights; i++) {
-            debug_color = float3(1, 1, 0);
-            LightDesc light = unpackLightData(lightDataBuffer[i]);
+        uint numLights = pushConst.numLights;
+
+        [unroll(1)]
+        for (uint i = 0; i < numLights; i++) {
+            LightDesc light = unpackLightData(lightDataBuffer[v2f.worldIdx * numLights + i]);
+            if(!light.active) {
+                continue;
+            }
             
-            float3 light_dir;
-            
+            float3 light_dir;            
             if (light.isDirectional) { // Directional light
                 light_dir = normalize(-light.direction.xyz);
-                debug_color = float3(1, 0, 0);
             } else { // Spot light
                 light_dir = normalize(v2f.worldPos.xyz - light.position.xyz);
                 float angle = acos(dot(normalize(light_dir), normalize(light.direction.xyz)));
-                debug_color = float3(0, 1, 1);
                 if (abs(angle) > light.cutoffAngle) {
                     continue;
                 }
@@ -179,7 +180,6 @@ PixelOutput frag(in V2F v2f,
         
         color.rgb = lighting;
         output.rgbOut = color;
-        //output.rgbOut.rgb = debug_color;
 
         return output;
     }
