@@ -908,14 +908,12 @@ static __device__ FragmentResult computeFragment(
                             .tMax = 10000.f,
                             .dOnly = true
                             }, world_info);
-
-                    if (!shadow_hit.hit) {
-                        light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f);
+                    if(shadow_hit.hit) {
+                        continue;
                     }
                 }
-            } else {
-                light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f);
             }
+            light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f) * desc.intensity;
         }
 
         acc_color = fmaxf(0.2, light_contrib) * first_hit.color;
