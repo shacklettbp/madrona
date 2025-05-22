@@ -63,10 +63,11 @@ inline Vector3 calculateOutRay(PerspectiveCameraData *view_data,
     Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
  
     // const float h = tanf(theta / 2);
-    const float h = 1.0f / (-view_data->yScale);
+    const float w = 1.0f / view_data->xScale;
+    const float h = 1.0f / -view_data->yScale;
 
     const auto viewport_height = 2 * h;
-    const auto viewport_width = viewport_height * view_data->yScale / view_data->xScale;
+    const auto viewport_width = 2 * w;
     const auto forward = look_at.normalize();
 
     auto u = rot.inv().rotateVec({1, 0, 0});
@@ -838,6 +839,22 @@ static __device__ void writeDepth(uint32_t pixel_byte_offset,
     *depth_out = depth;
 }
 
+static __device__ float linearToSRGB(float color) {
+    if (color <= 0.00031308f) {
+        return 12.92f * color;
+    } else {
+        return 1.055f*pow(color,(1.f / 2.4f)) - 0.055f;
+    }
+}
+
+static __device__ Vector3 linearToSRGB(Vector3 color) {
+    return Vector3(
+        linearToSRGB(color.x),
+        linearToSRGB(color.y),
+        linearToSRGB(color.z)
+    );
+}
+
 struct FragmentResult {
     bool hit;
     Vector3 color;
@@ -866,67 +883,64 @@ static __device__ FragmentResult computeFragment(
         Vector3 hit_pos = trace_info.rayOrigin +
                           first_hit.depth * trace_info.rayDirection;
 
-        Vector3 acc_color = Vector3{ 0.f, 0.f, 0.f };
-
-        float light_contrib = 0.f;
+        float totalLighting = 0.f;
 
         for (int i = 0; i < world_info.numLights; ++i) {
-            const LightDesc& desc = world_info.lights[i];
-
-            float cutoff = -1.f;
-
-            Vector3 light_dir = -desc.direction;
-            if (desc.type == LightDesc::Type::Spotlight) {
-                light_dir = (desc.position - hit_pos).normalize();
-                cutoff = desc.cutoff;
+            const LightDesc& light = world_info.lights[i];
+            if(!light.active) {
+                continue;
             }
 
-            if (cutoff != -1.f && desc.type == LightDesc::Type::Spotlight) {
-                // Dot the vector going from point to light with the direction
-                // of the light.
-                float d = (-light_dir).dot(desc.direction);
-                d /= (light_dir.length() * desc.direction.length());
-                float angle = acosf(d);
-
-                // This pixel isn't affected by this light.
-                if (std::abs(angle) > std::abs(desc.cutoff)) {
-                    continue;
+            Vector3 ray_dir;
+            if(light.type == LightDesc::Type::Directional) {
+                ray_dir = light.direction.normalize();
+            } else {
+                ray_dir = (hit_pos - light.position).normalize();
+                if(light.cutoffAngle >= 0) {
+                    float angle = acosf(ray_dir.dot(light.direction));
+                    if (std::abs(angle) > light.cutoffAngle) {
+                        continue;
+                    }
                 }
             }
 
+            float n_dot_l = max(0.0, dot(first_hit.normal, -ray_dir));
+            totalLighting += n_dot_l * light.intensity;
+
             // Make sure the surface is actually pointing to the light
             // when casting shadow.
-            if (desc.castShadow) {
-                if (light_dir.dot(first_hit.normal) > 0.f) {
+            if (light.castShadow) {
+                if (ray_dir.dot(first_hit.normal) < 0.f) {
                     // TODO: Definitely do some sort of ray fetching because there will
                     // be threads doing nothing potentially.
                     TraceResult shadow_hit = traceRay(
                             TraceInfo {
                             .rayOrigin = hit_pos,
-                            .rayDirection = light_dir,
+                            .rayDirection = -ray_dir,
                             .tMin = 0.000001f,
                             .tMax = 10000.f,
                             .dOnly = true
                             }, world_info);
-
-                    if (!shadow_hit.hit) {
-                        light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f);
+                    if(shadow_hit.hit) {
+                        continue;
                     }
                 }
-            } else {
-                light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f);
             }
         }
 
-        acc_color = fmaxf(0.2, light_contrib) * first_hit.color;
-        acc_color.x = fminf(1.f, acc_color.x);
-        acc_color.y = fminf(1.f, acc_color.y);
-        acc_color.z = fminf(1.f, acc_color.z);
+        Vector3 finalColor = totalLighting * first_hit.color;
+
+        // Add ambient term
+        float ambient = 0.2;
+        finalColor += first_hit.color * ambient;
+
+        // Convert to sRGB
+        finalColor = linearToSRGB(finalColor);
 
         // If we are still here, just do normal lighting calculation.
         return FragmentResult {
             .hit = true,
-            .color = acc_color,
+            .color = finalColor,
             .normal = first_hit.normal,
             .depth = first_hit.depth
         };

@@ -43,6 +43,7 @@ struct RenderingSystemState {
     // Also only used when on the CPU backend
     uint64_t *instanceWorldIDsCPU;
     uint64_t *viewWorldIDsCPU;
+    uint64_t *lightWorldIDsCPU;
 
     MeshBVH *bvhs;
     uint32_t numBVHs;
@@ -202,27 +203,20 @@ inline void lightUpdate(Context &ctx,
 
 #if defined(MADRONA_GPU_MODE)
     LightDesc &desc = ctx.get<LightDesc>(carrier.light);
-
-    desc.type = type.type;
-    desc.castShadow = shadow.castShadow;
-    desc.position = pos;
-    desc.direction = dir;
-    desc.cutoff = angle.cutoff;
-    desc.intensity = intensity.intensity;
-    desc.active = active.active;
 #else
     auto &system_state = ctx.singleton<RenderingSystemState>();
     uint32_t light_id = system_state.totalNumLightsCPU->fetch_add<sync::acq_rel>(1);
 
     LightDesc &desc = system_state.lightsCPU[light_id];
+#endif
+
     desc.type = type.type;
     desc.castShadow = shadow.castShadow;
     desc.position = pos;
     desc.direction = dir;
-    desc.cutoff = angle.cutoff;
+    desc.cutoffAngle = angle.cutoffAngle;
     desc.intensity = intensity.intensity;
     desc.active = active.active;
-#endif
 }
 
 inline void instanceTransformUpdateWithMat(Context &ctx,
@@ -358,8 +352,11 @@ inline void exportCountsGPU(Context &ctx,
         *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
             RenderableArchetype>();
     }
+    if (sys_state.totalNumLights) {
+        *sys_state.totalNumLights = state_mgr->getArchetypeNumRows<
+            LightArchetype>();
+    }
 
-#if MADRONA_GPU_MODE
     auto &gpu_consts = mwGPU::GPUImplConsts::get();
 
     BVHInternalData *bvh_internals =
@@ -370,10 +367,6 @@ inline void exportCountsGPU(Context &ctx,
             state_mgr->getArchetypeNumRows<RenderCameraArchetype>();
         bvh_internals->numViews = num_views;
     }
-#endif
-
-
-
 
 #if 0
     uint32_t *morton_codes = state_mgr->getArchetypeComponent<
@@ -472,13 +465,19 @@ void registerTypes(ECSRegistry &registry,
             ComponentMetadataSelector<InstanceData,TLBVHNode>(ComponentFlags::ImportMemory,ComponentFlags::ImportMemory),
             ArchetypeFlags::ImportOffsets,
             bridge->maxInstancesPerWorld);
+        registry.registerArchetype<LightArchetype>(
+            ComponentMetadataSelector<LightDesc>(ComponentFlags::ImportMemory),
+            ArchetypeFlags::None,
+            bridge->maxLightsPerWorld);
 #else
         registry.registerArchetype<RenderCameraArchetype>();
         registry.registerArchetype<RenderableArchetype>();
+        registry.registerArchetype<LightArchetype>();
 #endif
     } else {
         registry.registerArchetype<RenderCameraArchetype>();
         registry.registerArchetype<RenderableArchetype>();
+        registry.registerArchetype<LightArchetype>();
     }
 
 
@@ -490,11 +489,15 @@ void registerTypes(ECSRegistry &registry,
             bridge->instanceOffsets);
         state_mgr->setArchetypeWorldOffsets<RenderCameraArchetype>(
             bridge->viewOffsets);
+        state_mgr->setArchetypeWorldOffsets<LightArchetype>(
+            bridge->lightOffsets);
 
         state_mgr->setArchetypeComponent<RenderableArchetype, InstanceData>(
             bridge->instances);
         state_mgr->setArchetypeComponent<RenderCameraArchetype, PerspectiveCameraData>(
             bridge->views);
+        state_mgr->setArchetypeComponent<LightArchetype, LightDesc>(
+            bridge->lights);
         state_mgr->setArchetypeComponent<RenderableArchetype, TLBVHNode>(
             bridge->aabbs);
     }
@@ -649,6 +652,7 @@ void init(Context &ctx,
         system_state.lightsCPU = bridge->lights;
         system_state.instanceWorldIDsCPU = bridge->instancesWorldIDs;
         system_state.viewWorldIDsCPU = bridge->viewsWorldIDs;
+        system_state.lightWorldIDsCPU = bridge->lightWorldIDs;
 #endif
 
         system_state.aspectRatio = 
@@ -756,12 +760,12 @@ void makeEntityLightCarrier(Context &ctx, Entity e)
     ctx.get<LightCarrier>(e).light = light_e;
 
     ctx.get<LightDesc>(light_e) = LightDesc {
-        .type = ctx.get<LightDescType>(e).type,
-        .castShadow = ctx.get<LightDescShadow>(e).castShadow,
         .position = ctx.get<Position>(e),
         .direction = ctx.get<LightDescDirection>(e),
-        .cutoff = ctx.get<LightDescCutoffAngle>(e).cutoff,
+        .cutoffAngle = ctx.get<LightDescCutoffAngle>(e).cutoffAngle,
         .intensity = ctx.get<LightDescIntensity>(e).intensity,
+        .type = ctx.get<LightDescType>(e).type,
+        .castShadow = ctx.get<LightDescShadow>(e).castShadow,
         .active = ctx.get<LightDescActive>(e).active,
     };
 }

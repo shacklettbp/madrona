@@ -35,8 +35,8 @@ using DrawCmd = render::shader::DrawCmd;
 using DrawData = render::shader::DrawData;
 using PackedInstanceData = render::shader::PackedInstanceData;
 using PackedViewData = render::shader::PackedViewData;
+using PackedLightData = render::shader::PackedLightData;
 using ShadowViewData = render::shader::ShadowViewData;
-using DirectionalLight = render::shader::DirectionalLight;
 using SkyData = render::shader::SkyData;
 using DensityLayer = render::shader::DensityLayer;
 
@@ -1531,7 +1531,7 @@ static void makeFrame(Frame *dst,
         // (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
         (int64_t)sizeof(DrawData) * max_instances * 10,
-        (int64_t)sizeof(DirectionalLight) * InternalConfig::maxLights,
+        (int64_t)sizeof(PackedLightData) * InternalConfig::maxLights,
         (int64_t)sizeof(ShadowViewData) * (max_views + 1),
         (int64_t)sizeof(SkyData)
     };
@@ -1540,7 +1540,7 @@ static void makeFrame(Frame *dst,
         buffer_sizes, buffer_offsets, 256);
 
     HostBuffer view_staging = alloc.makeStagingBuffer(sizeof(PackedViewData));
-    HostBuffer light_staging = alloc.makeStagingBuffer(sizeof(DirectionalLight) * InternalConfig::maxLights);
+    HostBuffer light_staging = alloc.makeStagingBuffer(sizeof(PackedLightData) * InternalConfig::maxLights);
     // HostBuffer shadow_staging = alloc.makeStagingBuffer(sizeof(ShadowViewData));
     HostBuffer sky_staging = alloc.makeStagingBuffer(sizeof(SkyData));
 
@@ -1925,11 +1925,11 @@ static void packSky( const Device &dev,
 
 static void packLighting(const Device &dev,
                          HostBuffer &light_staging_buffer,
-                         const HeapArray<DirectionalLight> &lights)
+                         const HeapArray<render::LightDesc> &lights)
 {
-    DirectionalLight *staging = (DirectionalLight *)light_staging_buffer.ptr;
+    LightDesc *staging = (LightDesc *)light_staging_buffer.ptr;
     memcpy(staging, lights.data(),
-           sizeof(DirectionalLight) * InternalConfig::maxLights);
+           sizeof(LightDesc) * InternalConfig::maxLights);
     light_staging_buffer.flush(dev);
 }
 
@@ -2657,7 +2657,7 @@ bool ViewerRendererState::renderGridFrame(const viz::ViewerControl &viz_ctrl)
         VkBufferCopy light_copy {
             .srcOffset = 0,
             .dstOffset = frame.lightOffset,
-            .size = sizeof(DirectionalLight) * InternalConfig::maxLights
+            .size = sizeof(render::LightDesc) * InternalConfig::maxLights
         };
         dev.dt.cmdCopyBuffer(draw_cmd, frame.lightStaging.buffer,
                              frame.renderInput.buffer,
@@ -2824,7 +2824,7 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
         VkBufferCopy light_copy {
             .srcOffset = 0,
             .dstOffset = frame.lightOffset,
-            .size = sizeof(DirectionalLight) * InternalConfig::maxLights
+            .size = sizeof(LightDesc) * InternalConfig::maxLights
         };
         dev.dt.cmdCopyBuffer(draw_cmd, frame.lightStaging.buffer,
                              frame.renderInput.buffer,
@@ -3696,7 +3696,7 @@ CountT ViewerRenderer::loadObjects(Span<const imp::SourceObject> objs,
     return state_.rctx.loadObjects(objs, mats, textures, override_materials);
 }
 
-void ViewerRenderer::configureLighting(Span<const render::LightConfig> lights)
+void ViewerRenderer::configureLighting(Span<const render::LightDesc> lights)
 {
     state_.rctx.configureLighting(lights);
 }

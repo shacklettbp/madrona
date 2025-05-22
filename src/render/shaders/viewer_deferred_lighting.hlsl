@@ -1,5 +1,4 @@
-#include "shader_common.h"
-#include "../../render/vk/shaders/utils.hlsl"
+#include "shader_utils.hlsl"
 
 // GBuffer descriptor bindings
 
@@ -17,7 +16,7 @@ RWTexture2D<float4> gbufferPosition;
 
 // Assume stuff is Y-UP from here
 [[vk::binding(3, 0)]]
-StructuredBuffer<DirectionalLight> lights;
+StructuredBuffer<LightDesc> lights;
 
 // Atmosphere
 [[vk::binding(4, 0)]]
@@ -195,7 +194,7 @@ float3 accumulateSunRadianceBRDF(in GBufferData gbuffer,
                                    metal,
                                    normalize(gbuffer.wPosition.xyz - pushConst.viewPos.xyz),
                                    radiance_from_sun,
-                                   normalize(-lights[0].lightDir.xyz));
+                                   normalize(-lights[0].direction.xyz));
 
     float shadow_factor = shadowFactorVSM(gbuffer.wPosition, target_pixel);
 
@@ -214,7 +213,7 @@ float4 getPointRadianceBRDF(float roughness, float metal, in GBufferData gbuffer
         float3 p = gbuffer.wPosition / 1000.0 - skyBuffer[0].wPlanetCenter.xyz;
         float3 normal = gbuffer.wNormal;
 
-        float3 sun_direction = -normalize(lights[0].lightDir.xyz);
+        float3 sun_direction = -normalize(lights[0].direction.xyz);
 
         float3 view_direction = normalize(gbuffer.wPosition - pushConst.viewPos.xyz);
 
@@ -236,7 +235,7 @@ float4 getPointRadianceBRDF(float roughness, float metal, in GBufferData gbuffer
                                               scatteringLUT, scatteringLUT,
                                               pushConst.viewPos.xyz / 1000.0 - skyBuffer[0].wPlanetCenter.xyz,
                                               gbuffer.wPosition / 1000.0 - skyBuffer[0].wPlanetCenter.xyz, 0.0,
-                                              -normalize(lights[0].lightDir.xyz),
+                                              -normalize(lights[0].direction.xyz),
                                               transmittance);
 
     point_radiance = point_radiance * transmittance + in_scatter;
@@ -300,7 +299,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         float4 point_radiance = getPointRadianceBRDF(roughness, metalness, 
                                                      gbuffer_data, target_pixel);
 
-        float3 sun_direction = normalize(-lights[0].lightDir.xyz);
+        float3 sun_direction = normalize(-lights[0].direction.xyz);
 
         /* Incoming radiance from the sky: */
         float3 transmittance;

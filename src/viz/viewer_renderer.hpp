@@ -143,7 +143,7 @@ public:
                        Span<const imp::SourceTexture> textures,
                        bool override_materials);
 
-    void configureLighting(Span<const render::LightConfig> lights);
+    void configureLighting(Span<const render::LightDesc> lights);
     
     inline GLFWwindow * osWindow() const { return state_.window->hdl; }
 

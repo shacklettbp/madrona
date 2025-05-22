@@ -1,5 +1,4 @@
-#include "shader_common.h"
-#include "../../render/vk/shaders/utils.hlsl"
+#include "shader_utils.hlsl"
 
 [[vk::push_constant]]
 ShadowGenPushConst pushConst;
@@ -11,7 +10,7 @@ RWStructuredBuffer<ShadowViewData> shadowViewDataBuffer;
 StructuredBuffer<PackedViewData> flycamBuffer;
 
 [[vk::binding(2, 0)]]
-StructuredBuffer<DirectionalLight> lights;
+StructuredBuffer<LightDesc> lights;
 
 [[vk::binding(3, 0)]]
 StructuredBuffer<PackedViewData> viewDataBuffer;
@@ -22,33 +21,6 @@ StructuredBuffer<int> viewOffsetsBuffer;
 float4 invQuat(float4 rot)
 {
     return float4(-rot.x, -rot.y, -rot.z, rot.w);
-}
-
-float3 rotateVec(float4 q, float3 v)
-{
-    float3 pure = q.xyz;
-    float scalar = q.w;
-    
-    float3 pure_x_v = cross(pure, v);
-    float3 pure_x_pure_x_v = cross(pure, pure_x_v);
-    
-    return v + 2.f * ((pure_x_v * scalar) + pure_x_pure_x_v);
-}
-
-PerspectiveCameraData unpackViewData(PackedViewData packed)
-{
-    const float4 d0 = packed.data[0];
-    const float4 d1 = packed.data[1];
-    const float4 d2 = packed.data[2];
-
-    PerspectiveCameraData cam;
-    cam.pos = d0.xyz;
-    cam.rot = float4(d1.xyz, d0.w);
-    cam.xScale = d1.w;
-    cam.yScale = d2.x;
-    cam.zNear = d2.y;
-
-    return cam;
 }
 
 PerspectiveCameraData getCameraData()
@@ -79,7 +51,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     float3 cam_right = rotateVec(cam_rot, float3(1.0f, 0.0f, 0.0f));
 
     // Construct orthonormal basis
-    float3 light_fwd = normalize(lights[0].lightDir.xyz);
+    float3 light_fwd = normalize(lights[0].direction.xyz);
     float3 light_up = (light_fwd.x < 0.9999f) ?
         normalize(cross(float3(1.f, 0.f, 0.f), light_fwd)) :
         float3(0.f, 0.f, 1.f);

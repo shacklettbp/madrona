@@ -284,7 +284,7 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
     dyn_info.pDynamicStates = dyn_enable.data();
 
     VkPushConstantRange push_const {
-        VK_SHADER_STAGE_VERTEX_BIT,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         0,
         sizeof(shader::BatchDrawPushConst),
     };
@@ -522,9 +522,6 @@ static PipelineMP<1> makeComputePipeline(const vk::Device &dev,
 struct BatchFrame {
     BatchImportedBuffers buffers;
 
-    vk::LocalBuffer lighting;
-    vk::HostBuffer lightingStaging;
-
     vk::LocalBuffer skyInput;
     vk::HostBuffer skyInputStaging;
 
@@ -657,10 +654,6 @@ static void makeBatchFrame(vk::Device& dev,
                            uint32_t view_height,
                            bool depth_only)
 {
-    VkDeviceSize lights_size = InternalConfig::maxLights * sizeof(render::shader::DirectionalLight);
-    vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
-    vk::HostBuffer lights_staging = alloc.makeStagingBuffer(lights_size);
-
     VkDeviceSize sky_input_size = sizeof(render::shader::SkyData);
     vk::LocalBuffer sky_input = alloc.makeLocalBuffer(sky_input_size).value();
     vk::HostBuffer sky_input_staging = alloc.makeStagingBuffer(sky_input_size);
@@ -668,14 +661,20 @@ static void makeBatchFrame(vk::Device& dev,
     VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(PerspectiveCameraData);
     vk::LocalBuffer views = alloc.makeLocalBuffer(view_size).value();
 
+    VkDeviceSize view_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
+    vk::LocalBuffer view_offsets = alloc.makeLocalBuffer(view_offset_size).value();
+
     VkDeviceSize instance_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(InstanceData);
     vk::LocalBuffer instances = alloc.makeLocalBuffer(instance_size).value();
 
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
-    VkDeviceSize view_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
-    vk::LocalBuffer view_offsets = alloc.makeLocalBuffer(view_offset_size).value();
+    VkDeviceSize lights_size = cfg.numWorlds * cfg.maxLightsPerWorld * sizeof(LightDesc);
+    vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
+
+    VkDeviceSize light_offsets_size = cfg.numWorlds * sizeof(uint32_t);
+    vk::LocalBuffer light_offsets = alloc.makeLocalBuffer(light_offsets_size).value();
 
     VkCommandPool prepare_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
     VkCommandPool render_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
@@ -709,8 +708,7 @@ static void makeBatchFrame(vk::Device& dev,
 #endif
 
         new (frame) BatchFrame{
-            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets), std::move(lights) },
-            std::move(lights), std::move(lights_staging),
+            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets), std::move(lights), std::move(light_offsets) },
             std::move(sky_input), std::move(sky_input_staging),
             VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
             HeapArray<LayeredTarget>(0),
@@ -742,7 +740,7 @@ static void makeBatchFrame(vk::Device& dev,
     VkDescriptorSet aabb_set = prepare_views.descPools[3].makeSet();
 
     //Descriptor sets
-    std::array<VkWriteDescriptorSet, 11> desc_updates;
+    std::array<VkWriteDescriptorSet, 12> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = views.buffer;
@@ -765,23 +763,13 @@ static void makeBatchFrame(vk::Device& dev,
     vk::DescHelper::storage(desc_updates[4], prepare_views_set, &offset_info, 2);
     vk::DescHelper::storage(desc_updates[5], draw_views_set, &offset_info, 2);
 
-#if 0
-    VkDescriptorBufferInfo aabb_info;
-    aabb_info.buffer = aabbs.buffer;
-    aabb_info.offset = 0;
-    aabb_info.range = aabb_size;
-    vk::DescHelper::storage(desc_updates[6], aabb_set, &aabb_info, 0);
-#endif
-
     // PBR descriptor sets
 
     VkDescriptorBufferInfo light_data_info;
     light_data_info.buffer = lights.buffer;
     light_data_info.offset = 0;
-    light_data_info.range = VK_WHOLE_SIZE;
-
-    vk::DescHelper::storage(desc_updates[6],
-                            pbr_set, &light_data_info, 0);
+    light_data_info.range = lights_size;
+    vk::DescHelper::storage(desc_updates[6], pbr_set, &light_data_info, 0);
     vk::DescHelper::storage(desc_updates[7], draw_views_set, &light_data_info, 3);
 
     VkDescriptorImageInfo transmittance_info;
@@ -931,10 +919,9 @@ static void makeBatchFrame(vk::Device& dev,
             std::move(view_offsets),
             std::move(instances),
             std::move(instance_offsets),
-            std::move(lights)
+            std::move(lights),
+            std::move(light_offsets)
         },
-        std::move(lights),
-        std::move(lights_staging),
         std::move(sky_input),
         std::move(sky_input_staging),
         prepare_views_set,
@@ -1082,7 +1069,8 @@ static void issueRasterization(vk::Device &dev,
                                VkDescriptorSet asset_mat_tex_set,
                                VkExtent2D render_extent,
                                const DynArray<AssetData> &loaded_assets,
-                               bool depth_only)
+                               bool depth_only,
+                               uint32_t num_lights_per_world)
 {
     (void)render_extent;
 
@@ -1168,7 +1156,8 @@ static void issueRasterization(vk::Device &dev,
         dev.dt.cmdSetScissor(draw_cmd, 0, 1, &rect);
 
         shader::BatchDrawPushConst push_const = {
-            i * consts::maxDrawsPerView
+            i * consts::maxDrawsPerView,
+            num_lights_per_world
         };
 
         dev.dt.cmdPushConstants(draw_cmd, draw_pipeline.layout,
@@ -1557,6 +1546,28 @@ static void sortInstancesAndViewsCPU(EngineInterop *interop)
     }
 }
 
+static void sortLightsCPU(EngineInterop *interop)
+{
+    for (uint32_t i = 0; i < *interop->bridge.totalNumLights; ++i) {
+        interop->iotaArrayLightOffsetsCPU[i] = i;
+    }
+
+    std::sort(interop->iotaArrayLightOffsetsCPU,
+                interop->iotaArrayLightOffsetsCPU + *interop->bridge.totalNumLights,
+                [&interop] (uint32_t a, uint32_t b) {
+                    return interop->bridge.lightOffsets[a] < interop->bridge.lightOffsets[b];
+                });
+
+    LightDesc *lights = (LightDesc *)interop->lightsCPU->ptr;
+
+    for (uint32_t i = 0; i < *interop->bridge.totalNumLights; ++i) {
+        lights[i] = interop->bridge.lights[interop->iotaArrayLightOffsetsCPU[i]];
+
+        interop->sortedLightOffsets[i] = 
+            interop->bridge.lightOffsets[interop->iotaArrayLightOffsetsCPU[i]];
+    }
+}
+
 static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
 {
     uint32_t *instanceOffsets = (uint32_t *)interop->instanceOffsetsCPU->ptr;
@@ -1593,29 +1604,20 @@ static void computeViewOffsets(EngineInterop *interop, uint32_t num_worlds)
     }
 }
 
-static void computeLights(EngineInterop *interop, uint32_t num_worlds, uint32_t num_lightsPerWorld)
+static void computeLightOffsets(EngineInterop *interop, uint32_t num_worlds)
 {
-    // TODO: Implement light color
-    static constexpr math::Vector3 defaultColor = math::Vector3(1.0f, 1.0f, 1.0f);
+    uint32_t *lightOffsets = (uint32_t *)interop->lightOffsetsCPU->ptr;
 
-    // Convert LightDesc to DirectionalLight
-    render::shader::DirectionalLight *lights = (render::shader::DirectionalLight *)interop->lightsCPU->ptr;
-    LightDesc *lightDescs = (LightDesc *)interop->bridge.lights;
-    printf(">>>>>>>>>num_worlds: %d, num_lightsPerWorld: %d\n", num_worlds, num_lightsPerWorld);
-    for (uint32_t i = 0; i < num_worlds * num_lightsPerWorld; ++i) {
-        if(lightDescs[i].type == LightDesc::Type::Directional) {
-            lights[i] = {
-                .lightDir = math::Vector4::fromVec3W(lightDescs[i].direction, 0.0f),
-                .color = math::Vector4::fromVec3W(defaultColor* lightDescs[i].intensity, 1.0f),
-                .lightCutoff = 0
-            };
-        }
-        else if(lightDescs[i].type == LightDesc::Type::Spotlight) {
-            lights[i] = {
-                .lightDir = math::Vector4::fromVec3W(lightDescs[i].position, 1.0f),
-                .color = math::Vector4::fromVec3W(defaultColor * lightDescs[i].intensity, 1.0f),
-                .lightCutoff = lightDescs[i].cutoff,
-            };
+    for (int i = 0; i < (int)num_worlds; ++i) {
+        lightOffsets[i] = 0;
+    }
+
+    for (uint32_t i = 1; i < *interop->bridge.totalNumLights; ++i) {
+        uint32_t current_world_id = (uint32_t)(interop->sortedLightOffsets[i] >> 32);
+        uint32_t prev_world_id = (uint32_t)(interop->sortedLightOffsets[i-1] >> 32);
+
+        if (current_world_id != prev_world_id) {
+            lightOffsets[current_world_id] = i;
         }
     }
 }
@@ -1654,12 +1656,21 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
             // Need to flush engine input state before copy
             interop->voxelInputCPU->flush(impl->dev);
         }
-    }
 
-    if (interop->lightsCPU.has_value()) {
-        printf(">>>>>>>>>info.numWorlds: %d, info.maxLightsPerWorld: %d\n", info.numWorlds, info.maxLightsPerWorld);
-        computeLights(interop, info.numWorlds, info.maxLightsPerWorld);
-        interop->lightsCPU->flush(impl->dev);
+        if (interop->lightsCPU.has_value()) {
+            *interop->bridge.totalNumLights = interop->bridge.totalNumLightsCPUInc->load_acquire();
+
+            info.numLights = *interop->bridge.totalNumLights;
+
+            interop->bridge.totalNumLightsCPUInc->store_release(0);
+
+            // First, need to perform the sorts
+            sortLightsCPU(interop);
+            computeLightOffsets(interop, info.numWorlds);
+
+            interop->lightsCPU->flush(impl->dev);
+            interop->lightOffsetsCPU->flush(impl->dev);
+        }
     }
 
     BatchFrame &frame_data = impl->batchFrames[frame_index];
@@ -1755,21 +1766,6 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                              1, &offsets_data_copy);
     }
 
-    { // Import the lights
-        VkDeviceSize num_lights_bytes = info.numWorlds * info.maxLightsPerWorld *
-            sizeof(shader::DirectionalLight);
-
-        VkBufferCopy lights_data_copy = {
-            .srcOffset = 0, .dstOffset = 0,
-            .size = num_lights_bytes
-        };
-
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->lightsHdl,
-                             batch_buffers.lights.buffer,
-                             1, &lights_data_copy);
-    }
-
-
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
 
     VkSemaphore sema_wait = VK_NULL_HANDLE;
@@ -1797,17 +1793,6 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
     frame_data.latestOp = LatestOperation::RenderPrepare;
 
     didRender = true;
-}
-
-static void packLighting(const vk::Device &dev,
-                         vk::HostBuffer &light_staging_buffer,
-                         const HeapArray<render::shader::DirectionalLight> &lights)
-{
-    render::shader::DirectionalLight *staging = 
-        (render::shader::DirectionalLight *)light_staging_buffer.ptr;
-    memcpy(staging, lights.data(),
-           sizeof(render::shader::DirectionalLight) * InternalConfig::maxLights);
-    light_staging_buffer.flush(dev);
 }
 
 static void packSky( const vk::Device &dev,
@@ -1871,9 +1856,23 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 {
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
 
-    (void)interop;
+    {
+        // If we have a CPU backend, we need to import the lights and light offsets
+        if (interop->lightsCPU.has_value()) {
+            *interop->bridge.totalNumLights = interop->bridge.totalNumLightsCPUInc->load_acquire();
 
-    // prepareForRendering(info, interop);
+            info.numLights = *interop->bridge.totalNumLights;
+
+            interop->bridge.totalNumLightsCPUInc->store_release(0);
+
+            // First, need to perform the sorts
+            sortLightsCPU(interop);
+            computeLightOffsets(interop, info.numWorlds);
+
+            interop->lightsCPU->flush(impl->dev);
+            interop->lightOffsetsCPU->flush(impl->dev);
+        }
+    }
 
     // Circles between 0 to number of frames (not anymore, there is only one frame now)
     uint32_t frame_index = impl->currentFrame;
@@ -1896,17 +1895,34 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 
     ////////////////////////////////////////////////////////////////
 
-    { // Import sky and lighting information first
-        packLighting(impl->dev, frame_data.lightingStaging, rctx.lights_);
-        VkBufferCopy light_copy {
+
+    { // Import the lights
+        VkDeviceSize num_lights_bytes = info.numLights *
+            sizeof(shader::PackedLightData);
+        VkBufferCopy lights_data_copy = {
             .srcOffset = 0,
             .dstOffset = 0,
-            .size = sizeof(render::shader::DirectionalLight) * InternalConfig::maxLights
+            .size = num_lights_bytes
         };
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, frame_data.lightingStaging.buffer,
-                             frame_data.lighting.buffer,
-                             1, &light_copy);
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->lightsHdl,
+                             frame_data.buffers.lights.buffer,
+                             1, &lights_data_copy);
+    }
 
+    { // Import the light offsets
+        VkDeviceSize num_offsets_bytes = info.numWorlds *
+            sizeof(int32_t);
+        VkBufferCopy offsets_data_copy = {
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size = num_offsets_bytes
+        };
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->lightOffsetsHdl,
+                             frame_data.buffers.lightOffsets.buffer,
+                             1, &offsets_data_copy);
+    }
+
+    { // Import sky information first
         packSky(impl->dev, frame_data.skyInputStaging);
         VkBufferCopy sky_copy {
             .srcOffset = 0,
@@ -1949,7 +1965,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 nullptr,
                 VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame_data.lighting.buffer,
+                frame_data.skyInput.buffer,
                 0, VK_WHOLE_SIZE
             },
             VkBufferMemoryBarrier{
@@ -1957,11 +1973,18 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 nullptr,
                 VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame_data.skyInput.buffer,
+                frame_data.buffers.lights.buffer,
+                0, VK_WHOLE_SIZE
+            },
+            VkBufferMemoryBarrier{
+                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+                frame_data.buffers.lightOffsets.buffer,
                 0, VK_WHOLE_SIZE
             },
         };
-
         impl->dev.dt.cmdPipelineBarrier(
             draw_cmd,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -2074,7 +2097,8 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                            impl->assetSetTextureMat,
                            impl->renderExtent,
                            loaded_assets,
-                           impl->depthOnly);
+                           impl->depthOnly,
+                           info.numLights / info.numWorlds);
 
         issueComputeLayoutTransitions(impl->dev,
                                target,
@@ -2187,17 +2211,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 
     ////////////////////////////////////////////////////////////////
 
-    { // Import sky and lighting information first
-        packLighting(impl->dev, frame_data.lightingStaging, rctx.lights_);
-        VkBufferCopy light_copy {
-            .srcOffset = 0,
-            .dstOffset = 0,
-            .size = sizeof(render::shader::DirectionalLight) * InternalConfig::maxLights
-        };
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, frame_data.lightingStaging.buffer,
-                             frame_data.lighting.buffer,
-                             1, &light_copy);
-
+    { // Import sky information first
         packSky(impl->dev, frame_data.skyInputStaging);
         VkBufferCopy sky_copy {
             .srcOffset = 0,
@@ -2241,14 +2255,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
                 frame_data.buffers.aabbs.buffer,
-                0, VK_WHOLE_SIZE
-            },
-            VkBufferMemoryBarrier{
-                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
-                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame_data.lighting.buffer,
                 0, VK_WHOLE_SIZE
             },
             VkBufferMemoryBarrier{

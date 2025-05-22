@@ -693,7 +693,7 @@ CountT Viewer::loadObjects(Span<const imp::SourceObject> objs,
             override_materials);
 }
 
-void Viewer::configureLighting(Span<const render::LightConfig> lights)
+void Viewer::configureLighting(Span<const render::LightDesc> lights)
 {
     impl_->renderer.configureLighting(lights);
 }

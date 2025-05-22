@@ -3,6 +3,7 @@
 
 struct BatchDrawPushConst {
     uint drawDataOffset;
+    uint numLights;
 };
 
 struct GridDrawPushConst {
@@ -194,10 +195,28 @@ struct ShadowViewData {
     float4 cameraForward;
 };
 
+// Deprecated
+/*
 struct DirectionalLight {
     float4 lightDir;
     float4 color;
     float lightCutoff;
+};
+*/
+
+// Only used in shaders
+struct LightDesc {
+    float3 position;
+    float3 direction;
+    float cutoffAngle;
+    float intensity;
+    uint32_t isDirectional;
+    uint32_t castShadow;
+    uint32_t active;
+};
+
+struct PackedLightData {
+    float4 data[3];
 };
 
 struct PerspectiveCameraData {

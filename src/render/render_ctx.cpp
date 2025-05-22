@@ -64,8 +64,8 @@ using DrawCmd = render::shader::DrawCmd;
 using DrawData = render::shader::DrawData;
 using PackedInstanceData = render::shader::PackedInstanceData;
 using PackedViewData = render::shader::PackedViewData;
+using PackedLightData = render::shader::PackedLightData;
 using ShadowViewData = render::shader::ShadowViewData;
-using DirectionalLight = render::shader::DirectionalLight;
 using SkyData = render::shader::SkyData;
 using DensityLayer = render::shader::DensityLayer;
 
@@ -585,6 +585,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     auto instance_offsets_cpu = Optional<render::vk::HostBuffer>::none();
     auto aabb_cpu = Optional<render::vk::HostBuffer>::none();
     auto lights_cpu = Optional<render::vk::HostBuffer>::none();
+    auto light_offsets_cpu = Optional<render::vk::HostBuffer>::none();
 
 #ifdef MADRONA_VK_CUDA_SUPPORT
     auto views_gpu = Optional<render::vk::DedicatedBuffer>::none();
@@ -599,11 +600,14 @@ static EngineInterop setupEngineInterop(Device &dev,
     auto instance_offsets_gpu = Optional<render::vk::DedicatedBuffer>::none();
     auto instance_offsets_cuda = Optional<render::vk::CudaImportedBuffer>::none();
 
-    auto aabb_gpu = Optional<render::vk::DedicatedBuffer>::none();
-    auto aabb_cuda = Optional<render::vk::CudaImportedBuffer>::none();
-
     auto lights_gpu = Optional<render::vk::DedicatedBuffer>::none();
     auto lights_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+
+    auto light_offsets_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto light_offsets_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+
+    auto aabb_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto aabb_cuda = Optional<render::vk::CudaImportedBuffer>::none();
 #endif
 
     VkBuffer views_hdl = VK_NULL_HANDLE;
@@ -612,20 +616,20 @@ static EngineInterop setupEngineInterop(Device &dev,
     VkBuffer instance_offsets_hdl = VK_NULL_HANDLE;
     VkBuffer aabb_hdl = VK_NULL_HANDLE;
     VkBuffer lights_hdl = VK_NULL_HANDLE;
+    VkBuffer light_offsets_hdl = VK_NULL_HANDLE;
 
     void *views_base = nullptr;
     void *view_offsets_base = nullptr;
-
     void *instances_base = nullptr;
     void *instance_offsets_base = nullptr;
+    void *lights_base = nullptr;
+    void *light_offsets_base = nullptr;
 
     void *aabb_base = nullptr;
 
-    void *lights_base = nullptr;
-
     void *world_ids_instances_base = nullptr;
     void *world_ids_views_base = nullptr;
-
+    void *world_ids_lights_base = nullptr;
 
     { // Create the views buffer
         uint64_t num_views_bytes = num_worlds * max_views_per_world *
@@ -672,6 +676,28 @@ static EngineInterop setupEngineInterop(Device &dev,
 
             instances_hdl = instances_gpu->buf.buffer;
             instances_base = (char *)instances_cuda->getDevicePointer();
+#endif
+        }
+    }
+    
+    { // Create the lights buffer
+        uint64_t num_lights_bytes = num_worlds * max_lights_per_world *
+            (int64_t)sizeof(render::shader::PackedLightData);
+        if (!gpu_input) {
+            lights_cpu = alloc.makeStagingBuffer(num_lights_bytes);
+            lights_hdl = lights_cpu->buffer;
+            lights_base = malloc(sizeof(render::shader::PackedLightData) * num_worlds * max_lights_per_world);
+        }
+        else
+        {
+#ifdef MADRONA_VK_CUDA_SUPPORT
+            lights_gpu = alloc.makeDedicatedBuffer(
+                num_lights_bytes, false, true);
+            lights_cuda.emplace(dev, lights_gpu->mem,
+                num_lights_bytes);
+
+            lights_hdl = lights_gpu->buf.buffer;
+            lights_base = (char *)lights_cuda->getDevicePointer();
 #endif
         }
     }
@@ -739,26 +765,24 @@ static EngineInterop setupEngineInterop(Device &dev,
 #endif
         }
     }
-    
-    { // Create the lights buffer
-        uint64_t num_lights_bytes = num_worlds * max_lights_per_world *
-            (int64_t)sizeof(render::shader::DirectionalLight);
+
+    { // Create the light offsets buffer
+        uint64_t num_offsets_bytes = (num_worlds+1) * sizeof(int32_t);
 
         if (!gpu_input) {
-            lights_cpu = alloc.makeStagingBuffer(num_lights_bytes);
-            lights_hdl = lights_cpu->buffer;
-            lights_base = lights_cpu->ptr;
-        }
-        else
-        {
+            light_offsets_cpu = alloc.makeStagingBuffer(num_offsets_bytes);
+            light_offsets_hdl = light_offsets_cpu->buffer;
+            light_offsets_base = light_offsets_cpu->ptr;
+        } else {
 #ifdef MADRONA_VK_CUDA_SUPPORT
-            lights_gpu = alloc.makeDedicatedBuffer(
-                num_lights_bytes, false, true);
-            lights_cuda.emplace(dev, lights_gpu->mem,
-                num_lights_bytes);
+            light_offsets_gpu = alloc.makeDedicatedBuffer(
+                num_offsets_bytes, false, true);
 
-            lights_hdl = lights_gpu->buf.buffer;
-            lights_base = (char *)lights_cuda->getDevicePointer();
+            light_offsets_cuda.emplace(dev, light_offsets_gpu->mem,
+                num_offsets_bytes);
+
+            light_offsets_hdl = light_offsets_gpu->buf.buffer;
+            light_offsets_base = (char *)light_offsets_cuda->getDevicePointer();
 #endif
         }
     }
@@ -831,6 +855,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         .lights = (LightDesc *)lights_base,
         .instanceOffsets = (int32_t *)instance_offsets_base,
         .viewOffsets = (int32_t *)view_offsets_base,
+        .lightOffsets = (int32_t *)light_offsets_base,
         .totalNumViews = total_num_views_readback,
         .totalNumInstances = total_num_instances_readback,
         .totalNumLights = total_num_lights_readback,
@@ -839,11 +864,13 @@ static EngineInterop setupEngineInterop(Device &dev,
         .totalNumLightsCPUInc = total_num_lights_cpu_inc,
         .instancesWorldIDs = (uint64_t *)world_ids_instances_base,
         .viewsWorldIDs = (uint64_t *)world_ids_views_base,
+        .lightWorldIDs = (uint64_t *)world_ids_lights_base,
         .renderWidth = (int32_t)render_width,
         .renderHeight = (int32_t)render_height,
         .voxels = voxel_buffer_ptr,
         .maxViewsPerworld = max_views_per_world,
         .maxInstancesPerWorld = max_instances_per_world,
+        .maxLightsPerWorld = max_lights_per_world,
         .isGPUBackend = gpu_input
     };
 
@@ -861,14 +888,18 @@ static EngineInterop setupEngineInterop(Device &dev,
 
     uint32_t *iota_array_instances = nullptr;
     uint32_t *iota_array_views = nullptr;
+    uint32_t *iota_array_lights = nullptr;
     uint64_t *sorted_instance_world_ids = nullptr;
     uint64_t *sorted_view_world_ids = nullptr;
+    uint64_t *sorted_light_world_ids = nullptr;
 
     if (!gpu_input) {
         iota_array_instances = (uint32_t *)malloc(sizeof(uint32_t) * num_worlds * max_instances_per_world);
         iota_array_views = (uint32_t *)malloc(sizeof(uint32_t) * num_worlds * max_views_per_world);
+        iota_array_lights = (uint32_t *)malloc(sizeof(uint32_t) * num_worlds * max_lights_per_world);
         sorted_instance_world_ids = (uint64_t *)malloc(sizeof(uint64_t) * num_worlds * max_instances_per_world);
         sorted_view_world_ids = (uint64_t *)malloc(sizeof(uint64_t) * num_worlds * max_views_per_world);
+        sorted_light_world_ids = (uint64_t *)malloc(sizeof(uint64_t) * num_worlds * max_lights_per_world);
     }
 
     return EngineInterop {
@@ -876,8 +907,9 @@ static EngineInterop setupEngineInterop(Device &dev,
         std::move(view_offsets_cpu),
         std::move(instances_cpu),
         std::move(instance_offsets_cpu),
-        std::move(aabb_cpu),
         std::move(lights_cpu),
+        std::move(light_offsets_cpu),
+        std::move(aabb_cpu),
 #ifdef MADRONA_VK_CUDA_SUPPORT
         std::move(views_gpu),
         std::move(view_offsets_gpu),
@@ -885,24 +917,28 @@ static EngineInterop setupEngineInterop(Device &dev,
         std::move(instances_gpu),
         std::move(instance_offsets_gpu),
 
+        std::move(lights_gpu),
+        std::move(light_offsets_gpu),
+        
         std::move(views_cuda),
         std::move(view_offsets_cuda),
 
         std::move(instances_cuda),
         std::move(instance_offsets_cuda),
 
+        std::move(lights_cuda),
+        std::move(light_offsets_cuda),
+
         std::move(aabb_gpu),
         std::move(aabb_cuda),
-
-        std::move(lights_gpu),
-        std::move(lights_cuda),
 #endif
         views_hdl,
         view_offsets_hdl,
         instances_hdl,
         instance_offsets_hdl,
-        aabb_hdl,
         lights_hdl,
+        light_offsets_hdl,
+        aabb_hdl,
         bridge,
         gpu_bridge,
         max_views_per_world,
@@ -916,8 +952,10 @@ static EngineInterop setupEngineInterop(Device &dev,
         voxel_buffer_hdl,
         iota_array_instances,
         iota_array_views,
+        iota_array_lights,
         sorted_instance_world_ids,
-        sorted_view_world_ids
+        sorted_view_world_ids,
+        sorted_light_world_ids
     };
 }
 
@@ -1385,7 +1423,7 @@ RenderContext::RenderContext(
                 .binding = 3,
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                 .pImmutableSamplers = nullptr,
             }
         };
@@ -1501,6 +1539,7 @@ RenderContext::RenderContext(
          cfg.numWorlds,
          cfg.maxViewsPerWorld,
          cfg.maxInstancesPerWorld,
+         cfg.maxLightsPerWorld,
          1
     };
 
@@ -1539,6 +1578,7 @@ RenderContext::~RenderContext()
 
     dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_layout_, nullptr);
     dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_tex_layout_, nullptr);
+    dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_batch_draw_layout_, nullptr);
     dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_batch_lighting_layout_, nullptr);
     // dev.dt.destroyDescriptorSetLayout(dev.hdl, sky_data_layout_, nullptr);
 
@@ -1833,8 +1873,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     }
 
     int64_t num_total_objs = src_objs.size();
-    uint32_t num_total_lights = engine_interop_.maxLightsPerWorld;
-    printf(">>>>>>>>>num_total_lights: %d\n", num_total_lights);
 
     int64_t buffer_offsets[5];
     int64_t buffer_sizes[6] = {
@@ -2184,13 +2222,17 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     return 0;
 }
 
-void RenderContext::configureLighting(Span<const LightConfig> lights)
+void RenderContext::configureLighting(Span<const LightDesc> lights)
 {
     for (int i = 0; i < lights.size(); ++i) {
-        lights_.insert(i, DirectionalLight{ 
-            math::Vector4{lights[i].dir.x, lights[i].dir.y, lights[i].dir.z, 0.0f }, 
-            math::Vector4{lights[i].color.x, lights[i].color.y, lights[i].color.z, 1.0f},
-            0.0f
+        lights_.insert(i, LightDesc {
+            .position = {lights[i].position.x, lights[i].position.y, lights[i].position.z},
+            .direction = {lights[i].direction.x, lights[i].direction.y, lights[i].direction.z},
+            .cutoffAngle = lights[i].cutoffAngle,
+            .intensity = lights[i].intensity,
+            .type = lights[i].type,
+            .castShadow = lights[i].castShadow,
+            .active = lights[i].active
         });
     }
 }

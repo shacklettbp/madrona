@@ -43,7 +43,7 @@ struct BatchRenderInfo {
     uint32_t numViews;
     uint32_t numInstances;
     uint32_t numWorlds;
-    uint32_t maxLightsPerWorld;
+    uint32_t numLights;
 };
 
 struct BatchImportedBuffers {
@@ -54,6 +54,7 @@ struct BatchImportedBuffers {
     render::vk::LocalBuffer instanceOffsets;
 
     render::vk::LocalBuffer lights;
+    render::vk::LocalBuffer lightOffsets;
 };
 
 struct BatchRenderer {
@@ -71,6 +72,7 @@ struct BatchRenderer {
         uint32_t numWorlds;
         uint32_t maxViewsPerWorld;
         uint32_t maxInstancesPerWorld;
+        uint32_t maxLightsPerWorld;
         uint32_t numFrames;
     };
 
