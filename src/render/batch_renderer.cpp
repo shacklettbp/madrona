@@ -661,14 +661,14 @@ static void makeBatchFrame(vk::Device& dev,
     VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(PerspectiveCameraData);
     vk::LocalBuffer views = alloc.makeLocalBuffer(view_size).value();
 
+    VkDeviceSize view_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
+    vk::LocalBuffer view_offsets = alloc.makeLocalBuffer(view_offset_size).value();
+
     VkDeviceSize instance_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(InstanceData);
     vk::LocalBuffer instances = alloc.makeLocalBuffer(instance_size).value();
 
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
-
-    VkDeviceSize view_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
-    vk::LocalBuffer view_offsets = alloc.makeLocalBuffer(view_offset_size).value();
 
     VkDeviceSize lights_size = cfg.numWorlds * cfg.maxLightsPerWorld * sizeof(render::shader::LightDesc);
     vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
@@ -1772,40 +1772,6 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                              1, &offsets_data_copy);
     }
 
-    { // Import the lights
-        printf(">>>>>>>>>import lights, numWorlds: %d, numLights: %d\n", info.numWorlds, info.numLights);
-        //LightDesc* light = (LightDesc*)(interop->lightsCUDA->getDevicePointer());
-        //printf(">>>>>>>>>light[0].position: %f, %f, %f\n", light[0].position.x, light[0].position.y, light[0].position.z);
-        //printf(">>>>>>>>>light[0].direction: %f, %f, %f\n", light[0].direction.x, light[0].direction.y, light[0].direction.z);
-        //printf(">>>>>>>>>light[1].position: %f, %f, %f\n", light[1].position.x, light[1].position.y, light[1].position.z);
-        //printf(">>>>>>>>>light[1].direction: %f, %f, %f\n", light[1].direction.x, light[1].direction.y, light[1].direction.z);
-        VkDeviceSize num_lights_bytes = info.numWorlds * info.numLights *
-            sizeof(shader::LightDesc);
-
-        VkBufferCopy lights_data_copy = {
-            .srcOffset = 0, .dstOffset = 0,
-            .size = num_lights_bytes
-        };
-
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->lightsHdl,
-                             batch_buffers.lights.buffer,
-                             1, &lights_data_copy);
-    }
-
-    { // Import the light offsets
-        VkDeviceSize num_offsets_bytes = info.numWorlds *
-            sizeof(int32_t);
-
-        VkBufferCopy offsets_data_copy = {
-            .srcOffset = 0, .dstOffset = 0,
-            .size = num_offsets_bytes
-        };
-
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->lightOffsetsHdl,
-                             batch_buffers.lightOffsets.buffer,
-                             1, &offsets_data_copy);
-    }
-
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
 
     VkSemaphore sema_wait = VK_NULL_HANDLE;
@@ -1896,9 +1862,23 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 {
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
 
-    (void)interop;
+    {
+        // If we have a CPU backend, we need to import the lights and light offsets
+        if (interop->lightsCPU.has_value()) {
+            *interop->bridge.totalNumLights = interop->bridge.totalNumLightsCPUInc->load_acquire();
 
-    // prepareForRendering(info, interop);
+            info.numLights = *interop->bridge.totalNumLights;
+
+            interop->bridge.totalNumLightsCPUInc->store_release(0);
+
+            // First, need to perform the sorts
+            sortLightsCPU(interop);
+            computeLightOffsets(interop, info.numWorlds);
+
+            interop->lightsCPU->flush(impl->dev);
+            interop->lightOffsetsCPU->flush(impl->dev);
+        }
+    }
 
     // Circles between 0 to number of frames (not anymore, there is only one frame now)
     uint32_t frame_index = impl->currentFrame;
@@ -1920,6 +1900,34 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, impl->timeQueryPool, 0);
 
     ////////////////////////////////////////////////////////////////
+
+
+    { // Import the lights
+        printf(">>>>>>>>>import lights, numWorlds: %d, numLights: %d\n", info.numWorlds, info.numLights);
+        VkDeviceSize num_lights_bytes = info.numWorlds * info.numLights *
+            sizeof(shader::LightDesc);
+        VkBufferCopy lights_data_copy = {
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size = num_lights_bytes
+        };
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->lightsHdl,
+                             frame_data.buffers.lights.buffer,
+                             1, &lights_data_copy);
+    }
+
+    { // Import the light offsets
+        VkDeviceSize num_offsets_bytes = info.numWorlds *
+            sizeof(int32_t);
+        VkBufferCopy offsets_data_copy = {
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size = num_offsets_bytes
+        };
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->lightOffsetsHdl,
+                             frame_data.buffers.lightOffsets.buffer,
+                             1, &offsets_data_copy);
+    }
 
     { // Import sky information first
         packSky(impl->dev, frame_data.skyInputStaging);
@@ -1977,8 +1985,23 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 frame_data.skyInput.buffer,
                 0, VK_WHOLE_SIZE
             },
+            VkBufferMemoryBarrier{
+                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+                frame_data.buffers.lights.buffer,
+                0, VK_WHOLE_SIZE
+            },
+            VkBufferMemoryBarrier{
+                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+                frame_data.buffers.lightOffsets.buffer,
+                0, VK_WHOLE_SIZE
+            },
         };
-
         impl->dev.dt.cmdPipelineBarrier(
             draw_cmd,
             VK_PIPELINE_STAGE_TRANSFER_BIT,

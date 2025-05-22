@@ -475,13 +475,19 @@ void registerTypes(ECSRegistry &registry,
             ComponentMetadataSelector<InstanceData,TLBVHNode>(ComponentFlags::ImportMemory,ComponentFlags::ImportMemory),
             ArchetypeFlags::ImportOffsets,
             bridge->maxInstancesPerWorld);
+        registry.registerArchetype<LightArchetype>(
+            ComponentMetadataSelector<LightDesc>(ComponentFlags::ImportMemory),
+            ArchetypeFlags::None,
+            bridge->maxLightsPerWorld);
 #else
         registry.registerArchetype<RenderCameraArchetype>();
         registry.registerArchetype<RenderableArchetype>();
+        registry.registerArchetype<LightArchetype>();
 #endif
     } else {
         registry.registerArchetype<RenderCameraArchetype>();
         registry.registerArchetype<RenderableArchetype>();
+        registry.registerArchetype<LightArchetype>();
     }
 
 
