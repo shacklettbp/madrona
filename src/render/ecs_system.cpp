@@ -44,6 +44,7 @@ struct RenderingSystemState {
     uint64_t *instanceWorldIDsCPU;
     uint64_t *viewWorldIDsCPU;
     uint64_t *lightWorldIDsCPU;
+
     MeshBVH *bvhs;
     uint32_t numBVHs;
 
@@ -216,7 +217,6 @@ inline void lightUpdate(Context &ctx,
     desc.cutoffAngle = angle.cutoffAngle;
     desc.intensity = intensity.intensity;
     desc.active = active.active;
-    printf(">>>>>>>>>lightUpdate, desc.position: %f, %f, %f, active: %d\n", desc.position.x, desc.position.y, desc.position.z, desc.active);
 }
 
 inline void instanceTransformUpdateWithMat(Context &ctx,
@@ -290,7 +290,6 @@ inline void viewTransformUpdate(Context &ctx,
                                 const Rotation &rot,
                                 const RenderCamera &cam)
 {
-    printf(">>>>>>>>>viewTransformUpdate\n");
     auto &system_state = ctx.singleton<RenderingSystemState>();
     float aspect_ratio = system_state.aspectRatio;
 
@@ -340,7 +339,6 @@ inline void viewTransformUpdate(Context &ctx,
 inline void exportCountsGPU(Context &ctx,
                             RenderingSystemState &sys_state)
 {
-    printf(">>>>>>>>>exportCountsGPU\n");
     // FIXME: Add option for global, across worlds, systems
     if (ctx.worldID().idx != 0) {
         return;
@@ -459,7 +457,6 @@ void registerTypes(ECSRegistry &registry,
     // Pointers get set in RenderingSystem::init
     if (bridge) {
 #if defined(MADRONA_GPU_MODE)
-        printf(">>>>>>>>>registerArchetype<RenderCameraArchetype>\n");
         registry.registerArchetype<RenderCameraArchetype>(
             ComponentMetadataSelector<PerspectiveCameraData>(ComponentFlags::ImportMemory),
             ArchetypeFlags::None,
@@ -486,7 +483,6 @@ void registerTypes(ECSRegistry &registry,
 
 #if defined(MADRONA_GPU_MODE)
     if (bridge) {
-        printf(">>>>>>>>>has bridge\n");
         auto *state_mgr = mwGPU::getStateManager();
 
         state_mgr->setArchetypeWorldOffsets<RenderableArchetype>(

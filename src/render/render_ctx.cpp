@@ -683,7 +683,6 @@ static EngineInterop setupEngineInterop(Device &dev,
     { // Create the lights buffer
         uint64_t num_lights_bytes = num_worlds * max_lights_per_world *
             (int64_t)sizeof(render::shader::PackedLightData);
-        printf(">>>>>>>>>num_worlds, max_lights_per_world, num_lights_bytes: %d, %d, %d\n", num_worlds, max_lights_per_world, (uint32_t)num_lights_bytes);
         if (!gpu_input) {
             lights_cpu = alloc.makeStagingBuffer(num_lights_bytes);
             lights_hdl = lights_cpu->buffer;
@@ -1875,7 +1874,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
 
     int64_t num_total_objs = src_objs.size();
     uint32_t num_total_lights = engine_interop_.maxLightsPerWorld;
-    printf(">>>>>>>>>num_total_lights: %d\n", num_total_lights);
 
     int64_t buffer_offsets[5];
     int64_t buffer_sizes[6] = {

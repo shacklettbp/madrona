@@ -1895,7 +1895,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 
 
     { // Import the lights
-        printf(">>>>>>>>>import lights, numWorlds: %d, numLights: %d\n", info.numWorlds, info.numLights);
         VkDeviceSize num_lights_bytes = info.numWorlds * info.numLights *
             sizeof(shader::PackedLightData);
         VkBufferCopy lights_data_copy = {
@@ -1959,16 +1958,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 frame_data.buffers.instanceOffsets.buffer,
                 0, VK_WHOLE_SIZE
             },
-            /*
-            VkBufferMemoryBarrier{
-                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
-                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame_data.lighting.buffer,
-                0, VK_WHOLE_SIZE
-            },
-            */
             VkBufferMemoryBarrier{
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
                 nullptr,
@@ -2265,16 +2254,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 frame_data.buffers.aabbs.buffer,
                 0, VK_WHOLE_SIZE
             },
-/*
-            VkBufferMemoryBarrier{
-                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
-                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame_data.lighting.buffer,
-                0, VK_WHOLE_SIZE
-            },
-*/
             VkBufferMemoryBarrier{
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
                 nullptr,
