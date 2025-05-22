@@ -740,7 +740,7 @@ static void makeBatchFrame(vk::Device& dev,
     VkDescriptorSet aabb_set = prepare_views.descPools[3].makeSet();
 
     //Descriptor sets
-    std::array<VkWriteDescriptorSet, 11> desc_updates;
+    std::array<VkWriteDescriptorSet, 12> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = views.buffer;
@@ -777,9 +777,7 @@ static void makeBatchFrame(vk::Device& dev,
     light_data_info.buffer = lights.buffer;
     light_data_info.offset = 0;
     light_data_info.range = lights_size;
-
-    vk::DescHelper::storage(desc_updates[6],
-                            pbr_set, &light_data_info, 0);
+    vk::DescHelper::storage(desc_updates[6], pbr_set, &light_data_info, 0);
     vk::DescHelper::storage(desc_updates[7], draw_views_set, &light_data_info, 3);
 
     VkDescriptorImageInfo transmittance_info;
@@ -1596,7 +1594,6 @@ static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
 
 static void computeViewOffsets(EngineInterop *interop, uint32_t num_worlds)
 {
-    printf(">>>>>>>>>computeViewOffsets\n");
     uint32_t *viewOffsets = (uint32_t *)interop->viewOffsetsCPU->ptr;
 
     for (int i = 0; i < (int)num_worlds; ++i) {
@@ -1641,7 +1638,6 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
         if (interop->viewsCPU.has_value()) {
             *interop->bridge.totalNumViews = interop->bridge.totalNumViewsCPUInc->load_acquire();
             *interop->bridge.totalNumInstances = interop->bridge.totalNumInstancesCPUInc->load_acquire();
-            printf(">>>>>>>>>totalNumViews: %d, totalNumInstances: %d\n", *interop->bridge.totalNumViews, *interop->bridge.totalNumInstances);
 
             info.numInstances = *interop->bridge.totalNumInstances;
             info.numViews = *interop->bridge.totalNumViews;

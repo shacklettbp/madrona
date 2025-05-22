@@ -107,6 +107,7 @@ inline void instanceTransformUpdate(Context &ctx,
                                     const ObjectID &obj_id,
                                     const Renderable &renderable)
 {
+    printf(">>>>>>>>>instanceTransformUpdate\n");
     if (renderable.renderEntity == Entity::none()) {
         return;
     }
@@ -206,11 +207,11 @@ inline void lightUpdate(Context &ctx,
     desc.type = type.type;
     desc.castShadow = shadow.castShadow;
     desc.position = pos;
-    printf(">>>>>>>>>lightUpdate, desc.position: %f, %f, %f\n", desc.position.x, desc.position.y, desc.position.z);
     desc.direction = dir;
     desc.cutoffAngle = angle.cutoffAngle;
     desc.intensity = intensity.intensity;
     desc.active = active.active;
+    printf(">>>>>>>>>lightUpdate, desc.position: %f, %f, %f, active: %d\n", desc.position.x, desc.position.y, desc.position.z, desc.active);
 #else
     auto &system_state = ctx.singleton<RenderingSystemState>();
     uint32_t light_id = system_state.totalNumLightsCPU->fetch_add<sync::acq_rel>(1);
@@ -236,6 +237,7 @@ inline void instanceTransformUpdateWithMat(Context &ctx,
                                            const ColorOverride &color,
                                            const Renderable &renderable)
 {
+    printf(">>>>>>>>>instanceTransformUpdateWithMat\n");
     if (renderable.renderEntity == Entity::none()) {
         return;
     }
@@ -297,6 +299,7 @@ inline void viewTransformUpdate(Context &ctx,
                                 const Rotation &rot,
                                 const RenderCamera &cam)
 {
+    printf(">>>>>>>>>viewTransformUpdate\n");
     auto &system_state = ctx.singleton<RenderingSystemState>();
     float aspect_ratio = system_state.aspectRatio;
 
