@@ -205,7 +205,7 @@ struct DirectionalLight {
 */
 
 // Only used in shaders
-struct LightDesc {
+struct ShaderLightData {
     float3 position;
     float3 direction;
     float cutoffAngle;

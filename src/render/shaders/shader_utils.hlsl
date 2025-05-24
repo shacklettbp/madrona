@@ -78,20 +78,21 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     return o;
 }
 
-LightDesc unpackLightData(PackedLightData packed)
+ShaderLightData unpackLightData(PackedLightData packed)
 {
     const float4 d0 = packed.data[0];
     const float4 d1 = packed.data[1];
     const float4 d2 = packed.data[2];
 
-    LightDesc o;
+    ShaderLightData o;
     o.position = d0.xyz;
     o.direction = float3(d0.w, d1.xy);
     o.cutoffAngle = d1.z;
     o.intensity = d1.w;
-    o.isDirectional = asuint(d2.x);
-    o.castShadow = asuint(d2.y);
-    o.active = asuint(d2.z);
+    const uint32_t rest = asuint(d2.x);
+    o.isDirectional = (rest & 0xFF) != 0;
+    o.castShadow = (rest & 0xFF00) != 0;
+    o.active = (rest & 0xFF0000) != 0;
 
     return o;
 }

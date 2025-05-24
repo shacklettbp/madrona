@@ -39,7 +39,7 @@ struct alignas(16) PerspectiveCameraData {
     float yScale;
     float zNear;
     int32_t worldIDX;
-    uint32_t pad;
+    uint32_t padding;
 };
 
 // For private usage - not to be used by user.
@@ -75,19 +75,22 @@ struct alignas(16) LightDesc {
     // Intensity of the light. (1.f is default)
     float intensity;
 
-    enum Type : uint32_t {
-        Directional = 1,
-        Spotlight = 0
+    enum Type : bool {
+        Spotlight = 0,
+        Directional = 1
     };
 
     // Type of the light.
     Type type;
 
     // Whether the light casts a shadow.
-    uint32_t castShadow;
+    bool castShadow;
 
     // Gives ability to turn light on or off.
-    uint32_t active;
+    bool active;
+
+    bool padding1 = false;
+    float padding2[3] = {0, 0, 0};
 };
 
 struct LightDescDirection : math::Vector3 {

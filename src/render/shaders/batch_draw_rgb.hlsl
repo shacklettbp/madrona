@@ -152,7 +152,7 @@ PixelOutput frag(in V2F v2f,
 
         [unroll(1)]
         for (uint i = 0; i < numLights; i++) {
-            LightDesc light = unpackLightData(lightDataBuffer[v2f.worldIdx * numLights + i]);
+            ShaderLightData light = unpackLightData(lightDataBuffer[v2f.worldIdx * numLights + i]);
             if(!light.active) {
                 continue;
             }

@@ -37,7 +37,7 @@ StructuredBuffer<uint32_t> instanceOffsets;
 
 // Lighting
 [[vk::binding(0, 3)]]
-StructuredBuffer<LightDesc> lights;
+StructuredBuffer<PackedLightData> lights;
 
 [[vk::binding(1, 3)]]
 Texture2D<float4> transmittanceLUT;
@@ -313,13 +313,14 @@ float3 accumulateSunRadianceBRDF(in GBufferData gbuffer,
     float3 radiance_from_sun = skyBuffer[0].solarIrradiance.xyz * 
                                getTransmittanceToSun(skyBuffer[0], transmittanceLUT, r, mu_sun);
 
+    ShaderLightData light = unpackLightData(lights[0]);
     ret += directionalRadianceBRDF(gbuffer,
                                    lerp(float3(0.04, 0.04, 0.04), gbuffer.albedo.rgb, metal),
                                    roughness,
                                    metal,
                                    normalize(gbuffer.wPosition.xyz - camera_data.pos.xyz),
                                    radiance_from_sun,
-                                   normalize(-lights[0].direction.xyz));
+                                   normalize(-light.direction.xyz));
 
     return ret * 1.0;
 }
@@ -338,7 +339,8 @@ float4 getPointRadianceBRDF(float roughness, float metal,
         float3 p = gbuffer.wPosition / 1000.0 - skyBuffer[0].wPlanetCenter.xyz;
         float3 normal = gbuffer.wNormal;
 
-        float3 sun_direction = -normalize(lights[0].direction.xyz);
+        ShaderLightData light = unpackLightData(lights[0]);
+        float3 sun_direction = -normalize(light.direction.xyz);
 
         float3 view_direction = normalize(gbuffer.wPosition - camera_data.pos.xyz);
 
@@ -356,11 +358,12 @@ float4 getPointRadianceBRDF(float roughness, float metal,
 
     /* How much is scattered towards us. */
     float3 transmittance;
+    ShaderLightData light = unpackLightData(lights[0]);
     float3 in_scatter = getSkyRadianceToPoint(skyBuffer[0], transmittanceLUT,
                                               scatteringLUT, scatteringLUT,
                                               camera_data.pos.xyz / 1000.0 - skyBuffer[0].wPlanetCenter.xyz,
                                               gbuffer.wPosition / 1000.0 - skyBuffer[0].wPlanetCenter.xyz, 0.0,
-                                              -normalize(lights[0].direction.xyz),
+                                              -normalize(light.direction.xyz),
                                               transmittance);
 
     point_radiance = point_radiance * transmittance + in_scatter;
