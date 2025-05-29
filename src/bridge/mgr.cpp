@@ -712,7 +712,7 @@ static RTAssets loadRenderObjects(
 
     std::vector<imp::SourceMaterial> materials;
     for (CountT i = 0; i < model.numMats; i++) {
-        int32_t tex_idx = model.matTexIDs[(i * 10) + 1];
+        int32_t tex_idx = model.matTexIDs[i * 10];
         SourceMaterial mat = {
             .color = math::Vector4{
                 model.matRGBA[i].x, model.matRGBA[i].y,

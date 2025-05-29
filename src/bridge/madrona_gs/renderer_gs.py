@@ -3,6 +3,7 @@ import torch
 
 from madrona_gs._madrona_gs_batch_renderer import MadronaBatchRenderer
 from madrona_gs._madrona_gs_batch_renderer.madrona import ExecMode
+from trimesh.visual.texture import TextureVisuals
 
 class BatchRendererGS:
   """Wraps Genesis Model around MadronaBatchRenderer."""
@@ -31,8 +32,8 @@ class BatchRendererGS:
 
     self.rigid = rigid
     self.num_worlds = num_worlds
-    self.cameras = np.array(cameras)
-    self.lights = np.array(lights)
+    self.cameras = cameras
+    self.lights = lights
 
     mesh_vertices = rigid.vverts_info.init_pos.to_numpy()
     mesh_faces = rigid.vfaces_info.vverts_idx.to_numpy()
@@ -45,33 +46,16 @@ class BatchRendererGS:
     for i in range(n_vgeom):
       mesh_faces[face_start[i] : face_end[i]] -= mesh_vertex_offsets[i]
 
-    mesh_texcoords = np.zeros([0, 2], dtype=np.float32)#
-    mesh_texcoord_offsets = np.full((n_vgeom,), -1, dtype=np.int32)#
-    mesh_texcoord_num = np.full((n_vgeom,), 0, dtype=np.int32)#
-    geom_types = np.full((n_vgeom,), 7, dtype=np.int32)##
-    geom_groups = np.full((n_vgeom,), default_geom_group, dtype=np.int32)#
-    geom_data_ids = np.arange(n_vgeom, dtype=np.int32)#
-    geom_sizes = np.ones((n_vgeom, 3), dtype=np.float32)#
-    num_cams = len(cameras) if cameras is not None else 0#
+    geom_types = np.full((n_vgeom,), 7, dtype=np.int32)
+    geom_groups = np.full((n_vgeom,), default_geom_group, dtype=np.int32)
+    geom_data_ids = np.arange(n_vgeom, dtype=np.int32)
+    geom_sizes = np.ones((n_vgeom, 3), dtype=np.float32)
+    num_cams = len(cameras) if cameras is not None else 0
     assert num_cams > 0, "Must have at least one camera for Madrona to work!"
-    num_lights = len(lights) if lights is not None else 0#
-
-    # TODO: Update material and color correctly
-    #geom_rgba = np.array([[0.8,0.6,0.4,1]]*n_vgeom, dtype=np.float32)
+    num_lights = len(lights) if lights is not None else 0
     geom_rgba = rigid.vgeoms_info.color.to_numpy()
-    geom_mat_ids = np.full((n_vgeom,), -1, dtype=np.int32)
-    mat_rgba = np.array([[0.8,0.6,0.4,1]]*6, dtype=np.float32)
-    
-    # dummy texdata, assume 1 gray rgba texture with 128x128
-    # TODO: Support textures correctly
-    numTextures = 1
-    tex_data = np.full((numTextures * 128 * 128), 0xFF, dtype=np.uint8)#
-    tex_offsets = np.zeros((numTextures), dtype=np.int32)#
-    tex_widths = np.full((numTextures), 128, dtype=np.int32)#
-    tex_heights = np.full((numTextures), 128, dtype=np.int32)#
-    tex_nchans = np.full((numTextures), 4, dtype=np.int32)#
-    mat_tex_ids = np.full((6, 10), -1, dtype=np.int32)
-    mat_tex_ids[-1,1] = 1
+
+    geom_mat_ids, mesh_texcoord_num, mesh_texcoord_offsets, mesh_texcoord_data, texture_widths, texture_heights, texture_nchans, texture_data, texture_offsets, material_texture_ids, material_rgba = self.get_texture_data()
 
     # TODO: Support mutable camera fov
     cam_fovy = np.array([cam.fov for cam in cameras], dtype=np.float32)#
@@ -82,7 +66,7 @@ class BatchRendererGS:
         mesh_faces=mesh_faces,
         mesh_vertex_offsets=mesh_vertex_offsets,
         mesh_face_offsets=mesh_face_offsets,
-        mesh_texcoords=mesh_texcoords,
+        mesh_texcoords=mesh_texcoord_data,
         mesh_texcoord_offsets=mesh_texcoord_offsets,
         mesh_texcoord_num=mesh_texcoord_num,
         geom_types=geom_types,
@@ -91,14 +75,14 @@ class BatchRendererGS:
         geom_sizes=geom_sizes,
         geom_mat_ids=geom_mat_ids,
         geom_rgba=geom_rgba,
-        mat_rgba=mat_rgba,
-        mat_tex_ids=mat_tex_ids,
+        mat_rgba=material_rgba,
+        mat_tex_ids=material_texture_ids,
 
-        tex_data=tex_data,
-        tex_offsets=tex_offsets,
-        tex_widths=tex_widths,
-        tex_heights=tex_heights,
-        tex_nchans=tex_nchans,
+        tex_data=texture_data,
+        tex_offsets=texture_offsets,
+        tex_widths=texture_widths,
+        tex_heights=texture_heights,
+        tex_nchans=texture_nchans,
         num_lights=num_lights,
         num_cams=num_cams,
         num_worlds=num_worlds,
@@ -111,27 +95,32 @@ class BatchRendererGS:
         use_rt=not use_rasterizer,
     )
     
-    cam_pos, cam_rot = self.get_camera_pos_rot_numpy()
-    geom_pos, geom_rot = self.get_geom_pos_rot_numpy()
-    light_pos, light_dir, light_directional, light_castshadow, light_cutoff, light_intensity = self.get_lights_properties_numpy()
 
+  def init(self):
     #print("init")
     #print("cam_pos", cam_pos)
     #print("cam_rot", cam_rot) 
-    #print("cam_fovy", cam_fovy)
     #print("geom_pos", geom_pos)
     #print("geom_rot", geom_rot)
+    #print("geom_mat_ids", geom_mat_ids)
+    #print("geom_rgba", geom_rgba)
+    #print("geom_sizes", geom_sizes)
     #print("light_pos", light_pos, light_pos.shape)
     #print("light_dir", light_dir, light_dir.shape)
     #print("light_directional", light_directional, light_directional.shape)
     #print("light_castshadow", light_castshadow, light_castshadow.shape)
     #print("light_cutoff", light_cutoff, light_cutoff.shape)
-    #print("geom_mat_ids", geom_mat_ids)
-    #print("geom_rgba", geom_rgba)
-    #print("geom_sizes", geom_sizes)
-    
+
+    cam_pos, cam_rot = self.get_camera_pos_rot_numpy()
+    geom_pos, geom_rot = self.get_geom_pos_rot_numpy()
+
+    geom_mat_ids = np.full((self.rigid.n_vgeoms,), -1, dtype=np.int32)
+    geom_rgba = self.rigid.vgeoms_info.color.to_numpy()
     geom_rgba_uint = np.array(geom_rgba * 255, np.uint32) 
     geom_rgb = geom_rgba_uint[...,0] * (1 << 16) + geom_rgba_uint[...,1] * (1 << 8) + geom_rgba_uint[...,2]
+    geom_sizes = np.ones((self.rigid.n_vgeoms, 3), dtype=np.float32)#
+
+    light_pos, light_dir, light_directional, light_castshadow, light_cutoff, light_intensity = self.get_lights_properties_numpy()
 
     # Make a copy to actually shuffle the memory layout before passing to C++
     self.madrona.init(
@@ -139,18 +128,19 @@ class BatchRendererGS:
       geom_rot.copy(),
       cam_pos.copy(),
       cam_rot.copy(),
-      np.repeat(geom_mat_ids[np.newaxis], num_worlds, axis=0),
-      np.repeat(geom_rgb[np.newaxis], num_worlds, axis=0),
-      np.repeat(geom_sizes[np.newaxis], num_worlds, axis=0),
-      np.repeat(light_pos[np.newaxis], num_worlds, axis=0),
-      np.repeat(light_dir[np.newaxis], num_worlds, axis=0),
-      np.repeat(light_directional[np.newaxis], num_worlds, axis=0),
-      np.repeat(light_castshadow[np.newaxis], num_worlds, axis=0),
-      np.repeat(light_cutoff[np.newaxis], num_worlds, axis=0),
-      np.repeat(light_intensity[np.newaxis], num_worlds, axis=0),
+      np.repeat(geom_mat_ids[np.newaxis], self.num_worlds, axis=0),
+      np.repeat(geom_rgb[np.newaxis], self.num_worlds, axis=0),
+      np.repeat(geom_sizes[np.newaxis], self.num_worlds, axis=0),
+      np.repeat(light_pos[np.newaxis], self.num_worlds, axis=0),
+      np.repeat(light_dir[np.newaxis], self.num_worlds, axis=0),
+      np.repeat(light_directional[np.newaxis], self.num_worlds, axis=0),
+      np.repeat(light_castshadow[np.newaxis], self.num_worlds, axis=0),
+      np.repeat(light_cutoff[np.newaxis], self.num_worlds, axis=0),
+      np.repeat(light_intensity[np.newaxis], self.num_worlds, axis=0),
     )
 
-  def render(self, rigid):
+
+  def render(self):
     #print("here is rendering")      
     # Assume execution on GPU
     # TODO: Need to check if the device is GPU or CPU, or assert if not GPU
@@ -176,6 +166,71 @@ class BatchRendererGS:
     self.rigid = None
     self.cameras = None
     self.lights = None
+
+  def get_texture_data(self):
+    n_vgeom = self.rigid.n_vgeoms
+    vgeoms = self.rigid.vgeoms
+
+    # get number of textures, total texcoord and texture data size
+    num_textures = 0
+    total_texcoord_data_size = 0
+    total_texture_data_size = 0
+    for geomIdx, vgeom in enumerate(vgeoms):
+      visual = vgeom.get_trimesh().visual
+      if(isinstance(visual, TextureVisuals)):
+        total_texcoord_data_size += visual.uv.shape[0]
+        texture_width = visual.material.image.width
+        texture_height = visual.material.image.height
+        texture_nchans = 4 if visual.material.image.mode == "RGBA" else 3
+        texture_data_size = texture_width * texture_height * texture_nchans
+        total_texture_data_size += texture_data_size
+        num_textures += 1
+
+    # allocate memory for texcoord data
+    geom_mat_ids = np.full(n_vgeom, -1, dtype=np.int32)
+    mesh_texcoord_num = np.full(n_vgeom, 0, dtype=np.int32)
+    mesh_texcoord_offsets = np.full(n_vgeom, -1, dtype=np.int32)
+    texcoord_data = np.empty((total_texcoord_data_size, 2), dtype=np.float32)
+    texture_widths = np.empty(num_textures, dtype=np.int32)
+    texture_heights = np.empty(num_textures, dtype=np.int32)
+    texture_nchans = np.empty(num_textures, dtype=np.int32)
+    texture_data = np.empty(total_texture_data_size, dtype=np.uint8)
+    texture_offsets = np.empty(num_textures, dtype=np.int32)
+    num_textures_per_material = 10 # Madrona allows up to 10 textures per material
+    material_texture_ids = np.full((num_textures, num_textures_per_material), -1, dtype=np.int32)
+    material_rgba = np.empty((num_textures, 4), dtype=np.float32)
+
+    num_textures = 0 # reset index
+    total_texcoord_data_size = 0 # reset size
+    total_texture_data_size = 0 # reset size
+    for geomIdx, vgeom in enumerate(vgeoms):
+      visual = vgeom.get_trimesh().visual
+      if(isinstance(visual, TextureVisuals)):
+        # Copy texcoord data
+        uv_size = visual.uv.shape
+        mesh_texcoord_num[num_textures] = uv_size[0]
+        mesh_texcoord_offsets[num_textures] = total_texcoord_data_size
+        total_texcoord_data_size += uv_size[0] * 2
+        texcoord_data[mesh_texcoord_offsets[num_textures] : mesh_texcoord_offsets[num_textures] + mesh_texcoord_num[num_textures] * 2] = visual.uv.astype(np.float32)
+
+        # Copy texture data
+        texture_widths[num_textures] = visual.material.image.width
+        texture_heights[num_textures] = visual.material.image.height
+        texture_nchans[num_textures] = 4 if visual.material.image.mode == "RGBA" else 3
+        texture_data_size = texture_widths[num_textures] * texture_heights[num_textures] * texture_nchans[num_textures]
+        texture_offsets[num_textures] = total_texture_data_size
+        total_texture_data_size += texture_data_size
+        texture_data[texture_offsets[num_textures] : texture_offsets[num_textures] + texture_data_size] = np.array(list(visual.material.image.getdata()), dtype=np.uint8).flatten()
+
+        # Set material id
+        geom_mat_ids[geomIdx] = num_textures
+        material_texture_ids[num_textures, 0] = num_textures # Use first texture as diffuse
+        material_rgba[num_textures] = visual.material.diffuse.astype(np.float32) / 255.0
+
+        # Bump texture index
+        num_textures += 1
+
+    return geom_mat_ids, mesh_texcoord_num, mesh_texcoord_offsets, texcoord_data, texture_widths, texture_heights, texture_nchans, texture_data, texture_offsets, material_texture_ids, material_rgba
 
 ########################## Utils ##########################
   def get_camera_pos_rot_numpy(self):
@@ -206,10 +261,10 @@ class BatchRendererGS:
     return geom_pos, geom_rot
   
   def get_lights_properties_numpy(self):
-    light_pos = np.array([l._pos for l in self.lights], dtype=np.float32).reshape(-1, 3)
-    light_dir = np.array([l._dir for l in self.lights], dtype=np.float32).reshape(-1, 3)
-    light_directional = np.array([l._directional for l in self.lights], dtype=np.uint8).reshape(-1)
-    light_castshadow = np.array([l._castshadow for l in self.lights], dtype=np.uint8).reshape(-1)
-    light_cutoff = np.array([l._cutoff for l in self.lights], dtype=np.float32).reshape(-1)
-    light_intensity = np.array([l._intensity for l in self.lights], dtype=np.float32).reshape(-1)
+    light_pos = np.array([l.pos for l in self.lights], dtype=np.float32).reshape(-1, 3)
+    light_dir = np.array([l.dir for l in self.lights], dtype=np.float32).reshape(-1, 3)
+    light_directional = np.array([l.directional for l in self.lights], dtype=np.uint8).reshape(-1)
+    light_castshadow = np.array([l.castshadow for l in self.lights], dtype=np.uint8).reshape(-1)
+    light_cutoff = np.array([l.cutoffRad for l in self.lights], dtype=np.float32).reshape(-1)
+    light_intensity = np.array([l.intensity for l in self.lights], dtype=np.float32).reshape(-1)
     return light_pos, light_dir, light_directional, light_castshadow, light_cutoff, light_intensity
