@@ -6,6 +6,18 @@
 
 Please see the [Madrona engine project page](https://madrona-engine.github.io) for more information, as well as the [Madrona FAQ](https://madrona-engine.github.io#faq).
 
+# Run
+```
+git submodule update --init --recursive
+mkdir build
+cd build
+cmake ..
+make -j
+
+cd ..
+pip install -e .
+```
+
 ### Key Features: ###
 * GPU-driven batch ECS implementation for high-throughput execution.
 * CPU backend for debugging and visualization. Simulators can execute on GPU or CPU with no code changes.
