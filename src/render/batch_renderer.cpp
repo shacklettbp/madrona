@@ -670,10 +670,13 @@ static void makeBatchFrame(vk::Device& dev,
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
+    // In case number of lights is 0, allocate a dummy buffer to avoid errors
     VkDeviceSize lights_size = cfg.numWorlds * cfg.maxLightsPerWorld * sizeof(LightDesc);
+    lights_size = std::max(lights_size, (VkDeviceSize)1024);
     vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
 
     VkDeviceSize light_offsets_size = cfg.numWorlds * sizeof(uint32_t);
+    light_offsets_size = std::max(light_offsets_size, (VkDeviceSize)1024);
     vk::LocalBuffer light_offsets = alloc.makeLocalBuffer(light_offsets_size).value();
 
     VkCommandPool prepare_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);

@@ -683,6 +683,8 @@ static EngineInterop setupEngineInterop(Device &dev,
     { // Create the lights buffer
         uint64_t num_lights_bytes = num_worlds * max_lights_per_world *
             (int64_t)sizeof(render::shader::PackedLightData);
+        // In case number of lights is 0, allocate a dummy buffer to avoid errors
+        num_lights_bytes = std::max(num_lights_bytes, (uint64_t)1024);
         if (!gpu_input) {
             lights_cpu = alloc.makeStagingBuffer(num_lights_bytes);
             lights_hdl = lights_cpu->buffer;
