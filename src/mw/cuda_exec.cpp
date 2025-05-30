@@ -2344,11 +2344,11 @@ MWCudaExecutor::MWCudaExecutor(
     : impl_(nullptr)
 {
     // Setup CUDA cache directory
-    if(!std::filesystem::exists("build")) {
-        std::filesystem::create_directories("build");
+    if(!std::filesystem::exists("/tmp/madrona_cache")) {
+        std::filesystem::create_directories("/tmp/madrona_cache");
     }
-    std::string kernel_cache_path = "build/kernel_cache";
-    std::string bvh_cache_path = "build/bvh_cache";
+    std::string kernel_cache_path = "/tmp/madrona_cache/kernel_cache";
+    std::string bvh_cache_path = "/tmp/madrona_cache/bvh_cache";
     setenv("MADRONA_MWGPU_KERNEL_CACHE", kernel_cache_path.c_str(), 1);
     setenv("MADRONA_BVH_KERNEL_CACHE", bvh_cache_path.c_str(), 1);
     printf("Kernel cache directory set to: %s\n", kernel_cache_path.c_str());

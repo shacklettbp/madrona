@@ -81,31 +81,25 @@ public:
             madrona::Optional<VisualizerGPUHandles>::none());
     MGR_EXPORT ~Manager();
 
-    MGR_EXPORT void init(madrona::math::Vector3 *geom_pos,
-                         madrona::math::Quat *geom_rot,
-                         madrona::math::Vector3 *cam_pos,
-                         madrona::math::Quat *cam_rot,
-                         int32_t *mat_ids,
-                         uint32_t *geom_rgb,
-                         madrona::math::Diag3x3 *geom_sizes,
-                         madrona::math::Vector3 *light_pos,
-                         madrona::math::Vector3 *light_dir,
-                         bool *light_isdir,
-                         bool *light_castshadow,
-                         float *light_cutoff,
-                         float *light_intensity);
+    MGR_EXPORT void init(const madrona::math::Vector3 *geom_pos,
+                         const madrona::math::Quat *geom_rot,
+                         const madrona::math::Vector3 *cam_pos,
+                         const madrona::math::Quat *cam_rot,
+                         const int32_t *mat_ids,
+                         const uint32_t *geom_rgb,
+                         const madrona::math::Diag3x3 *geom_sizes,
+                         const madrona::math::Vector3 *light_pos,
+                         const madrona::math::Vector3 *light_dir,
+                         const bool *light_isdir,
+                         const bool *light_castshadow,
+                         const float *light_cutoff,
+                         const float *light_intensity);
     
-    MGR_EXPORT void render(madrona::math::Vector3 *geom_pos,
-                           madrona::math::Quat *geom_rot,
-                           madrona::math::Vector3 *cam_pos,
-                           madrona::math::Quat *cam_rot);
 
-    MGR_EXPORT void render_torch(const madrona::math::Vector3 *geom_pos,
-                                 const madrona::math::Quat *geom_rot,
-                                 const madrona::math::Vector3 *cam_pos,
-                                 const madrona::math::Quat *cam_rot);
-
-    MGR_EXPORT void render_dummy();
+    MGR_EXPORT void render(const madrona::math::Vector3 *geom_pos,
+                           const madrona::math::Quat *geom_rot,
+                           const madrona::math::Vector3 *cam_pos,
+                           const madrona::math::Quat *cam_rot);
      
 #ifdef MADRONA_CUDA_SUPPORT
     MGR_EXPORT void gpuStreamInit(cudaStream_t strm, void **buffers);

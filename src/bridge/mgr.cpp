@@ -266,96 +266,6 @@ struct Manager::Impl {
             cudaMemcpyDeviceToDevice, strm);
     }
 
-    inline void copyInTransformsCPU(Vector3 *geom_positions,
-                                 Quat *geom_rotations,
-                                 Vector3 *cam_positions,
-                                 Quat *cam_rotations,
-                                 cudaStream_t strm)
-    {
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::InstancePositions),
-            geom_positions,
-            sizeof(Vector3) * numGeoms * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::InstanceRotations),
-            geom_rotations,
-            sizeof(Quat) * numGeoms * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::CameraPositions),
-            cam_positions,
-            sizeof(Vector3) * numCams * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::CameraRotations),
-            cam_rotations,
-            sizeof(Quat) * numCams * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-    }
-
-
-    inline void copyInPropertiesCPU(
-        Diag3x3 *geom_sizes,
-        int32_t *mat_overrides,
-        uint32_t *col_overrides,
-        Vector3 *light_pos,
-        Vector3 *light_dir,
-        bool *light_isdir,
-        bool *light_castshadow,
-        float *light_cutoff,
-        float *light_intensity,
-        cudaStream_t strm)
-    {
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::InstanceMatOverrides),
-            mat_overrides,
-            sizeof(MaterialOverride) * numGeoms * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::InstanceColorOverrides),
-            col_overrides,
-            sizeof(ColorOverride) * numGeoms * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::InstanceScales),
-            geom_sizes,
-            sizeof(Diag3x3) * numGeoms * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-
-        // Copy light properties to GPU
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::LightPositions),
-            light_pos,
-            sizeof(Vector3) * numLights * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::LightDirections),
-            light_dir,
-            sizeof(Vector3) * numLights * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::LightTypes),
-            light_isdir,
-            sizeof(bool) * numLights * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::LightShadows),
-            light_castshadow,
-            sizeof(bool) * numLights * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::LightCutoffAngles),
-            light_cutoff,
-            sizeof(float) * numLights * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-        cudaMemcpyAsync(
-            gpuExec.getExported((CountT)ExportID::LightIntensities),
-            light_intensity,
-            sizeof(float) * numLights * cfg.numWorlds,
-            cudaMemcpyHostToDevice, strm);
-    }
-
     inline void copyInProperties(
         Diag3x3 *geom_sizes,
         int32_t *mat_overrides,
@@ -417,19 +327,19 @@ struct Manager::Impl {
             cudaMemcpyDeviceToDevice, strm);
     }
 
-    inline void init(Vector3 *geom_positions,
-                     Quat *geom_rotations,
-                     Vector3 *cam_positions,
-                     Quat *cam_rotations,
-                     int32_t *mat_ids,
-                     uint32_t *geom_rgb,
-                     Diag3x3 *geom_sizes,
-                     Vector3 *light_pos,
-                     Vector3 *light_dir,
-                     bool *light_isdir,
-                     bool *light_castshadow,
-                     float *light_cutoff,
-                     float *light_intensity)
+    inline void init(const Vector3 *geom_positions,
+                     const Quat *geom_rotations,
+                     const Vector3 *cam_positions,
+                     const Quat *cam_rotations,
+                     const int32_t *mat_ids,
+                     const uint32_t *geom_rgb,
+                     const Diag3x3 *geom_sizes,
+                     const Vector3 *light_pos,
+                     const Vector3 *light_dir,
+                     const bool *light_isdir,
+                     const bool *light_castshadow,
+                     const float *light_cutoff,
+                     const float *light_intensity)
     {
         MWCudaLaunchGraph init_graph =
             gpuExec.buildLaunchGraph(TaskGraphID::Init);
@@ -439,29 +349,27 @@ struct Manager::Impl {
 
         gpuExec.run(init_graph);
 
-        copyInTransformsCPU(geom_positions, geom_rotations,
-                         cam_positions, cam_rotations, 0);
-        copyInPropertiesCPU(geom_sizes, mat_ids, geom_rgb, light_pos, light_dir,
-            light_isdir, light_castshadow, light_cutoff, light_intensity, 0);
+        copyInTransforms(
+            const_cast<Vector3 *>(geom_positions),
+            const_cast<Quat *>(geom_rotations),
+            const_cast<Vector3 *>(cam_positions),
+            const_cast<Quat *>(cam_rotations), 0);
+        copyInProperties(
+            const_cast<Diag3x3 *>(geom_sizes),
+            const_cast<int32_t *>(mat_ids),
+            const_cast<uint32_t *>(geom_rgb),
+            const_cast<Vector3 *>(light_pos),
+            const_cast<Vector3 *>(light_dir),
+            const_cast<bool *>(light_isdir),
+            const_cast<bool *>(light_castshadow),
+            const_cast<float *>(light_cutoff),
+            const_cast<float *>(light_intensity), 0);
 
         gpuExec.run(render_init_graph);
         renderImpl();
     }
 
-    inline void render(Vector3 *geom_positions,
-                               Quat *geom_rotations,
-                               Vector3 *cam_positions,
-                               Quat *cam_rotations)
-    {
-        copyInTransformsCPU(geom_positions, geom_rotations,
-                         cam_positions, cam_rotations, 0);
-
-        gpuExec.run(renderGraph);
-
-        renderImpl();
-    }
-
-    inline void render_torch(const Vector3 *geom_pos,
+    inline void render(const Vector3 *geom_pos,
                              const Quat *geom_rot,
                              const Vector3 *cam_pos,
                              const Quat *cam_rot)
@@ -472,17 +380,6 @@ struct Manager::Impl {
             (Vector3 *)cam_pos,
             (Quat *)cam_rot, 0);
 
-        gpuExec.runAsync(renderGraph, 0);
-        // Currently a CPU sync is needed to read back the total number of
-        // instances for Vulkan
-        // TODO: Can we remove this? where is the total number read after this?
-        REQ_CUDA(cudaStreamSynchronize(0));
-
-        renderImpl();
-    }
-
-    inline void render_dummy()
-    {
         gpuExec.runAsync(renderGraph, 0);
         // Currently a CPU sync is needed to read back the total number of
         // instances for Vulkan
@@ -696,8 +593,7 @@ static RTAssets loadRenderObjects(
     SourceTexture *out_textures = tmp_alloc.allocN<SourceTexture>(model.numTextures);
 
     for (CountT i = 0; i < model.numTextures; i++) {
-        // Calculate the correct texture offset since we added a 4th channel
-        uint32_t tex_offset = model.texOffsets[i] + (model.texOffsets[i] / 3);
+        uint32_t tex_offset = model.texOffsets[i];
         Optional<SourceTexture> tex = SourceTexture {
             .data = &model.texData[tex_offset],
             .format = SourceTextureFormat::R8G8B8A8,
@@ -968,13 +864,13 @@ Manager::Manager(const Config &cfg,
 
 Manager::~Manager() {}
 
-void Manager::init(math::Vector3 *geom_pos, math::Quat *geom_rot,
-                   math::Vector3 *cam_pos, math::Quat *cam_rot,
-                   int32_t *mat_ids, uint32_t *geom_rgb,
-                   math::Diag3x3 *geom_sizes, math::Vector3 *light_pos,
-                   math::Vector3 *light_dir, bool *light_isdir,
-                   bool *light_castshadow, float *light_cutoff,
-                   float *light_intensity)
+void Manager::init(const math::Vector3 *geom_pos, const math::Quat *geom_rot,
+                   const math::Vector3 *cam_pos, const math::Quat *cam_rot,
+                   const int32_t *mat_ids, const uint32_t *geom_rgb,
+                   const math::Diag3x3 *geom_sizes, const math::Vector3 *light_pos,
+                   const math::Vector3 *light_dir, const bool *light_isdir,
+                   const bool *light_castshadow, const float *light_cutoff,
+                   const float *light_intensity)
 {
     impl_->init(
         geom_pos, geom_rot, cam_pos, cam_rot, mat_ids, geom_rgb, geom_sizes,
@@ -982,21 +878,10 @@ void Manager::init(math::Vector3 *geom_pos, math::Quat *geom_rot,
         light_cutoff, light_intensity);
 }
 
-void Manager::render(math::Vector3 *geom_pos, math::Quat *geom_rot,
-                     math::Vector3 *cam_pos, math::Quat *cam_rot)
-{
-    impl_->render(geom_pos, geom_rot, cam_pos, cam_rot);
-}
-
-void Manager::render_torch(const math::Vector3 *geom_pos, const math::Quat *geom_rot,
+void Manager::render(const math::Vector3 *geom_pos, const math::Quat *geom_rot,
                      const math::Vector3 *cam_pos, const math::Quat *cam_rot)
 {
-    impl_->render_torch(geom_pos, geom_rot, cam_pos, cam_rot);
-}
-
-void Manager::render_dummy()
-{
-    impl_->render_dummy();
+    impl_->render(geom_pos, geom_rot, cam_pos, cam_rot);
 }
 
 #ifdef MADRONA_CUDA_SUPPORT
