@@ -1,3 +1,3 @@
-from madrona_gs.renderer_gs import BatchRendererGS
+from madrona_gs.renderer_gs import MadronaBatchRendererAdapter
 
-__all__ = ["BatchRendererGS"]
+__all__ = ["MadronaBatchRendererAdapter"]

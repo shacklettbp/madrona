@@ -7,7 +7,7 @@ from madrona_gs._madrona_gs_batch_renderer.madrona import ExecMode
 from trimesh.visual.texture import TextureVisuals
 from PIL import Image
 
-class BatchRendererGS:
+class MadronaBatchRendererAdapter:
   """Wraps Genesis Model around MadronaBatchRenderer."""
 
   def __init__(
@@ -23,7 +23,7 @@ class BatchRendererGS:
       add_cam_debug_geo=False,
       use_rasterizer=False,
   ):
-    assert rigid is not None, "Rigid body model is required for BatchRendererGS"
+    assert rigid is not None, "Rigid body model is required for MadronaBatchRendererAdapter"
     assert gpu_id >= 0, "GPU ID must be greater than or equal to 0"
     assert num_worlds > 0, "Number of worlds must be greater than 0"
     assert batch_render_view_width > 0, "Batch render view width must be greater than 0"

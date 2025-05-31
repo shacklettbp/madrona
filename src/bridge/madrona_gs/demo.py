@@ -142,6 +142,14 @@ def main():
         GUI=True,
         spp=512,
     )
+    scene.add_light(
+        pos=[0.0, 0.0, 1.5],
+        dir=[1.0, 1.0, -2.0],
+        directional=1,
+        castshadow=1,
+        cutoff=45.0,
+        intensity=0.5
+    )
     scene.build()
 
     ########################## forward + backward twice ##########################

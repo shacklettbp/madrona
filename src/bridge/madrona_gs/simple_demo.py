@@ -50,11 +50,11 @@ def main():
         fov=45,
         GUI=True,
     )
-    #cam_1 = scene.add_camera(
-    #    pos=(1.5, -0.5, 1.5),
-    #    lookat=(0.0, 0.0, 0.5),
-    #    fov=45,
-    #    GUI=True,
+    cam_1 = scene.add_camera(
+        pos=(1.5, -0.5, 1.5),
+        lookat=(0.0, 0.0, 0.5),
+        fov=45,
+        GUI=True,
     )
     scene.add_light(
         pos=[0.0, 0.0, 1.5],
