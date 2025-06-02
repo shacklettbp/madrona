@@ -217,8 +217,8 @@ class MadronaBatchRendererAdapter:
 
 ########################## Utils ##########################  
   def get_camera_pos_rot_torch(self, cam_pos_tensor, cam_rot_tensor):
-    cam_pos = cam_pos_tensor.to_torch().unsqueeze(0).repeat(self.num_worlds, 1, 1)
-    cam_rot = cam_rot_tensor.to_torch().unsqueeze(0).repeat(self.num_worlds, 1, 1)
+    cam_pos = cam_pos_tensor.to_torch()
+    cam_rot = cam_rot_tensor.to_torch()
     return cam_pos, cam_rot
   
   def get_geom_pos_rot_torch(self, rigid):
