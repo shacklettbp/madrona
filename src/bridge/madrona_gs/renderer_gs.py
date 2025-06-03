@@ -56,7 +56,7 @@ class MadronaBatchRendererAdapter:
     geom_mat_ids, mesh_texcoord_num, mesh_texcoord_offsets, mesh_texcoord_data, texture_widths, texture_heights, texture_nchans, texture_data, texture_offsets, material_texture_ids, material_rgba = self.get_texture_data(rigid)
 
     # TODO: Support mutable camera fov
-    cam_fovy = cam_fovs_tensor.to_numpy()
+    cam_fovy = cam_fovs_tensor.cpu().numpy()
 
     self.madrona = MadronaBatchRenderer(
         gpu_id=gpu_id,
@@ -217,8 +217,8 @@ class MadronaBatchRendererAdapter:
 
 ########################## Utils ##########################  
   def get_camera_pos_rot_torch(self, cam_pos_tensor, cam_rot_tensor):
-    cam_pos = cam_pos_tensor.to_torch()
-    cam_rot = cam_rot_tensor.to_torch()
+    cam_pos = cam_pos_tensor
+    cam_rot = cam_rot_tensor
     return cam_pos, cam_rot
   
   def get_geom_pos_rot_torch(self, rigid):
